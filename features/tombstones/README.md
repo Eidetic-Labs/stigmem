@@ -28,9 +28,9 @@ release_lines:
 
 RTBF tombstones are signed, durable suppression records for right-to-be-
 forgotten workflows. The feature is implemented as the opt-in
-`stigmem-plugin-tombstones` source package; default installs do not mount
-tombstone admin/federation routes or apply tombstone filters unless the plugin
-is registered.
+`stigmem-plugin-tombstones` source package; default installs mount the
+tombstone route contracts but keep them access-gated and do not apply tombstone
+filters unless the plugin is registered.
 
 This feature remains experimental because tombstone issuance, revocation,
 federation propagation, and legal-hold access all carry compliance and security

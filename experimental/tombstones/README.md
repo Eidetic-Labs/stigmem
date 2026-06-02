@@ -35,8 +35,9 @@ export STIGMEM_TOMBSTONES_ENABLED=1
 
 The default install is inert; tombstone hook behavior only activates when the
 package is installed, discovered through the `stigmem.plugins` entry point, and
-the operator enables the gate. Admin routes, federation routes, recall
-filtering, and peer propagation remain separately gated.
+the operator enables the gate. Admin and federation route contracts are mounted
+but access-gated by default; recall filtering and peer propagation remain
+separately gated.
 
 ## Disable
 

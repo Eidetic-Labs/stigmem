@@ -1285,6 +1285,42 @@
         "title": "FederationFactsResponse",
         "type": "object"
       },
+      "FederationTombstonesResponse": {
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "revocations": {
+            "items": {
+              "$ref": "#/components/schemas/TombstoneRevocationRecord"
+            },
+            "title": "Revocations",
+            "type": "array"
+          },
+          "tombstones": {
+            "items": {
+              "$ref": "#/components/schemas/TombstoneRecord"
+            },
+            "title": "Tombstones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tombstones",
+          "revocations",
+          "cursor"
+        ],
+        "title": "FederationTombstonesResponse",
+        "type": "object"
+      },
       "GardenCreateRequest": {
         "properties": {
           "description": {
@@ -3110,6 +3146,41 @@
         "title": "SubscriptionRecord",
         "type": "object"
       },
+      "TombstoneCreateRequest": {
+        "properties": {
+          "entity_uri": {
+            "minLength": 1,
+            "title": "Entity Uri",
+            "type": "string"
+          },
+          "legal_hold": {
+            "default": false,
+            "title": "Legal Hold",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scope": {
+            "default": "*",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_uri"
+        ],
+        "title": "TombstoneCreateRequest",
+        "type": "object"
+      },
       "TombstoneNotice": {
         "description": "Tombstone metadata surfaced to admin callers on time-travel queries.\n\nCovered by Spec-X3-Time-Travel-Queries.",
         "properties": {
@@ -3137,6 +3208,153 @@
           "tombstone_created_at"
         ],
         "title": "TombstoneNotice",
+        "type": "object"
+      },
+      "TombstoneRecord": {
+        "description": "Durable record directing every node to suppress facts about entity_uri.\n\nCovered by Spec-X2-RTBF-Tombstones.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key_id": {
+            "default": "",
+            "title": "Key Id",
+            "type": "string"
+          },
+          "legal_hold": {
+            "default": false,
+            "title": "Legal Hold",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          },
+          "signed_by": {
+            "title": "Signed By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "entity_uri",
+          "scope",
+          "signed_by",
+          "signature",
+          "created_at"
+        ],
+        "title": "TombstoneRecord",
+        "type": "object"
+      },
+      "TombstoneRevocationRecord": {
+        "description": "Record reinstating a tombstoned entity (Spec-X2-RTBF-Tombstones).",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key_id": {
+            "default": "",
+            "title": "Key Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          },
+          "signed_by": {
+            "title": "Signed By",
+            "type": "string"
+          },
+          "tombstone_id": {
+            "title": "Tombstone Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tombstone_id",
+          "reason",
+          "signed_by",
+          "signature",
+          "created_at"
+        ],
+        "title": "TombstoneRevocationRecord",
+        "type": "object"
+      },
+      "TombstoneRevokeRequest": {
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "TombstoneRevokeRequest",
+        "type": "object"
+      },
+      "TombstoneStatusResponse": {
+        "properties": {
+          "revocations": {
+            "items": {
+              "$ref": "#/components/schemas/TombstoneRevocationRecord"
+            },
+            "title": "Revocations",
+            "type": "array"
+          },
+          "tombstoned": {
+            "title": "Tombstoned",
+            "type": "boolean"
+          },
+          "tombstones": {
+            "items": {
+              "$ref": "#/components/schemas/TombstoneRecord"
+            },
+            "title": "Tombstones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tombstoned",
+          "tombstones",
+          "revocations"
+        ],
+        "title": "TombstoneStatusResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -3229,7 +3447,7 @@
     }
   },
   "info": {
-    "description": "Reference node implementing the Stigmem v0.9.0a10 HTTP API \u2014 facts, federation, gardens, recall, subscriptions, audit, identity, content-addressed fact IDs. Cross-cutting features (tombstones, time-travel, multi-tenant) are opt-in plugins.",
+    "description": "Reference node implementing the Stigmem v0.9.0a10 HTTP API \u2014 facts, federation, gardens, recall, subscriptions, audit, identity, content-addressed fact IDs. Experimental cross-cutting behavior remains opt-in where plugin-gated; tombstone admin and federation route contracts are mounted but access-gated.",
     "license": {
       "name": "Apache-2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
@@ -5940,6 +6158,162 @@
         ]
       }
     },
+    "/v1/federation/tombstones": {
+      "get": {
+        "description": "Tombstone poll route.\n\nRequires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.",
+        "operationId": "federation_list_tombstones_v1_federation_tombstones_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationTombstonesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Federation List Tombstones",
+        "tags": [
+          "federation"
+        ]
+      }
+    },
+    "/v1/federation/tombstones/ingest": {
+      "post": {
+        "description": "Inbound tombstone push from a federation peer.\n\nAuth: peer JWT or capability token with tombstone:write verb (mirrors push_facts).\nVerifies signature against org manifest, writes to local tombstones table.\nCovered by Spec-X2-RTBF-Tombstones.",
+        "operationId": "federation_ingest_tombstone_v1_federation_tombstones_ingest_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-stigmem-capability",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Stigmem-Capability"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Federation Ingest Tombstone V1 Federation Tombstones Ingest Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Federation Ingest Tombstone",
+        "tags": [
+          "federation"
+        ]
+      }
+    },
     "/v1/gardens": {
       "get": {
         "description": "List accessible gardens (Spec-02-Scopes-and-ACL).\n\nNode admins see all; others see only their gardens.",
@@ -7489,6 +7863,156 @@
         "summary": "List Subscription Events",
         "tags": [
           "subscriptions"
+        ]
+      }
+    },
+    "/v1/tombstones": {
+      "post": {
+        "operationId": "issue_tombstone_v1_tombstones_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TombstoneCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TombstoneRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issue Tombstone",
+        "tags": [
+          "tombstones"
+        ]
+      }
+    },
+    "/v1/tombstones/{entity_uri_encoded}": {
+      "get": {
+        "operationId": "check_tombstone_status_v1_tombstones__entity_uri_encoded__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_uri_encoded",
+            "required": true,
+            "schema": {
+              "title": "Entity Uri Encoded",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TombstoneStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Check Tombstone Status",
+        "tags": [
+          "tombstones"
+        ]
+      }
+    },
+    "/v1/tombstones/{tombstone_id}/revoke": {
+      "post": {
+        "operationId": "revoke_tombstone_endpoint_v1_tombstones__tombstone_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tombstone_id",
+            "required": true,
+            "schema": {
+              "title": "Tombstone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TombstoneRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TombstoneRevocationRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Tombstone Endpoint",
+        "tags": [
+          "tombstones"
         ]
       }
     }

@@ -11,7 +11,13 @@ from .constants import NODES, RESULTS_DIR
 from .peers import make_client, register_full_mesh
 from .report import build_artifact, write_artifacts
 from .run import run_workload
-from .setup import create_admin_key, ensure_keypairs, start_cluster, wait_healthy
+from .setup import (
+    create_admin_key,
+    ensure_keypairs,
+    publish_eval_admin_manifest,
+    start_cluster,
+    wait_healthy,
+)
 from .teardown import stop_cluster
 
 
@@ -59,6 +65,7 @@ def main() -> int:
             admin_keys[node["name"]] = key
             print(f"  {node['name']}: key created")
 
+        publish_eval_admin_manifest(env, admin_keys)
         register_full_mesh(env, admin_keys)
 
         # Give the pull loop one cycle to initialize cursors

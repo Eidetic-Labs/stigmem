@@ -49,15 +49,19 @@ services:
       - eval_fed_data_a:/data
     environment:
       STIGMEM_DB_PATH: /data/stigmem.db
+      STIGMEM_TL_LOCAL_PATH: /data/stigmem_tl.jsonl
       STIGMEM_HOST: "0.0.0.0"
       STIGMEM_PORT: "8765"
       STIGMEM_NODE_URL: "http://node-a:8765"
       STIGMEM_FEDERATION_ENABLED: "true"
+      STIGMEM_FEDERATION_INSECURE: "1"
+      STIGMEM_LOCAL_DEV_ALLOW_INSECURE_NON_LOOPBACK: "1"
       STIGMEM_FEDERATION_PULL_INTERVAL_S: "5"
       STIGMEM_LOG_LEVEL: "warning"
       STIGMEM_AUTH_REQUIRED: "true"
       STIGMEM_FEDERATION_PUBKEY: "${NODE_A_PUBKEY}"
       STIGMEM_FEDERATION_PRIVKEY: "${NODE_A_PRIVKEY}"
+      STIGMEM_NODE_PRIVATE_KEY: "${NODE_A_PRIVKEY}"
 
   node-b:
     <<: *eval-node
@@ -69,15 +73,19 @@ services:
       - eval_fed_data_b:/data
     environment:
       STIGMEM_DB_PATH: /data/stigmem.db
+      STIGMEM_TL_LOCAL_PATH: /data/stigmem_tl.jsonl
       STIGMEM_HOST: "0.0.0.0"
       STIGMEM_PORT: "8765"
       STIGMEM_NODE_URL: "http://node-b:8765"
       STIGMEM_FEDERATION_ENABLED: "true"
+      STIGMEM_FEDERATION_INSECURE: "1"
+      STIGMEM_LOCAL_DEV_ALLOW_INSECURE_NON_LOOPBACK: "1"
       STIGMEM_FEDERATION_PULL_INTERVAL_S: "5"
       STIGMEM_LOG_LEVEL: "warning"
       STIGMEM_AUTH_REQUIRED: "true"
       STIGMEM_FEDERATION_PUBKEY: "${NODE_B_PUBKEY}"
       STIGMEM_FEDERATION_PRIVKEY: "${NODE_B_PRIVKEY}"
+      STIGMEM_NODE_PRIVATE_KEY: "${NODE_B_PRIVKEY}"
 
   node-c:
     <<: *eval-node
@@ -89,12 +97,16 @@ services:
       - eval_fed_data_c:/data
     environment:
       STIGMEM_DB_PATH: /data/stigmem.db
+      STIGMEM_TL_LOCAL_PATH: /data/stigmem_tl.jsonl
       STIGMEM_HOST: "0.0.0.0"
       STIGMEM_PORT: "8765"
       STIGMEM_NODE_URL: "http://node-c:8765"
       STIGMEM_FEDERATION_ENABLED: "true"
+      STIGMEM_FEDERATION_INSECURE: "1"
+      STIGMEM_LOCAL_DEV_ALLOW_INSECURE_NON_LOOPBACK: "1"
       STIGMEM_FEDERATION_PULL_INTERVAL_S: "5"
       STIGMEM_LOG_LEVEL: "warning"
       STIGMEM_AUTH_REQUIRED: "true"
       STIGMEM_FEDERATION_PUBKEY: "${NODE_C_PUBKEY}"
       STIGMEM_FEDERATION_PRIVKEY: "${NODE_C_PRIVKEY}"
+      STIGMEM_NODE_PRIVATE_KEY: "${NODE_C_PRIVKEY}"

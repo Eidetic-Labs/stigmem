@@ -124,7 +124,7 @@ def issue_tombstone(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/{entity_uri_encoded}", response_model=TombstoneStatusResponse)
+@router.get("/{entity_uri_encoded:path}", response_model=TombstoneStatusResponse)
 def check_tombstone_status(
     entity_uri_encoded: str,
     identity: Annotated[Identity, Depends(resolve_identity)],

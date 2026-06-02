@@ -794,6 +794,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/federation/tombstones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Federation List Tombstones
+         * @description Tombstone poll route.
+         *
+         *     Requires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.
+         */
+        get: operations["federation_list_tombstones_v1_federation_tombstones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/federation/tombstones/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Federation Ingest Tombstone
+         * @description Inbound tombstone push from a federation peer.
+         *
+         *     Auth: peer JWT or capability token with tombstone:write verb (mirrors push_facts).
+         *     Verifies signature against org manifest, writes to local tombstones table.
+         *     Covered by Spec-X2-RTBF-Tombstones.
+         */
+        post: operations["federation_ingest_tombstone_v1_federation_tombstones_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/gardens": {
         parameters: {
             query?: never;
@@ -1278,6 +1324,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tombstones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue Tombstone */
+        post: operations["issue_tombstone_v1_tombstones_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tombstones/{entity_uri_encoded}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check Tombstone Status */
+        get: operations["check_tombstone_status_v1_tombstones__entity_uri_encoded__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tombstones/{tombstone_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Tombstone Endpoint */
+        post: operations["revoke_tombstone_endpoint_v1_tombstones__tombstone_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1711,6 +1808,15 @@ export interface components {
             facts: components["schemas"]["FactRecord"][];
             /** Has More */
             has_more: boolean;
+        };
+        /** FederationTombstonesResponse */
+        FederationTombstonesResponse: {
+            /** Cursor */
+            cursor: string | null;
+            /** Revocations */
+            revocations: components["schemas"]["TombstoneRevocationRecord"][];
+            /** Tombstones */
+            tombstones: components["schemas"]["TombstoneRecord"][];
         };
         /** GardenCreateRequest */
         GardenCreateRequest: {
@@ -2432,6 +2538,23 @@ export interface components {
             /** Target Kind */
             target_kind: string;
         };
+        /** TombstoneCreateRequest */
+        TombstoneCreateRequest: {
+            /** Entity Uri */
+            entity_uri: string;
+            /**
+             * Legal Hold
+             * @default false
+             */
+            legal_hold: boolean;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Scope
+             * @default *
+             */
+            scope: string;
+        };
         /**
          * TombstoneNotice
          * @description Tombstone metadata surfaced to admin callers on time-travel queries.
@@ -2447,6 +2570,75 @@ export interface components {
             tombstone_created_at: string;
             /** Tombstone Id */
             tombstone_id: string;
+        };
+        /**
+         * TombstoneRecord
+         * @description Durable record directing every node to suppress facts about entity_uri.
+         *
+         *     Covered by Spec-X2-RTBF-Tombstones.
+         */
+        TombstoneRecord: {
+            /** Created At */
+            created_at: string;
+            /** Entity Uri */
+            entity_uri: string;
+            /** Id */
+            id: string;
+            /**
+             * Key Id
+             * @default
+             */
+            key_id: string;
+            /**
+             * Legal Hold
+             * @default false
+             */
+            legal_hold: boolean;
+            /** Reason */
+            reason?: string | null;
+            /** Scope */
+            scope: string;
+            /** Signature */
+            signature: string;
+            /** Signed By */
+            signed_by: string;
+        };
+        /**
+         * TombstoneRevocationRecord
+         * @description Record reinstating a tombstoned entity (Spec-X2-RTBF-Tombstones).
+         */
+        TombstoneRevocationRecord: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Key Id
+             * @default
+             */
+            key_id: string;
+            /** Reason */
+            reason: string;
+            /** Signature */
+            signature: string;
+            /** Signed By */
+            signed_by: string;
+            /** Tombstone Id */
+            tombstone_id: string;
+        };
+        /** TombstoneRevokeRequest */
+        TombstoneRevokeRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /** TombstoneStatusResponse */
+        TombstoneStatusResponse: {
+            /** Revocations */
+            revocations: components["schemas"]["TombstoneRevocationRecord"][];
+            /** Tombstoned */
+            tombstoned: boolean;
+            /** Tombstones */
+            tombstones: components["schemas"]["TombstoneRecord"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -2502,6 +2694,7 @@ export type SchemaFactChainProof = components['schemas']['FactChainProof'];
 export type SchemaFactRecord = components['schemas']['FactRecord'];
 export type SchemaFactValue = components['schemas']['FactValue'];
 export type SchemaFederationFactsResponse = components['schemas']['FederationFactsResponse'];
+export type SchemaFederationTombstonesResponse = components['schemas']['FederationTombstonesResponse'];
 export type SchemaGardenCreateRequest = components['schemas']['GardenCreateRequest'];
 export type SchemaGardenMemberRecord = components['schemas']['GardenMemberRecord'];
 export type SchemaGardenMemberRequest = components['schemas']['GardenMemberRequest'];
@@ -2541,7 +2734,12 @@ export type SchemaSubscriptionEventRecord = components['schemas']['SubscriptionE
 export type SchemaSubscriptionEventsResponse = components['schemas']['SubscriptionEventsResponse'];
 export type SchemaSubscriptionListResponse = components['schemas']['SubscriptionListResponse'];
 export type SchemaSubscriptionRecord = components['schemas']['SubscriptionRecord'];
+export type SchemaTombstoneCreateRequest = components['schemas']['TombstoneCreateRequest'];
 export type SchemaTombstoneNotice = components['schemas']['TombstoneNotice'];
+export type SchemaTombstoneRecord = components['schemas']['TombstoneRecord'];
+export type SchemaTombstoneRevocationRecord = components['schemas']['TombstoneRevocationRecord'];
+export type SchemaTombstoneRevokeRequest = components['schemas']['TombstoneRevokeRequest'];
+export type SchemaTombstoneStatusResponse = components['schemas']['TombstoneStatusResponse'];
 export type SchemaValidationError = components['schemas']['ValidationError'];
 export type SchemaCidVerifyResponse = components['schemas']['_CidVerifyResponse'];
 export type $defs = Record<string, never>;
@@ -3893,6 +4091,80 @@ export interface operations {
             };
         };
     };
+    federation_list_tombstones_v1_federation_tombstones_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                limit?: number;
+            };
+            header?: {
+                Authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FederationTombstonesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    federation_ingest_tombstone_v1_federation_tombstones_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string | null;
+                "x-stigmem-capability"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_gardens_v1_gardens_get: {
         parameters: {
             query?: never;
@@ -4748,6 +5020,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubscriptionEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issue_tombstone_v1_tombstones_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TombstoneCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TombstoneRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_tombstone_status_v1_tombstones__entity_uri_encoded__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_uri_encoded: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TombstoneStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_tombstone_endpoint_v1_tombstones__tombstone_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tombstone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TombstoneRevokeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TombstoneRevocationRecord"];
                 };
             };
             /** @description Validation Error */

@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import Header, HTTPException, Request, status
 
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
 from ...lifecycle.tombstones import list_revocations, list_tombstones
 from ...models.tombstones import FederationTombstonesResponse
 from .._federation_impl import federation_ingest_tombstone_impl
-from .common import _get_mtls_peer_cert, _public_module, _try_peer_token_auth
-
-router = APIRouter(tags=["federation"])
+from .common import _get_mtls_peer_cert, _public_module, _try_peer_token_auth, router
 
 
 @router.get("/v1/federation/tombstones", response_model=FederationTombstonesResponse)

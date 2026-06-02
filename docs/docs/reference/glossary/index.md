@@ -280,9 +280,9 @@ A signed right-to-be-forgotten (RTBF) marker for suppressing facts about an enti
 **Tombstones are distinct from normal retraction (`confidence = 0.0`) and are currently an opt-in experimental plugin source package.**
 
 Not part of the v0.9.0a1 default install or a supported compliance
-surface. Default installs do not expose tombstone routes or
-filtering unless `stigmem-plugin-tombstones` is explicitly
-registered.
+surface. Default installs expose tombstone route contracts but keep
+them access-gated, and do not apply tombstone filtering unless
+`stigmem-plugin-tombstones` is explicitly registered.
 
 </div>
 

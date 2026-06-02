@@ -118,7 +118,7 @@ The plugin infrastructure now exists on `main`: stable 22-hook dispatch, package
 <div>
 <dt>RTBF tombstones</dt>
 <dt><span className="stigmem-fields__type">experimental plugin</span></dt>
-<dd>Default installs do not expose tombstone routes. Use ordinary retractions for supported tests.</dd>
+<dd>Default installs expose access-gated tombstone route contracts but do not enable tombstone behavior. Use ordinary retractions for supported tests.</dd>
 </div>
 
 <div>
