@@ -164,6 +164,7 @@ restart; adapter packages require host-application opt-in.
 | Letta adapter | Bridges selected facts into Letta archival memory | `stigmem-plugin-letta-adapter` / `stigmem[letta-adapter]` | Host-application opt-in |
 | OpenAI tools adapter | Exposes Stigmem tools as OpenAI-compatible function calls | `stigmem-plugin-openai-tools-adapter` / `stigmem[openai-tools-adapter]` | Host-application opt-in |
 | Zep adapter | Bridges selected facts into Zep session memory | `stigmem-plugin-zep-adapter` / `stigmem[zep-adapter]` | Host-application opt-in |
+| Adapter bundle | Installs all five host-application adapter packages | `stigmem[adapters]` | Host-application opt-in |
 
 Inspect local state with `stigmem plugins list`, `stigmem plugins describe
 <plugin>`, and `stigmem plugins doctor`. Full catalog and per-plugin security
