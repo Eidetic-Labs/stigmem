@@ -41,6 +41,7 @@ from .routes.recall import router as recall_router
 from .routes.resolver import router as resolver_router
 from .routes.subscriptions import router as subscriptions_router
 from .routes.synthesize import router as synthesize_router
+from .routes.tombstones import router as tombstones_router
 from .routes.wellknown import router as wellknown_router
 from .settings import settings
 
@@ -214,7 +215,8 @@ def create_app() -> FastAPI:
         description=(
             "Reference node implementing the Stigmem v0.9.0a10 HTTP API — facts, federation, "
             "gardens, recall, subscriptions, audit, identity, content-addressed fact IDs. "
-            "Cross-cutting features (tombstones, time-travel, multi-tenant) are opt-in plugins."
+            "Experimental cross-cutting behavior remains opt-in where plugin-gated; tombstone "
+            "admin and federation route contracts are mounted but access-gated."
         ),
         license_info={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
         lifespan=lifespan,
@@ -294,6 +296,7 @@ def create_app() -> FastAPI:
     app.include_router(cards_router)
     app.include_router(recall_router)
     app.include_router(subscriptions_router)
+    app.include_router(tombstones_router)
     app.include_router(mcp_router)
     app.include_router(wellknown_router)
 

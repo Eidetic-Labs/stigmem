@@ -47,6 +47,14 @@ openai-tools-adapter = [
 zep-adapter = [
   "stigmem-plugin-zep-adapter>=0.1.0,<2.0.0",
 ]
+# pip install stigmem[adapters] -> SDK + host-application adapter plugins
+adapters = [
+  "stigmem-plugin-cognee-adapter>=0.1.0,<2.0.0",
+  "stigmem-plugin-gemini-adapter>=0.1.0,<2.0.0",
+  "stigmem-plugin-letta-adapter>=0.1.0,<2.0.0",
+  "stigmem-plugin-openai-tools-adapter>=0.1.0,<2.0.0",
+  "stigmem-plugin-zep-adapter>=0.1.0,<2.0.0",
+]
 lazy-instruction-discovery = [
   "stigmem-plugin-lazy-instruction-discovery>=0.1.0,<2.0.0",
 ]

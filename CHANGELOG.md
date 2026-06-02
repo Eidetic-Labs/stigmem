@@ -38,10 +38,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
   experimental opt-in. Discoverable via `stigmem plugins list` and installable
   via `pip install stigmem-plugin-zep-adapter`. See
   [feature record](features/zep-adapter/).
+- `stigmem[adapters]` meta-package extra for installing the five
+  host-application adapter plugins as a single group.
 
 ### Changed
 
 - Prepared the `v0.9.0a10` adapter batch publication release line.
+- Pointed the previous-release SDK compatibility smoke at the shipped
+  `v0.9.0a9` baseline until a later tagged baseline supersedes it.
+- Kept the previous-release SDK compatibility smoke focused on SDK behavior by
+  disabling plugin auto-discovery during its local node startup.
 
 ### Fixed
 
@@ -54,6 +60,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 - Extended the MCP catalog consistency guard to validate the
   `/v1/mcp/connectors` payload alongside README, adapter README, docs, and CLI
   editor surfaces.
+- Added federation-soak startup diagnostics so failed node health checks print
+  Compose state and recent per-node logs before the nightly job exits.
+- Restored the local federation soak harness by explicitly marking its
+  container-only HTTP federation topology as insecure local/dev/test mode with
+  Docker's non-loopback dev override, generated node signing keys, and an eval
+  tombstone-signer manifest while writing local transparency-log artifacts to
+  the writable eval data volume.
+- Updated the federation soak harness for the current peer approval lifecycle
+  and admin-only tombstone endpoints.
+- Mounted the tombstone admin API router so RTBF tombstone endpoints are
+  available on the reference node.
+- Fixed tombstone status lookups for URI entities whose percent-encoded form
+  contains path separators.
+- Mounted federation tombstone poll and ingest routes on the federation router.
 
 ## [0.9.0a9] — 2026-05-25
 

@@ -8,11 +8,11 @@ Date: 2026-05-16
 
 PR 4d should extract RTBF tombstones from the default core surface into
 `stigmem-plugin-tombstones` without changing the plugin-loaded behavior. The
-default install should have no active tombstone routes, propagation, recall
-filtering, or tombstone-specific storage behavior. When the plugin is
-registered, it should provide the existing admin and federation APIs, apply the
-same recall/query/provenance/subscription suppression rules, and own the
-tombstone migration set through `migration_register`.
+default install should keep tombstone route contracts access-gated and have no
+active propagation, recall filtering, or tombstone-specific storage behavior.
+When the plugin is registered, it should provide the admin and federation API
+behavior, apply the same recall/query/provenance/subscription suppression
+rules, and own the tombstone migration set through `migration_register`.
 
 Artifact signing, publication, and launch evidence remain parked in the
 all-plugins launch lane tracked by issue #298.

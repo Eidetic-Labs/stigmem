@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPAT_TAG="${SDK_BACKWARD_COMPAT_TAG:-v1.0-rc}"
+COMPAT_TAG="${SDK_BACKWARD_COMPAT_TAG:-v0.9.0a9}"
 PORT="${SDK_BACKWARD_COMPAT_PORT:-8877}"
 URL="http://127.0.0.1:${PORT}"
 REPORT_PATH="${SDK_BACKWARD_COMPAT_REPORT:-${ROOT_DIR}/artifacts/sdk-backward-compat.json}"
@@ -72,6 +72,7 @@ env \
   STIGMEM_HOST=127.0.0.1 \
   STIGMEM_PORT="${PORT}" \
   STIGMEM_DB_PATH="${DB_PATH}" \
+  STIGMEM_PLUGIN_AUTO_DISCOVERY_ENABLED=false \
   uv run python -m stigmem_node.main >"${LOG_PATH}" 2>&1 &
 NODE_PID=$!
 

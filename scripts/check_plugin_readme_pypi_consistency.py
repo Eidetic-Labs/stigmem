@@ -24,6 +24,16 @@ PLUGINS: tuple[tuple[str, str], ...] = (
     ("tombstones", "stigmem-plugin-tombstones"),
 )
 
+ADAPTER_SLUGS = frozenset(
+    {
+        "cognee-adapter",
+        "gemini-adapter",
+        "letta-adapter",
+        "openai-tools-adapter",
+        "zep-adapter",
+    }
+)
+
 
 def _root_pyproject() -> dict[str, object]:
     with (ROOT / "pyproject.toml").open("rb") as handle:
@@ -47,6 +57,7 @@ def check_pyproject_extras() -> list[str]:
     project = cast("dict[str, object]", _root_pyproject()["project"])
     optional = cast("dict[str, list[str]]", project.get("optional-dependencies", {}))
     errors: list[str] = []
+    adapters = _dependency_names(optional.get("adapters", []))
     plugins_all = _dependency_names(optional.get("plugins-all", []))
     root_all = _dependency_names(optional.get("all", []))
     for slug, package in PLUGINS:
@@ -54,6 +65,8 @@ def check_pyproject_extras() -> list[str]:
         extra = _dependency_names(optional.get(extra_name, []))
         if package not in extra:
             errors.append(f"pyproject.toml: [{extra_name}] missing {package}")
+        if slug in ADAPTER_SLUGS and package not in adapters:
+            errors.append(f"pyproject.toml: [adapters] missing {package}")
         if package not in plugins_all:
             errors.append(f"pyproject.toml: [plugins-all] missing {package}")
         if package not in root_all:

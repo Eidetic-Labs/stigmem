@@ -438,7 +438,7 @@ features:
     requires:
       node: ">=0.9.0a1"
       tombstone_plugin: "source-only on main; no released artifact yet"
-    notes: "Extracted to experimental/tombstones/ as an opt-in plugin source package. Default installs do not expose tombstone routes or filters. Signed/package artifact evidence is deferred to the plugin launch train; ADR-008 graduation remains blocked on tombstone threat-model, conformance, soak, and operator-runbook gates."
+    notes: "Extracted to experimental/tombstones/ as an opt-in plugin source package. Default installs expose tombstone route contracts but keep them access-gated and do not apply tombstone filters. Signed/package artifact evidence is deferred to the plugin launch train; ADR-008 graduation remains blocked on tombstone threat-model, conformance, soak, and operator-runbook gates."
 
   - id: oidc-sso
     name: OIDC SSO

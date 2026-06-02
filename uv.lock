@@ -6022,6 +6022,13 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+adapters = [
+    { name = "stigmem-plugin-cognee-adapter" },
+    { name = "stigmem-plugin-gemini-adapter" },
+    { name = "stigmem-plugin-letta-adapter" },
+    { name = "stigmem-plugin-openai-tools-adapter" },
+    { name = "stigmem-plugin-zep-adapter" },
+]
 all = [
     { name = "stigmem-node" },
     { name = "stigmem-openclaw" },
@@ -6111,15 +6118,18 @@ requires-dist = [
     { name = "stigmem-node", marker = "extra == 'node'", editable = "node" },
     { name = "stigmem-openclaw", marker = "extra == 'all'", editable = "adapters/openclaw" },
     { name = "stigmem-openclaw", marker = "extra == 'openclaw'", editable = "adapters/openclaw" },
+    { name = "stigmem-plugin-cognee-adapter", marker = "extra == 'adapters'", editable = "experimental/cognee-adapter" },
     { name = "stigmem-plugin-cognee-adapter", marker = "extra == 'all'", editable = "experimental/cognee-adapter" },
     { name = "stigmem-plugin-cognee-adapter", marker = "extra == 'cognee-adapter'", editable = "experimental/cognee-adapter" },
     { name = "stigmem-plugin-cognee-adapter", marker = "extra == 'plugins-all'", editable = "experimental/cognee-adapter" },
+    { name = "stigmem-plugin-gemini-adapter", marker = "extra == 'adapters'", editable = "experimental/gemini-adapter" },
     { name = "stigmem-plugin-gemini-adapter", marker = "extra == 'all'", editable = "experimental/gemini-adapter" },
     { name = "stigmem-plugin-gemini-adapter", marker = "extra == 'gemini-adapter'", editable = "experimental/gemini-adapter" },
     { name = "stigmem-plugin-gemini-adapter", marker = "extra == 'plugins-all'", editable = "experimental/gemini-adapter" },
     { name = "stigmem-plugin-lazy-instruction-discovery", marker = "extra == 'all'", specifier = ">=0.1.0,<2.0.0" },
     { name = "stigmem-plugin-lazy-instruction-discovery", marker = "extra == 'lazy-instruction-discovery'", specifier = ">=0.1.0,<2.0.0" },
     { name = "stigmem-plugin-lazy-instruction-discovery", marker = "extra == 'plugins-all'", specifier = ">=0.1.0,<2.0.0" },
+    { name = "stigmem-plugin-letta-adapter", marker = "extra == 'adapters'", editable = "experimental/letta-adapter" },
     { name = "stigmem-plugin-letta-adapter", marker = "extra == 'all'", editable = "experimental/letta-adapter" },
     { name = "stigmem-plugin-letta-adapter", marker = "extra == 'letta-adapter'", editable = "experimental/letta-adapter" },
     { name = "stigmem-plugin-letta-adapter", marker = "extra == 'plugins-all'", editable = "experimental/letta-adapter" },
@@ -6129,6 +6139,7 @@ requires-dist = [
     { name = "stigmem-plugin-multi-tenant", marker = "extra == 'all'", specifier = ">=0.1.0,<2.0.0" },
     { name = "stigmem-plugin-multi-tenant", marker = "extra == 'multi-tenant'", specifier = ">=0.1.0,<2.0.0" },
     { name = "stigmem-plugin-multi-tenant", marker = "extra == 'plugins-all'", specifier = ">=0.1.0,<2.0.0" },
+    { name = "stigmem-plugin-openai-tools-adapter", marker = "extra == 'adapters'", editable = "experimental/openai-tools-adapter" },
     { name = "stigmem-plugin-openai-tools-adapter", marker = "extra == 'all'", editable = "experimental/openai-tools-adapter" },
     { name = "stigmem-plugin-openai-tools-adapter", marker = "extra == 'openai-tools-adapter'", editable = "experimental/openai-tools-adapter" },
     { name = "stigmem-plugin-openai-tools-adapter", marker = "extra == 'plugins-all'", editable = "experimental/openai-tools-adapter" },
@@ -6141,12 +6152,13 @@ requires-dist = [
     { name = "stigmem-plugin-tombstones", marker = "extra == 'all'", specifier = ">=0.1.0,<2.0.0" },
     { name = "stigmem-plugin-tombstones", marker = "extra == 'plugins-all'", specifier = ">=0.1.0,<2.0.0" },
     { name = "stigmem-plugin-tombstones", marker = "extra == 'tombstones'", specifier = ">=0.1.0,<2.0.0" },
+    { name = "stigmem-plugin-zep-adapter", marker = "extra == 'adapters'", editable = "experimental/zep-adapter" },
     { name = "stigmem-plugin-zep-adapter", marker = "extra == 'all'", editable = "experimental/zep-adapter" },
     { name = "stigmem-plugin-zep-adapter", marker = "extra == 'plugins-all'", editable = "experimental/zep-adapter" },
     { name = "stigmem-plugin-zep-adapter", marker = "extra == 'zep-adapter'", editable = "experimental/zep-adapter" },
     { name = "stigmem-py", editable = "sdks/stigmem-py" },
 ]
-provides-extras = ["node", "openclaw", "cognee-adapter", "gemini-adapter", "letta-adapter", "openai-tools-adapter", "zep-adapter", "lazy-instruction-discovery", "memory-garden-acl", "multi-tenant", "source-attestation", "time-travel", "tombstones", "plugins-all", "all"]
+provides-extras = ["node", "openclaw", "cognee-adapter", "gemini-adapter", "letta-adapter", "openai-tools-adapter", "zep-adapter", "adapters", "lazy-instruction-discovery", "memory-garden-acl", "multi-tenant", "source-attestation", "time-travel", "tombstones", "plugins-all", "all"]
 
 [package.metadata.requires-dev]
 dev = [

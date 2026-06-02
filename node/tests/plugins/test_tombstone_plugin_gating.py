@@ -144,15 +144,15 @@ def tombstone_plugin_no_filter_client(
         _restore_settings(original, extra)
 
 
-def test_default_install_keeps_tombstone_routes_absent(client: TestClient) -> None:
-    assert client.get("/v1/tombstones/user%3Aalice").status_code == 404
-    assert client.get("/v1/federation/tombstones").status_code == 404
-    assert client.post("/v1/federation/tombstones/ingest", json={}).status_code == 404
+def test_default_install_keeps_tombstone_routes_access_gated(client: TestClient) -> None:
+    assert client.get("/v1/tombstones/user%3Aalice").status_code == 403
+    assert client.get("/v1/federation/tombstones").status_code == 401
+    assert client.post("/v1/federation/tombstones/ingest", json={}).status_code == 401
 
     openapi_paths = client.get("/openapi.json").json()["paths"]
-    assert "/v1/tombstones/{entity_uri_encoded}" not in openapi_paths
-    assert "/v1/federation/tombstones" not in openapi_paths
-    assert "/v1/federation/tombstones/ingest" not in openapi_paths
+    assert "/v1/tombstones/{entity_uri_encoded}" in openapi_paths
+    assert "/v1/federation/tombstones" in openapi_paths
+    assert "/v1/federation/tombstones/ingest" in openapi_paths
 
 
 def test_default_install_does_not_apply_legacy_tombstone_filter(client: TestClient) -> None:

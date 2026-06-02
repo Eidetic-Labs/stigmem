@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import sys
 from datetime import UTC, datetime
@@ -22,6 +23,10 @@ def _sign_declaration(priv_b64: str, fields: dict) -> str:
     privkey = Ed25519PrivateKey.from_private_bytes(raw)
     canonical = json.dumps(fields, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(privkey.sign(canonical)).decode().rstrip("=")
+
+
+def _pubkey_fingerprint(pubkey: str) -> str:
+    return f"sha256:{hashlib.sha256(pubkey.encode()).hexdigest()}"
 
 
 def register_full_mesh(env: dict[str, str], admin_keys: dict[str, str]) -> None:
@@ -83,12 +88,33 @@ def register_full_mesh(env: dict[str, str], admin_keys: dict[str, str]) -> None:
                 if resp.status_code == 201 and resp.json().get("status") == "active":
                     success += 1
                     print(f"  {r_name} ← {peer['name']}: active")
+                elif resp.status_code == 201 and resp.json().get("status") == "pending_approval":
+                    peer_id = resp.json()["peer_id"]
+                    approve_resp = httpx.post(
+                        f"{registrar['host_url']}/v1/federation/peers/{peer_id}/approve",
+                        json={"pubkey_fingerprint": _pubkey_fingerprint(p_pub)},
+                        headers={"Authorization": f"Bearer {r_key}"},
+                        timeout=15.0,
+                    )
+                    if (
+                        approve_resp.status_code == 200
+                        and approve_resp.json().get("status") == "active"
+                    ):
+                        success += 1
+                        print(f"  {r_name} ← {peer['name']}: approved")
+                    else:
+                        failed += 1
+                        print(
+                            f"  {r_name} ← {peer['name']}: APPROVE FAILED "
+                            f"{approve_resp.status_code} {approve_resp.text}",
+                            file=sys.stderr,
+                        )
                 elif resp.status_code == 409:
                     skipped += 1
                 else:
                     failed += 1
                     print(
-                        f"  {r_name} ← {peer['name']}: FAILED {resp.status_code}",
+                        f"  {r_name} ← {peer['name']}: FAILED {resp.status_code} {resp.text}",
                         file=sys.stderr,
                     )
             except Exception as exc:

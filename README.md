@@ -119,6 +119,7 @@ pick it up by default. Use `--pre` and choose the scope:
 pip install --pre stigmem                          # SDK only
 pip install --pre stigmem[node]                    # SDK + reference node service
 pip install --pre stigmem[openclaw]                # SDK + alpha adapter package
+pip install --pre 'stigmem[adapters]'              # SDK + host-application adapters
 pip install --pre 'stigmem[plugins-all]'           # SDK + every published plugin
 pip install --pre stigmem[all]                     # everything published from this repo
 ```
@@ -131,6 +132,8 @@ Individual plugin extras: `stigmem[lazy-instruction-discovery]`,
 `stigmem[openai-tools-adapter]`, and `stigmem[zep-adapter]`.
 Each is an independently versioned PyPI package (`stigmem-plugin-<name>`)
 released under [ADR-011](docs/adr/011-plugin-independent-versioning.md).
+Use `stigmem[adapters]` to install the five host-application adapter plugins
+without the node behavior plugins.
 
 The MCP server is a separate npm package:
 

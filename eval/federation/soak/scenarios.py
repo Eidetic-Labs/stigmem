@@ -176,6 +176,7 @@ def _issue_tombstone(client: httpx.Client, entity_uri: str, scope: str = "*") ->
     )
     if r.status_code == 201:
         return r.json().get("id", "")
+    print(f"  CC-4 tombstone issue failed: {r.status_code} {r.text}", file=sys.stderr)
     return ""
 
 
@@ -221,34 +222,53 @@ def run_cc4(clients: dict[str, httpx.Client]) -> dict:
     t2.start()
     t1.join()
     t2.join()
+    if not results.get("tombstone"):
+        return {"scenario": "CC-4", "passed": False, "convergence_s": 0.0}
 
     # Tombstone replication happens via federation pull loop (§23.4.3);
-    # wait for convergence across all nodes.
+    # wait for fact convergence across all nodes before checking the tombstone
+    # state itself.
+    convergence_started = time.monotonic()
     conv = _wait_convergence(clients, entity, relation)
 
     # Verify tombstone wins: GET /v1/tombstones/{entity} should report
     # tombstoned=true on all nodes after replication.
     tombstone_wins = False
+    tombstone_statuses: dict[str, Any] = {}
     if conv is not None:
-        tombstone_wins = True
         encoded_entity = urllib.parse.quote(entity, safe="")
-        for client in clients.values():
-            try:
-                r = client.get(f"/v1/tombstones/{encoded_entity}")
-                if r.status_code == 200:
-                    if not r.json().get("tombstoned", False):
+        deadline = time.monotonic() + CONVERGENCE_WINDOW_S
+        while time.monotonic() < deadline:
+            tombstone_wins = True
+            tombstone_statuses = {}
+            for name, client in clients.items():
+                try:
+                    r = client.get(f"/v1/tombstones/{encoded_entity}")
+                    is_json = r.headers.get("content-type", "").startswith("application/json")
+                    body = r.json() if is_json else r.text
+                    tombstone_statuses[name] = {
+                        "status_code": r.status_code,
+                        "body": body,
+                    }
+                    if r.status_code != 200 or not body.get("tombstoned", False):
                         tombstone_wins = False
-                else:
+                except (httpx.HTTPError, ValueError) as exc:
+                    print(f"  CC-4 tombstone verification failed: {exc}", file=sys.stderr)
+                    tombstone_statuses[name] = {"error": str(exc)}
                     tombstone_wins = False
-            except (httpx.HTTPError, ValueError) as exc:
-                print(f"  CC-4 tombstone verification failed: {exc}", file=sys.stderr)
-                tombstone_wins = False
+            if tombstone_wins:
+                conv = time.monotonic() - convergence_started
+                break
+            time.sleep(1.0)
+    if conv is not None and not tombstone_wins:
+        print(f"  CC-4 tombstone status mismatch: {tombstone_statuses}", file=sys.stderr)
 
     return {
         "scenario": "CC-4",
         "passed": conv is not None and tombstone_wins,
         "convergence_s": round(conv, 2) if conv is not None else CONVERGENCE_WINDOW_S,
         "tombstone_wins": tombstone_wins,
+        "tombstone_statuses": tombstone_statuses,
     }
 
 

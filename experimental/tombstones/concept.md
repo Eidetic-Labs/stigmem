@@ -10,7 +10,7 @@ audience: Integrator
 
 :::caution Experimental source package
 
-RTBF tombstones are not part of the v0.9.0a1 default install and are not a supported compliance surface. The source package lives under `experimental/tombstones/` and only becomes active when `stigmem-plugin-tombstones` is explicitly registered/configured. Default installs do not mount tombstone admin or federation routes and do not apply tombstone filters.
+RTBF tombstones are not part of the v0.9.0a1 default install and are not a supported compliance surface. The source package lives under `experimental/tombstones/` and only becomes active when `stigmem-plugin-tombstones` is explicitly registered/configured. Default installs mount tombstone admin and federation route contracts but keep them access-gated, and do not apply tombstone filters.
 
 Signed package publication, launch evidence, and operator-ready artifact verification are deferred to the all-plugins launch lane. Treat the API and CLI examples below as the target plugin-loaded workflow, not default-install behavior.
 
