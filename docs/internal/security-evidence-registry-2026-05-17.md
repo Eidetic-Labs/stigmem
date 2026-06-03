@@ -9,6 +9,14 @@ This page lists each audit finding, the code paths that implement the fix, the r
 
 ## Critical / High findings (published as GHSAs)
 
+**Advisory range correction (2026-06-03):** The six published GHSA records in
+this table were narrowed from `<0.9.0a2` to `==0.9.0a1` after Dependabot
+reopened alerts against the `uv.lock` editable workspace entry for
+`stigmem-node 0.9.0a10`. The a2 patch disposition did not change: `0.9.0a1`
+is the reset-line vulnerable artifact, and `0.9.0a2` is the first patched
+artifact. Alerts #53-#58 were dismissed as inaccurate after the advisory
+metadata read back with the exact affected range.
+
 | Finding | GHSA | Evidence path(s) | Resolution PR | Regression evidence | Disposition |
 | --- | --- | --- | ---: | --- | --- |
 | C1 — Federation peer token timestamp handling | [GHSA-xh5j-xjfq-qvvx](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-xh5j-xjfq-qvvx) | `node/src/stigmem_node/federation/peer_auth.py`; `node/src/stigmem_node/federation/peer_token.py` | #487 | Peer-token epoch tests | Closed |

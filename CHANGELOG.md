@@ -14,6 +14,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 - Opened the post-`v0.9.0a10` release-prep lane after the adapter publication
   batch.
 
+### Fixed
+
+- Made the tag coverage workflow tolerate the release-creation race by keeping
+  the generated artifacts and coverage branch green when `coverage.xml` cannot
+  be attached to the GitHub release before the publish workflow creates it.
+
+### Security
+
+- Corrected the six published `v0.9.0a2` Critical/High GitHub Security
+  Advisory affected ranges from `<0.9.0a2` to `==0.9.0a1`, matching the
+  reset-line vulnerable artifact and preventing false-positive Dependabot
+  alerts against later alpha lockfile entries.
+
 ## [0.9.0a10] — 2026-05-26
 
 ### Added
