@@ -354,30 +354,38 @@ If you install through the meta-package, use:
 pip install --upgrade --pre 'stigmem[node]'
 ```
 
-| Finding | Severity | Advisory | Resolution |
-| ---- | -------- | -------- | ------- |
-| C1 — Federation peer token timestamp handling | High (CVSS 4.0 — 7.1) | [GHSA-xh5j-xjfq-qvvx](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-xh5j-xjfq-qvvx) | Canonical millisecond token contract with regression coverage for valid and seconds-shaped tokens. |
-| C2 — Non-loopback insecure federation startup | Critical (CVSS 4.0 — 9.1) | [GHSA-jmfc-hfjq-pxcp](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-jmfc-hfjq-pxcp) | Startup refuses insecure federation mode on non-loopback deployments. |
-| H1 — Non-loopback auth-disabled deployment | Critical (CVSS 4.0 — 9.2) | [GHSA-fp6w-8wpg-74g5](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-fp6w-8wpg-74g5) | Startup refuses anonymous full-permission mode outside local development. |
-| H2 — Federation peer registration approval gate | Critical (CVSS 4.0 — 9.1) | [GHSA-9vp8-3hmv-8fgh](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-9vp8-3hmv-8fgh) | Peer registration requires explicit out-of-band approval before activation. |
-| H3 — Unsigned plugin override acknowledgement | High (CVSS 4.0 — 7.3) | [GHSA-w7pm-9g55-mxfm](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-w7pm-9g55-mxfm) | Unsigned plugin override requires explicit operator acknowledgement. |
-| H5 — Postgres schema identifier handling | High (CVSS 4.0 — 7.5) | [GHSA-9pc9-4crj-mhpj](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-9pc9-4crj-mhpj) | Backend schema handling uses identifier-safe SQL composition and validation. |
-| M1 — Federation nonce cache lifetime | Medium | None; documented per policy | Nonce cache lifetime is at least as long as the accepted token lifetime. |
-| M2 — Federation token issuer validation | Medium | None; documented per policy | Issuer handling has explicit validation coverage. |
-| M3 — Federation token time-claim validation | Medium | None; documented per policy | Time-claim handling has explicit validation coverage, including Hypothesis fuzz coverage. |
-| M4 — Legacy SHA-256 API key acceptance deadline | Medium | None; documented per policy | Legacy SHA-256 API key acceptance has a configurable deadline and regression coverage. |
-| M5 — OIDC ID-token algorithm allowlist | Medium | None; documented per policy | OIDC ID-token algorithm handling uses a configurable allowlist. |
-| M6 — SQLite database and sidecar permissions | Medium | None; documented per policy | SQLite database and sidecar files use restrictive permissions at creation time. |
-| M7 — CLI write-out path permissions | Medium | None; documented per policy | CLI write-out paths use restrictive permissions. |
-| M8 — Rate-limit kill-switch acknowledgement | Medium | None; documented per policy | Production-risky quota-disablement requires explicit operator acknowledgement and remains covered by deployment guidance. |
-| M9 — Federation message validation | Medium | None; documented per policy | Federation message state transitions have validation coverage and are documented as a Medium security disposition. |
-| L1 — Development CORS startup warning | Low | None; documented per policy | Development CORS posture emits a startup warning when enabled. |
-| L2 — Embedding-provider error redaction | Low | None; documented per policy | Embedding-provider errors no longer log sensitive provider detail. |
-| L3 — Audit posture documentation by trust mode | Low | None; documented per policy | Audit evidence posture is documented by trust mode and backend. |
-| L4 — Federation clock-skew leeway | Low; folded into M2/M3 | None; documented per policy | Clock-skew behavior is covered by federation token validation hardening. |
-| L5 — OIDC discovery URL validation | Low | None; documented per policy | OIDC discovery URL handling validates outbound locations and is documented as a Low security disposition. |
+| Finding | Severity | Advisory | Affected | Fixed | Resolution |
+| ---- | -------- | -------- | -------- | ----- | ------- |
+| C1 — Federation peer token timestamp handling | High (CVSS 4.0 — 7.1) | [GHSA-xh5j-xjfq-qvvx](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-xh5j-xjfq-qvvx) | `stigmem-node 0.9.0a1` | `0.9.0a2` | Canonical millisecond token contract with regression coverage for valid and seconds-shaped tokens. |
+| C2 — Non-loopback insecure federation startup | Critical (CVSS 4.0 — 9.1) | [GHSA-jmfc-hfjq-pxcp](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-jmfc-hfjq-pxcp) | `stigmem-node 0.9.0a1` | `0.9.0a2` | Startup refuses insecure federation mode on non-loopback deployments. |
+| H1 — Non-loopback auth-disabled deployment | Critical (CVSS 4.0 — 9.2) | [GHSA-fp6w-8wpg-74g5](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-fp6w-8wpg-74g5) | `stigmem-node 0.9.0a1` | `0.9.0a2` | Startup refuses anonymous full-permission mode outside local development. |
+| H2 — Federation peer registration approval gate | Critical (CVSS 4.0 — 9.1) | [GHSA-9vp8-3hmv-8fgh](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-9vp8-3hmv-8fgh) | `stigmem-node 0.9.0a1` | `0.9.0a2` | Peer registration requires explicit out-of-band approval before activation. |
+| H3 — Unsigned plugin override acknowledgement | High (CVSS 4.0 — 7.3) | [GHSA-w7pm-9g55-mxfm](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-w7pm-9g55-mxfm) | `stigmem-node 0.9.0a1` | `0.9.0a2` | Unsigned plugin override requires explicit operator acknowledgement. |
+| H5 — Postgres schema identifier handling | High (CVSS 4.0 — 7.5) | [GHSA-9pc9-4crj-mhpj](https://github.com/eidetic-labs/stigmem/security/advisories/GHSA-9pc9-4crj-mhpj) | `stigmem-node 0.9.0a1` | `0.9.0a2` | Backend schema handling uses identifier-safe SQL composition and validation. |
+| M1 — Federation nonce cache lifetime | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Nonce cache lifetime is at least as long as the accepted token lifetime. |
+| M2 — Federation token issuer validation | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Issuer handling has explicit validation coverage. |
+| M3 — Federation token time-claim validation | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Time-claim handling has explicit validation coverage, including Hypothesis fuzz coverage. |
+| M4 — Legacy SHA-256 API key acceptance deadline | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Legacy SHA-256 API key acceptance has a configurable deadline and regression coverage. |
+| M5 — OIDC ID-token algorithm allowlist | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | OIDC ID-token algorithm handling uses a configurable allowlist. |
+| M6 — SQLite database and sidecar permissions | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | SQLite database and sidecar files use restrictive permissions at creation time. |
+| M7 — CLI write-out path permissions | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | CLI write-out paths use restrictive permissions. |
+| M8 — Rate-limit kill-switch acknowledgement | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Production-risky quota-disablement requires explicit operator acknowledgement and remains covered by deployment guidance. |
+| M9 — Federation message validation | Medium | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Federation message state transitions have validation coverage and are documented as a Medium security disposition. |
+| L1 — Development CORS startup warning | Low | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Development CORS posture emits a startup warning when enabled. |
+| L2 — Embedding-provider error redaction | Low | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Embedding-provider errors no longer log sensitive provider detail. |
+| L3 — Audit posture documentation by trust mode | Low | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Audit evidence posture is documented by trust mode and backend. |
+| L4 — Federation clock-skew leeway | Low; folded into M2/M3 | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | Clock-skew behavior is covered by federation token validation hardening. |
+| L5 — OIDC discovery URL validation | Low | None; documented per policy | `stigmem-node 0.9.0a1` | `0.9.0a2` | OIDC discovery URL handling validates outbound locations and is documented as a Low security disposition. |
 
 Detailed PR, path, test, and evidence lineage for this audit is recorded in [`docs/internal/security-evidence-registry-2026-05-17.md`](docs/internal/security-evidence-registry-2026-05-17.md). Architectural risk classes derived from C2, H1, and H2 are registered as R-24, R-25, and R-26 in [`spec/security/threat-model.md`](spec/security/threat-model.md).
+
+On 2026-06-03, the six published Critical/High advisory records above were
+corrected from the broad affected range `<0.9.0a2` to the exact affected range
+`==0.9.0a1`. The implementation and patched-version disposition did not
+change; the correction prevents later alpha versions such as `0.9.0a10` from
+being misclassified by dependency scanners that compare pre-release suffixes
+conservatively or treat editable workspace lockfile entries as external
+packages.
 
 ---
 
