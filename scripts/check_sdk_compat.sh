@@ -90,7 +90,9 @@ main().catch((err) => {
 });
 JS
 
-GO_SMOKE_FILE="$(mktemp "${TMPDIR:-/tmp}/stigmem-go-compat.XXXXXX.go")"
+GO_SMOKE_FILE_BASE="$(mktemp "${TMPDIR:-/tmp}/stigmem-go-compat.XXXXXX")"
+GO_SMOKE_FILE="${GO_SMOKE_FILE_BASE}.go"
+mv "${GO_SMOKE_FILE_BASE}" "${GO_SMOKE_FILE}"
 cat >"${GO_SMOKE_FILE}" <<'EOF'
 package main
 

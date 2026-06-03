@@ -66,7 +66,7 @@ check-sdk-backward-compat:
 	bash scripts/check_sdk_backward_compat.sh
 
 check-migration-compat:
-	uv run pytest node/tests/test_migration_compat.py -q --tb=short
+	uv run pytest node/tests/lifecycle/test_migration_compat.py -q --tb=short
 
 check-evidence-maintenance:
 	python3 scripts/check_evidence_maintenance.py

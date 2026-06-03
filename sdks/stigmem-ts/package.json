@@ -17,7 +17,7 @@
     "README.md"
   ],
   "scripts": {
-    "generate": "openapi-typescript ../../docs/openapi/stigmem.json -o src/generated.ts --root-types && python ../../scripts/mark_openapi_typescript_generated.py src/generated.ts",
+    "generate": "openapi-typescript ../../docs/openapi/stigmem.json -o src/generated.ts --root-types && python3 ../../scripts/mark_openapi_typescript_generated.py src/generated.ts",
     "build": "tsc",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
