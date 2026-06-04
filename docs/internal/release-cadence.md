@@ -134,6 +134,14 @@ Before pushing a tag, verify:
 - [ ] Any pending Trusted Publisher (PyPI) configurations for new packages added in this release are registered at pypi.org.
 - [ ] **Local smoke-build:** all four Python wheels build cleanly via `uv build --package <name>` and pass `uv run twine check dist/*`. Catches package-metadata issues that the version-consistency CI gate doesn't see (missing files, broken `[build-system]`, etc.).
 - [ ] **OpenAPI spec is current:** `uv run python scripts/export_openapi.py && git diff --exit-code docs/openapi/stigmem.json` produces no diff. If there's drift, the FastAPI `app.version` was changed but the exported spec wasn't regenerated.
+- [ ] **Eval fast gate:** `make eval-fast` passes on the release candidate
+  commit when the release includes eval, recall, node, SDK, spec, conformance,
+  or eval-harness feature-record changes. For `v0.9.0a11` and later alpha
+  releases, the release-readiness script also statically verifies adversarial
+  corpus count, recall probe count, baseline hash/schema, eval-fast path
+  filters, and that generated `eval/results/` artifacts were not accidentally
+  tracked. `make eval-soak-smoke` remains optional/manual unless a maintainer
+  explicitly opens a Docker/Colima-dependent soak gate.
 - [ ] **Meta-package dep ranges updated** (if applicable). The root `stigmem` `pyproject.toml` `dependencies` and `[project.optional-dependencies]` lists pin to e.g. `stigmem-py>=0.9.0a2,<1.0.0` — when bumping the canonical line, the lower bound should bump too. If you're cutting a beta from an alpha (`0.9.0a3` → `0.9.0b1`), the upper bound stays at `<1.0.0`; if cutting `1.0.0`, the meta-package's bounds get a major-version bump (separate decision; revisit before then).
 - [ ] **Update security artifacts** per `docs/internal/evidence-maintenance.md`: refresh the docs-landing risk-register summary, threat-model page status header, `CHANGELOG.md` `### Security` subsection when security work or risk-status changes landed, and SBOM/signature verification evidence for published artifacts.
 - [ ] **Evidence maintenance validators pass:** `python3 scripts/check_evidence_maintenance.py`, `python3 scripts/validate_security_evidence.py`, and `python3 scripts/check_security_documentation.py`.

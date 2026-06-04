@@ -40,6 +40,7 @@ shipped in the tagged release.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -51,8 +52,36 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 PLUGIN_CATALOG_CHECK = REPO_ROOT / "scripts" / "check_plugin_readme_pypi_consistency.py"
+EVAL_FAST_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "eval-fast.yml"
+EVAL_RESULTS_DIR = REPO_ROOT / "eval" / "results"
 
 DEFAULT_REPO = "Eidetic-Labs/stigmem"
+EXPECTED_ADVERSARIAL_COUNTS = {
+    "typo_squatted": 20,
+    "contradiction_floods": 9,
+    "tombstone_bypass": 10,
+    "capability_token": 15,
+    "sanitizer_bypass": 25,
+}
+EXPECTED_RECALL_PROBES = 400
+EXPECTED_EVAL_FAST_FILTERS = {
+    ".github/workflows/eval-fast.yml",
+    "Makefile",
+    "eval/**",
+    "experimental/eval-harness/**",
+    "features/eval-harness/**",
+    "node/**",
+    "sdks/stigmem-py/**",
+    "scripts/validate_adversarial_corpus.py",
+    "scripts/validate_adversarial_results.py",
+    "spec/**",
+    "data/conformance/**",
+}
+ALLOWED_TRACKED_EVAL_RESULTS = {
+    "eval/results/.gitkeep",
+    "eval/results/ci-0b1a76a.json",
+    "eval/results/ci-0b1a76a.md",
+}
 
 VERSION_TAG_RE = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:[ab]\d+|rc\d+)?)$")
 
@@ -157,6 +186,113 @@ def _check_plugin_catalog_consistency() -> list[str]:
     return [f"plugin catalog consistency failed: {detail}"]
 
 
+def _load_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise AssertionError(f"{path.relative_to(REPO_ROOT)} is missing") from None
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"{path.relative_to(REPO_ROOT)} is invalid JSON: {exc}") from exc
+
+
+def _load_json_or_failure(path: Path, failures: list[str]) -> object | None:
+    try:
+        return _load_json(path)
+    except AssertionError as exc:
+        failures.append(str(exc))
+        return None
+
+
+def _canonical_corpus_sha(probes: object) -> str:
+    raw = json.dumps(probes, sort_keys=True, ensure_ascii=False).encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _tracked_files_under(path: Path) -> set[str]:
+    result = subprocess.run(  # noqa: S603
+        ["git", "ls-files", "--", str(path.relative_to(REPO_ROOT))],  # noqa: S607
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise AssertionError(f"could not inspect tracked eval results: {detail}")
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _check_eval_harness_static_gates() -> list[str]:
+    failures: list[str] = []
+
+    corpus_dir = REPO_ROOT / "eval" / "corpus" / "adversarial"
+    total = 0
+    for class_name, expected_count in EXPECTED_ADVERSARIAL_COUNTS.items():
+        class_total = 0
+        for path in sorted((corpus_dir / class_name).glob("*.json")):
+            data = _load_json_or_failure(path, failures)
+            if data is None:
+                continue
+            class_total += len(data) if isinstance(data, list) else 1
+        if class_total != expected_count:
+            failures.append(
+                f"eval adversarial corpus {class_name!r} has {class_total} "
+                f"scenario(s), expected {expected_count}"
+            )
+        total += class_total
+    expected_total = sum(EXPECTED_ADVERSARIAL_COUNTS.values())
+    if total != expected_total:
+        failures.append(
+            f"eval adversarial corpus has {total} scenario(s), expected {expected_total}"
+        )
+
+    probes_path = REPO_ROOT / "eval" / "corpus" / "recall" / "probes.json"
+    probes = _load_json_or_failure(probes_path, failures)
+    if not isinstance(probes, list):
+        failures.append("eval recall probes.json must contain a JSON list")
+        probes = []
+    elif len(probes) != EXPECTED_RECALL_PROBES:
+        failures.append(
+            f"eval recall corpus has {len(probes)} probe(s), "
+            f"expected {EXPECTED_RECALL_PROBES}"
+        )
+
+    baseline_path = REPO_ROOT / "eval" / "corpus" / "recall" / "baseline.json"
+    baseline = _load_json_or_failure(baseline_path, failures)
+    if not isinstance(baseline, dict):
+        failures.append("eval recall baseline.json must contain a JSON object")
+    else:
+        required = {"nDCG@10", "Recall@5", "corpus_sha", "server_version", "recorded_at"}
+        missing = sorted(required - set(baseline))
+        if missing:
+            failures.append(f"eval recall baseline.json missing key(s): {', '.join(missing)}")
+        expected_sha = _canonical_corpus_sha(probes)
+        if baseline.get("corpus_sha") != expected_sha:
+            failures.append(
+                "eval recall baseline corpus_sha "
+                f"{baseline.get('corpus_sha')!r} does not match {expected_sha!r}"
+            )
+
+    workflow_text = EVAL_FAST_WORKFLOW.read_text(encoding="utf-8")
+    missing_filters = sorted(
+        token for token in EXPECTED_EVAL_FAST_FILTERS if f'- "{token}"' not in workflow_text
+    )
+    if missing_filters:
+        failures.append(
+            "eval-fast workflow is missing path filter(s): " + ", ".join(missing_filters)
+        )
+
+    tracked_results = _tracked_files_under(EVAL_RESULTS_DIR)
+    unexpected_results = sorted(tracked_results - ALLOWED_TRACKED_EVAL_RESULTS)
+    if unexpected_results:
+        failures.append(
+            "eval/results contains tracked generated artifact(s) outside the "
+            "allowlist: " + ", ".join(unexpected_results)
+        )
+
+    return failures
+
+
 def _run_gh_api(repo: str, path: str) -> tuple[bool, str]:
     if not shutil.which("gh"):
         return False, "gh CLI not on PATH"
@@ -255,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         failures.extend(_check_changelog_unreleased(changelog))
     failures.extend(_check_plugin_catalog_consistency())
+    failures.extend(_check_eval_harness_static_gates())
 
     if failures:
         _print_failures(failures)

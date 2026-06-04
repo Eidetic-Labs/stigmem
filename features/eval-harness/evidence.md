@@ -13,8 +13,8 @@
 | `eval/corpus/adversarial/**/scenarios.json` | 79 adversarial scenarios across typo-squatting, contradiction floods, tombstone bypass, capability-token forgery, and sanitizer bypass. |
 | `eval/corpus/recall/probes.json` | 400 labeled recall probes. |
 | `eval/corpus/recall/baseline.json` | Alpha recall baseline schema and canonical corpus hash. |
-| `eval/results/` | Tracked seed result evidence plus ignored per-run result artifacts. |
-| `.github/workflows/eval-fast.yml` | Path-filtered CI workflow for fast adversarial and recall validation. |
+| `eval/results/` | Tracked seed result evidence plus ignored per-run result artifacts; release readiness rejects unapproved tracked result files. |
+| `.github/workflows/eval-fast.yml` | Path-filtered CI workflow for fast adversarial and recall validation, including eval harness feature-record changes. |
 | `Makefile` | `eval-fast`, `eval-adversarial`, `eval-recall`, `eval-fast-baseline`, `eval-soak-smoke`, and `eval-soak` targets. |
 
 ## Test Evidence
@@ -26,7 +26,7 @@
 | `make eval-fast` | Runs adversarial and recall suites together; expected local budget is documented as five minutes or less. |
 | `uv run python scripts/validate_adversarial_corpus.py` | Validates ADR-015 adversarial corpus structure. |
 | `uv run python scripts/validate_adversarial_results.py` | Validates the ADR-015 certification results index. |
-| `.github/workflows/eval-fast.yml` | CI validation for eval, node, SDK, spec, and conformance path changes. |
+| `.github/workflows/eval-fast.yml` | CI validation for eval, eval-harness feature records, Make target, node, SDK, spec, and conformance path changes. |
 
 ## Documentation Evidence
 
@@ -53,6 +53,7 @@ python3 scripts/check_feature_changelog_projection.py
 python3 scripts/check_feature_compatibility_projection.py
 python3 scripts/check_feature_protocol_projection.py
 CHECK_SKIP_DOCS_INSTALL=1 bash scripts/check.sh docs
+python3 scripts/check_release_readiness.py --no-milestone-check
 ```
 
 ## Limitations

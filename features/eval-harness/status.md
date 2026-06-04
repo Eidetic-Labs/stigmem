@@ -32,7 +32,7 @@ targets, CI wiring, and tracked baseline/result artifacts.
 | Feature record | Complete | ADR-020 feature record added under `features/eval-harness`. |
 | Runnable harness | Complete | `eval/test_adversarial.py`, `eval/test_recall.py`, and `eval/harness/*.py` are present. |
 | Corpus fixtures | Complete | `eval/corpus/adversarial/**/scenarios.json` contains 79 scenarios; `eval/corpus/recall/probes.json` contains 400 probes. |
-| CI integration | Complete | `.github/workflows/eval-fast.yml` runs the fast harness on eval, node, SDK, spec, and conformance changes. |
+| CI integration | Complete | `.github/workflows/eval-fast.yml` runs the fast harness on eval, eval-harness feature record, Make target, node, SDK, spec, and conformance changes. |
 | Live-node validation | Partial | The default path uses an in-process FastAPI TestClient; `STIGMEM_EVAL_URL` and `STIGMEM_EVAL_API_KEY` support operator-run live-node validation. |
 | Ownership | Open | Owner remains unassigned. |
 
