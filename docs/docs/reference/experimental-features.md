@@ -240,7 +240,7 @@ These features have a `Spec-XN-*` experimental spec. They are not part of the su
 <div className="stigmem-grid">
 
 <div><h4>Curator dashboard</h4><p><a href="https://github.com/eidetic-labs/stigmem/tree/main/features/dashboard"><code>features/dashboard</code></a> — deferred internal tooling; live-node and deployment validation remain future alpha work.</p></div>
-<div><h4>Eval harness</h4><p><a href="https://github.com/eidetic-labs/stigmem/tree/main/features/eval-harness"><code>features/eval-harness</code></a> — deferred concept-only evaluation tooling; runnable harness remains future alpha work.</p></div>
+<div><h4>Eval harness</h4><p><a href="https://github.com/eidetic-labs/stigmem/tree/main/features/eval-harness"><code>features/eval-harness</code></a> — active internal evaluation tooling for adversarial and recall validation; standalone package publication remains future alpha work.</p></div>
 <div><h4>Helm deployment</h4><p><a href="https://github.com/eidetic-labs/stigmem/tree/main/features/deploy-helm"><code>features/deploy-helm</code></a> — deferred Kubernetes deployment recipe; live cluster validation remains future alpha work.</p></div>
 <div><h4>Fly.io deployment</h4><p><a href="https://github.com/eidetic-labs/stigmem/tree/main/features/deploy-fly"><code>features/deploy-fly</code></a> — deferred Fly.io deployment recipe; live deployment, persistence, dashboard validation, and secrets review remain future alpha work.</p></div>
 <div><h4>Grafana deployment</h4><p><a href="https://github.com/eidetic-labs/stigmem/tree/main/features/deploy-grafana"><code>features/deploy-grafana</code></a> — deferred observability deployment seed; live stack validation, metric review, alert review, and packaging remain future alpha work.</p></div>

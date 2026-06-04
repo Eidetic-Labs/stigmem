@@ -1,21 +1,23 @@
 # Evaluation Harness Security
 
-The evaluation harness is intended to validate adversarial behavior against a
-live Stigmem node, but the current feature surface is concept-only. Its security
-posture is therefore a future validation target, not current release evidence.
+The evaluation harness validates adversarial behavior against a Stigmem node or
+in-process test node. Its current `v0.9.0a11` posture is internal alpha release
+evidence, not a stable external certification surface.
 
 ## Security Posture
 
 | Area | Current control | Evidence |
 | --- | --- | --- |
-| Deferred surface | The harness is outside the current alpha artifact set. | `experimental/eval-harness/STATUS.md`; this feature record |
-| Adversarial scope | The concept describes typo-squatting, contradiction floods, tombstone bypass, capability-token forgery, and sanitizer bypass. | `experimental/eval-harness/concept.md` |
-| Credential handling | Intended runs use `STIGMEM_EVAL_URL` and optional `STIGMEM_API_KEY`. | `experimental/eval-harness/concept.md` |
+| Internal surface | The harness remains in-repo internal tooling with no standalone package publication. | `features/eval-harness/status.md`; `docs/internal/plugin-publication-disposition.md` |
+| Adversarial scope | The corpus covers typo-squatting, contradiction floods, tombstone bypass, capability-token forgery, and sanitizer bypass. | `eval/corpus/adversarial/**/scenarios.json`; `eval/test_adversarial.py` |
+| Credential handling | Live-node runs use `STIGMEM_EVAL_URL` and optional `STIGMEM_EVAL_API_KEY`; default runs use an in-process TestClient. | `eval/README.md`; `eval/harness/utils.py`; `eval/conftest.py` |
+| Artifact handling | Per-run results under `eval/results/` are ignored except for intentionally tracked seed evidence. | `.gitignore`; `eval/results/.gitkeep`; `eval/results/ci-0b1a76a.*`; `eval/results/consecutive_failures.txt` |
+| CI scope | The fast harness is path-filtered to eval, node, SDK, spec, and conformance changes. | `.github/workflows/eval-fast.yml` |
 
 ## Security References
 
 No dedicated R-* audit item is assigned to this feature. The concept maps to
-security regression testing but does not currently provide runnable evidence.
+security regression testing through the adversarial corpus and fast eval CI.
 
 ## Advisories and Findings
 
@@ -23,17 +25,17 @@ None currently recorded for the feature.
 
 ## Residual Risk
 
-- Concept-level adversarial counts and thresholds may be stale until the
-  runnable corpus is restored.
-- A future harness that targets live nodes must protect API keys and generated
-  results artifacts.
-- Security conclusions should not rely on this feature until implementation and
-  CI evidence exist.
+- Live-node runs must protect API keys and avoid committing generated result
+  artifacts.
+- Recall thresholds and baseline values are alpha gates, not a stable external
+  quality claim.
+- Federation soak checks depend on Docker/Colima and remain optional/manual or
+  nightly unless a later release gate makes them mandatory.
 
 ## Operator Guidance
 
-- Treat this feature as deferred until a runnable harness and corpus are
-  present.
-- Do not use concept-only counts as release evidence.
-- Revalidate API-key handling and artifact retention when the harness is
-  implemented.
+- Prefer `make eval-fast` for local a11 foundation validation.
+- Use `make eval-soak-smoke` only when Docker/Colima-dependent federation soak
+  validation is explicitly in scope.
+- Do not publish the harness as a package until package boundaries, secrets,
+  generated artifacts, and Trusted Publisher setup are deliberately reviewed.

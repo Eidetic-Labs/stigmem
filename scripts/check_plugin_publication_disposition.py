@@ -15,7 +15,7 @@ EXPECTED_DISPOSITIONS = {
     "openai-tools-adapter": "published",
     "paperclip-adapter": "defer",
     "dashboard": "defer",
-    "eval-harness": "defer",
+    "eval-harness": "internal",
     "deploy-fly": "defer",
     "deploy-paas": "defer",
     "deploy-systemd": "defer",

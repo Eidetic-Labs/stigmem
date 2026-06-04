@@ -246,9 +246,9 @@ Progress:
   `features/dashboard/`; dependency currency, auth/session, live-node, and
   deployment posture remain future alpha release-line gates.
 - `eval-harness` now has a canonical tooling feature record under
-  `features/eval-harness/`; the current surface is concept-only and runnable
-  implementation, corpus, CI, and live-node validation remain future alpha
-  release-line gates.
+  `features/eval-harness/`; the `eval/` implementation, corpus, Make targets,
+  and path-filtered CI now form the active internal a11 foundation surface,
+  while standalone package publication remains a future release-line gate.
 - `deploy-helm` now has a canonical deployment feature record under
   `features/deploy-helm/`; chart publication, live cluster validation,
   hardening review, and ownership remain future alpha release-line gates.

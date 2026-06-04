@@ -38,12 +38,12 @@ uv sync --all-packages
 
 # Run adversarial suite (79 scenarios)
 STIGMEM_EVAL_URL=http://localhost:8765 \
-STIGMEM_API_KEY=sk-... \
+STIGMEM_EVAL_API_KEY=sk-... \
   uv run pytest eval/test_adversarial.py -v --tb=short
 
 # Run recall benchmark (400 probes)
 STIGMEM_EVAL_URL=http://localhost:8765 \
-STIGMEM_API_KEY=sk-... \
+STIGMEM_EVAL_API_KEY=sk-... \
   uv run pytest eval/test_recall.py -v --tb=short
 ```
 
@@ -146,8 +146,8 @@ To update the baseline after intentional ranking changes:
 
 ```bash
 STIGMEM_EVAL_URL=http://localhost:8765 \
-STIGMEM_API_KEY=sk-... \
-  uv run python -m eval.harness.recall --update-baseline
+STIGMEM_EVAL_API_KEY=sk-... \
+  uv run python -m eval.harness.recall --save-baseline
 ```
 
 ---
@@ -183,7 +183,7 @@ The eval harness is designed to be run against any spec-compliant node, not just
 
 ```bash
 STIGMEM_EVAL_URL=https://your-node.example.com \
-STIGMEM_API_KEY=sk-... \
+STIGMEM_EVAL_API_KEY=sk-... \
   uv run pytest eval/ -v
 ```
 

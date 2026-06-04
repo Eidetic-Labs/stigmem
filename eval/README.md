@@ -51,7 +51,7 @@ eval/
       sanitizer_bypass/     # 25 payloads (SQL, null bytes, Unicode, oversized, prompt-injection)
     recall/
       probes.json           # 400 labeled (query, gold-entity-set) probes, hash-pinned
-      baseline.json         # frozen nDCG@10 at commit time
+      baseline.json         # frozen nDCG@10 with canonical corpus hash
   results/                  # JSON + markdown run artifacts (gitignored per-run files)
   harness/
     adversarial.py          # run adversarial corpus, return pass/fail per scenario
@@ -92,7 +92,7 @@ The `eval-fast` job runs on every PR via `.github/workflows/eval-fast.yml`.
 {
   "nDCG@10": 0.0,
   "Recall@5": 0.0,
-  "corpus_sha": "<sha256[:16] of probes.json>",
+  "corpus_sha": "<sha256[:16] of canonical sorted JSON probes>",
   "server_version": "0.9.0a1",
   "recorded_at": "<ISO8601 UTC>"
 }
