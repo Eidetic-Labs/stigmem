@@ -22,6 +22,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ### Security
 
+- Updated the locked `aiohttp` transitive dependency from `3.13.5` to
+  `3.14.0`, resolving Dependabot alerts GHSA-hg6j-4rv6-33pg and
+  GHSA-jg22-mg44-37j8 in optional adapter/provider dependency paths.
 - Corrected the six published `v0.9.0a2` Critical/High GitHub Security
   Advisory affected ranges from `<0.9.0a2` to `==0.9.0a1`, matching the
   reset-line vulnerable artifact and preventing false-positive Dependabot
