@@ -125,16 +125,16 @@ features:
     feature_record: features/eval-harness/README.md
     feature_type: tooling
     default_surface: internal
-    implementation_path: experimental/eval-harness
+    implementation_path: eval
     package: none
     release_lines:
       - "v0.9.0a1"
-      - "0.9.xA"
+      - "v0.9.0a11"
     spec_section: (tooling)
     stability: experimental
     requires:
       node: "experimental"
-    notes: "Deferred concept-only evaluation tooling; runnable harness, corpus, CI, and live-node validation remain future alpha work."
+    notes: "Active internal evaluation tooling for the a11 foundation lane; standalone package publication remains deferred."
 
   - id: deploy-helm
     name: Helm deployment

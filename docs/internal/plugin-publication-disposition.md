@@ -24,6 +24,7 @@ create package promises, or graduate any feature under ADR-008.
 | `published` | Meets the plugin publication contract, has maintainer clearance, and has completed the approved registry action. | Keep post-publication evidence current; future versions follow the recorded release workflow. |
 | `publish-now` | Meets the plugin publication contract and has maintainer clearance. | May move to Goal 5 dry-run and publication clearance. |
 | `hold` | Real implementation/package surface exists, but release-line validation is incomplete. | Do not publish until the named gaps close. |
+| `internal` | Real implementation exists as internal repo tooling, not a standalone plugin/package publication target for the active track. | Keep validation evidence current; do not publish in this milestone. |
 | `defer` | Not a standalone plugin publication target for the active track. | Do not publish in this milestone. |
 
 The MCP adapter is classified as `published` after maintainer clearance,
@@ -53,7 +54,7 @@ publication PRs land.
 | Surface | Feature record | Implementation | Disposition | Reason |
 | --- | --- | --- | --- | --- |
 | Dashboard | `features/dashboard/` | `experimental/dashboard/` | `defer` | Internal/deployment surface, not a standalone plugin artifact; live-node, auth/session, dependency, and deployment posture gates remain open. |
-| Evaluation harness | `features/eval-harness/` | `experimental/eval-harness/` | `defer` | Concept-only in the current repository state; no runnable harness/corpus package exists. |
+| Evaluation harness | `features/eval-harness/` | `eval/` | `internal` | Active internal evaluation tooling for the a11 foundation lane; not a standalone plugin/package publication target yet. |
 | Fly.io deployment helper | `features/deploy-fly/` | `experimental/deploy-fly/` | `defer` | Deployment recipe, not plugin artifact; live deployment, persistence/restore, secrets, and dashboard validation remain open. |
 | PaaS deployment helper | `features/deploy-paas/` | `experimental/deploy-paas/` | `defer` | Deployment recipes, not plugin artifacts; live platform, persistence, secrets, scaling, and cost validation remain open. |
 | systemd deployment helper | `features/deploy-systemd/` | `experimental/deploy-systemd/` | `defer` | Deployment helper, not plugin artifact; live distro, hardening, upgrade/rollback, and offline-install validation remain open. |

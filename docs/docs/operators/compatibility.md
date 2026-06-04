@@ -106,7 +106,7 @@ compatibility remains in [`docs/compatibility-matrix.yaml`](https://github.com/e
 | [Content-addressed fact IDs](https://github.com/eidetic-labs/stigmem/blob/main/features/content-addressed-ids/README.md) | core | stable / default | `v0.9.0a1`, `v0.9.0a3` | `stigmem-node`; `node/src/stigmem_node/cid.py` |
 | [Dashboard](https://github.com/eidetic-labs/stigmem/blob/main/features/dashboard/README.md) | tooling | experimental / internal | `v0.9.0a1`, `0.9.xA` | `dashboard`; `experimental/dashboard` |
 | [Decay semantics](https://github.com/eidetic-labs/stigmem/blob/main/features/decay/README.md) | protocol | experimental / opt-in | `v0.9.0a1`, `0.9.xA` | `experimental/decay` |
-| [Evaluation harness](https://github.com/eidetic-labs/stigmem/blob/main/features/eval-harness/README.md) | tooling | experimental / internal | `v0.9.0a1`, `0.9.xA` | `experimental/eval-harness` |
+| [Evaluation harness](https://github.com/eidetic-labs/stigmem/blob/main/features/eval-harness/README.md) | tooling | experimental / internal | `v0.9.0a1`, `v0.9.0a11` | `eval` |
 | [Fly.io deployment](https://github.com/eidetic-labs/stigmem/blob/main/features/deploy-fly/README.md) | deployment | experimental / external | `v0.9.0a1`, `0.9.xA` | `stigmem`; `experimental/deploy-fly` |
 | [Fuzzy resolver](https://github.com/eidetic-labs/stigmem/blob/main/features/fuzzy-resolver/README.md) | core | experimental / opt-in | `v0.9.0a1`, `0.9.xA` | `stigmem-node`; `node/src/stigmem_node/recall/entity_resolver.py` |
 | [Grafana deployment](https://github.com/eidetic-labs/stigmem/blob/main/features/deploy-grafana/README.md) | deployment | experimental / external | `v0.9.0a1`, `0.9.xA` | `experimental/deploy-grafana` |
