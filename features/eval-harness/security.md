@@ -11,8 +11,8 @@ evidence, not a stable external certification surface.
 | Internal surface | The harness remains in-repo internal tooling with no standalone package publication. | `features/eval-harness/status.md`; `docs/internal/plugin-publication-disposition.md` |
 | Adversarial scope | The corpus covers typo-squatting, contradiction floods, tombstone bypass, capability-token forgery, and sanitizer bypass. | `eval/corpus/adversarial/**/scenarios.json`; `eval/test_adversarial.py` |
 | Credential handling | Live-node runs use `STIGMEM_EVAL_URL` and optional `STIGMEM_EVAL_API_KEY`; default runs use an in-process TestClient. | `eval/README.md`; `eval/harness/utils.py`; `eval/conftest.py` |
-| Artifact handling | Per-run results under `eval/results/` are ignored except for intentionally tracked seed evidence. | `.gitignore`; `eval/results/.gitkeep`; `eval/results/ci-0b1a76a.*`; `eval/results/consecutive_failures.txt` |
-| CI scope | The fast harness is path-filtered to eval, node, SDK, spec, and conformance changes. | `.github/workflows/eval-fast.yml` |
+| Artifact handling | Per-run results under `eval/results/` are ignored except for intentionally tracked seed evidence, and release readiness rejects unapproved tracked result files. | `.gitignore`; `eval/results/.gitkeep`; `eval/results/ci-0b1a76a.*`; `scripts/check_release_readiness.py` |
+| CI scope | The fast harness is path-filtered to eval, eval-harness feature records, Make target, node, SDK, spec, and conformance changes. | `.github/workflows/eval-fast.yml` |
 
 ## Security References
 

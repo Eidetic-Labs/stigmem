@@ -19,10 +19,14 @@ make eval-recall        # 400 recall probes only
 make eval-fast-baseline
 ```
 
-Results land in `eval/results/` as JSON + markdown:
+Per-run results land in `eval/results/` as ignored JSON, markdown, and log
+artifacts:
 - `adversarial-<git-sha>.log`
 - `recall-<git-sha>.log`
 - `ci-<git-sha>.json` + `ci-<git-sha>.md` (from the recall benchmark)
+
+The only tracked files in `eval/results/` are seed evidence files that are
+explicitly allowed by the release-readiness gate.
 
 ## Running against a live node
 
@@ -59,9 +63,11 @@ eval/
     utils.py                # shared: HTTP client, corpus loader, metric helpers
 ```
 
-## CI gates
+## CI Gates
 
-The `eval-fast` job runs on every PR via `.github/workflows/eval-fast.yml`.
+The `eval-fast` job runs on pull requests when relevant eval, node, SDK, spec,
+conformance, or eval-harness feature-record surfaces change. The path filter is
+defined in `.github/workflows/eval-fast.yml`.
 
 **Adversarial gates** — CI fails immediately if any scenario fails its pass criterion:
 
@@ -73,7 +79,10 @@ The `eval-fast` job runs on every PR via `.github/workflows/eval-fast.yml`.
 | Capability-token forgery | 15 | 403/401; zero fact data in response |
 | Sanitizer bypass | 25 | 400 or stored sanitised |
 
-**Recall regression gate** — nDCG@10 drop ≥ 3% relative triggers a warning on the first failure, and blocks CI on the second consecutive failure. The counter resets on any passing run (`eval/results/consecutive_failures.txt`).
+**Recall regression gate** — once `baseline.json` records a non-zero nDCG@10
+baseline, an nDCG@10 drop of 3% or more fails the eval run immediately. The
+current bootstrap baseline is zero, so corpus shape and report generation are
+validated while recall-quality blocking waits for a maintainer-frozen baseline.
 
 ## Probe classes (400 total)
 

@@ -25,12 +25,17 @@ jobs:
           filters: |
             eval:
               - ".github/workflows/eval-fast.yml"
+              - "Makefile"
               - "pyproject.toml"
               - "uv.lock"
               - "conftest.py"
               - "eval/**"
+              - "experimental/eval-harness/**"
+              - "features/eval-harness/**"
               - "node/**"
               - "sdks/stigmem-py/**"
+              - "scripts/validate_adversarial_corpus.py"
+              - "scripts/validate_adversarial_results.py"
               - "spec/**"
               - "data/conformance/**"
 

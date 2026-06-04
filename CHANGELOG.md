@@ -11,11 +11,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ### Changed
 
+- Tightened the a11 eval-harness quality gate documentation and release
+  readiness posture around `make eval-fast`, path-filtered CI, recall baseline
+  behavior, and generated eval result artifacts.
 - Opened the post-`v0.9.0a10` release-prep lane after the adapter publication
   batch.
 
 ### Fixed
 
+- Removed stale recall consecutive-failure wording and tracked state now that
+  recall regressions block immediately once a non-zero baseline is frozen.
 - Made the tag coverage workflow tolerate the release-creation race by keeping
   the generated artifacts and coverage branch green when `coverage.xml` cannot
   be attached to the GitHub release before the publish workflow creates it.
