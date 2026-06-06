@@ -207,11 +207,18 @@ of the v1.0 critical path because R-23 mitigation depends on them.
 
 </div>
 
-The CID computation covers: `entity`, `relation`, `value_type`,
-`value_v`, `source`, `timestamp`, **`interpret_as`** (added per
-ADR-003), `scope`. Mutation of any of these by an attacker breaks the
-CID — including the critical case of changing `interpret_as` from
-`content` to `instruction`.
+The CID computation covers exactly seven fields (spec §25.2.1; see
+`node/src/stigmem_node/cid.py`): `confidence`, `entity`, `relation`,
+`scope`, `source`, `value_type`, `value_v`. Mutation of any of these by
+an attacker breaks the CID.
+
+**Known gap (R-23 / ADR-003): `interpret_as` is NOT currently covered by
+the CID** (nor is `timestamp`). The critical attack this ADR cites —
+flipping `interpret_as` from `content` to `instruction` — is therefore
+*not* detected by a CID mismatch today. Because `interpret_as` is
+load-bearing for ADR-003's prompt-injection defense, adding it to the
+canonical CID body is required hardening (a wire-format change tracked
+in the tamper-evidence hardening plan).
 
 ### Layer 4 (L4) · Local hash chain
 
@@ -493,6 +500,21 @@ rule. Common amendment cases: changing the layer composition (e.g.,
 dropping a layer); changing the witness service away from Rekor;
 changing default verification posture (verify-by-default vs. opt-in);
 adding hardware enforcement requirements at the protocol level.
+
+## Amendments
+
+- **2026-06-06 — tamper-evidence verification correction.** A read-only audit
+  of the L1–L5 stack found this ADR overstated CID field coverage: the
+  implemented CID (`cid.py`, spec §25.2.1) covers seven fields
+  (`confidence`, `entity`, `relation`, `scope`, `source`, `value_type`,
+  `value_v`) and does **not** cover `interpret_as` or `timestamp`. The L3
+  section above is corrected accordingly. The same audit confirmed L4 (hash
+  chain) and L5 (checkpoints) are **unsigned** and the default external anchor
+  is a local file, so the stack is tamper-evident against application-level and
+  non-privileged tampering but not against an attacker with DB write access in
+  the default configuration. Closing that gap (out-of-band signing,
+  default/enforced external anchor, SDK verify-by-default, and `interpret_as`
+  CID coverage) is tracked in the tamper-evidence hardening plan.
 
 ---
 

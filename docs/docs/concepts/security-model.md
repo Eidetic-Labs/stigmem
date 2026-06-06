@@ -120,9 +120,10 @@ is `confidence × t`.
 Itself a Memory Garden (Spec-02-Scopes-and-ACL) with admin-only ACL
 — operators triage, accept, or reject quarantined writes from a
 single dashboard. Facts also accumulate
-<code>derived_from: [fact_hash...]</code> and
-<code>attestation_chain: [signature...]</code> for tamper-evident
-audit.
+<code>derived_from: [fact_hash...]</code>, and — when agent-keypair
+attestation is enabled (opt-in per assertion) —
+<code>attestation_chain: [signature...]</code> for signed source
+provenance.
 
 </div>
 
