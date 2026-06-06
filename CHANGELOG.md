@@ -16,6 +16,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
   behavior, and generated eval result artifacts.
 - Opened the post-`v0.9.0a10` release-prep lane after the adapter publication
   batch.
+- **ADR consolidation + de-contrition.** Consolidated the ADR set from 20 to 10
+  living records (amendments/clusters folded into their surviving ADR;
+  superseded originals retained in `docs/adr/archive/`), and removed the
+  post-v1.0-retraction "contrition" framing from the public docs while keeping
+  the honest per-scenario scoping. The `0.x` version line is the sole
+  pre-stability signal. Added `scripts/check_adr_references.py` as a CI guard
+  against dangling/stale ADR references.
+- **ADRs are now living documents** (previously: immutable after acceptance).
+  Editorial edits are made in place — git holds the history; material decision
+  changes are recorded as dated `## Amendments` entries, never silent
+  overwrites — mirroring Stigmem's own supersede-with-a-record model for facts.
+- **Feature graduation Gate 4** (ADR-008) changed from a mandatory 30-day
+  external-operator soak to an internal-quality bar; external-operator
+  validation relocated to the 1.0 GA stability gate (ADR-001).
 
 ### Fixed
 
