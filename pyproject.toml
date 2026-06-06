@@ -163,6 +163,9 @@ dev = [
   "types-PyYAML>=6.0",
   "bandit>=1.7",
   "pip-audit>=2.7",
+  # pip is present in the resolved environment; pin past PYSEC-2026-196
+  # (fixed in 26.1.2) so the pip-audit gate sees a patched pip.
+  "pip>=26.1.2",
   "hypothesis>=6.100",
 ]
 
