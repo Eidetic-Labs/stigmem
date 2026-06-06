@@ -124,6 +124,35 @@ advanced ACL plugin is not registered. See
 [`features/memory-garden-acl/security.md`](features/memory-garden-acl/security.md)
 for the full feature-owned disposition.
 
+## Dependency Advisory — Hono + pip (2026-06-06)
+
+Two Moderate dependency advisories were cleared ahead of the next release line.
+
+**Hono (4 Moderate advisories).** At the locked `hono@4.12.18`, `pnpm audit`
+flagged: IP-restriction middleware bypassing static deny rules; the cookie
+helper not sanitizing `sameSite`; JWT middleware accepting any `Authorization`
+scheme; and `app.mount()` stripping the mount prefix using an undecoded path.
+Hono is the HTTP framework for the TypeScript MCP adapter (`adapters/mcp`); it
+is not used by the Python reference node or the SDKs. Remediation: the `hono`
+workspace override was raised from `>=4.12.18` to `>=4.12.23` in both
+`pnpm-workspace.yaml` and `package.json`, and the lockfile resolves
+`hono@4.12.23`. `pnpm audit --audit-level=moderate` reports no known
+vulnerabilities.
+
+**pip — PYSEC-2026-196.** The `pip` resolved into the `uv` build/audit
+environment was `26.1` (fixed in `26.1.2`). This is developer/CI build
+tooling, not a published Stigmem runtime dependency — no shipped artifact
+embeds `pip`. Remediation: `pip>=26.1.2` is pinned in the `dev` dependency
+group so the `pip-audit` gate's environment uses the patched release;
+`pip-audit` then reports no known vulnerabilities.
+
+Publication disposition: documented here per the Medium/Low publication policy.
+No Stigmem GHSA is opened — both upstream advisories are already public, both
+dependencies are patched before the next release, and neither vulnerable code
+path is reachable through a supported Stigmem runtime endpoint (Hono affects
+the MCP adapter's HTTP surface, mitigated by the version bump; pip is
+build-time tooling only). Both fixes landed via PR #702.
+
 ## Security Posture — v0.9.0a10 (2026-05-26)
 
 `v0.9.0a10` is the adapter-batch publication alpha release. It packages the
