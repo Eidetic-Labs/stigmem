@@ -129,7 +129,7 @@ feature.
 <small>Phases and stability commitments.</small>
 </a>
 
-<a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md">
+<a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/013-deprecation-policy.md">
 <strong>ADR-008 §Deprecation policy</strong>
 <span>Deprecation policy</span>
 <small>Lifecycle and required artifacts.</small>

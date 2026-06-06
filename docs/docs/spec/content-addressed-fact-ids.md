@@ -28,7 +28,7 @@ which is core behavior per ADR-011. Content-addressed fact IDs
 <small>Component spec: CID format, canonical body, alias persistence, federation handoff.</small>
 </a>
 
-<a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/017-amendment-to-adr-011-cids-as-core.md">
+<a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/017-amendment-to-adr-011-cids-as-core.md">
 <strong>ADR-011</strong>
 <span>CIDs as core</span>
 <small>Amendment to ADR-011 moving CIDs from plugin to core.</small>

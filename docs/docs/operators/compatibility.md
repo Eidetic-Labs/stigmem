@@ -202,8 +202,8 @@ for the architectural-gap acknowledgment.
 <div className="stigmem-grid">
 
 <div><h4>Source-of-truth YAML</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/compatibility-matrix.yaml"><code>docs/compatibility-matrix.yaml</code></a></p></div>
-<div><h4>ADR-020 §10 (compatibility matrix)</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/014-compatibility-matrix.md">Compatibility matrix</a></p></div>
-<div><h4>ADR-008 §Deprecation policy</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md">Deprecation policy</a></p></div>
+<div><h4>ADR-020 §10 (compatibility matrix)</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/014-compatibility-matrix.md">Compatibility matrix</a></p></div>
+<div><h4>ADR-008 §Deprecation policy</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/013-deprecation-policy.md">Deprecation policy</a></p></div>
 <div><h4>Commitment</h4><p><a href="../security/compatibility-commitment.md">Compatibility commitment</a> — written commitment scaled to v0.9.0a1.</p></div>
 
 </div>

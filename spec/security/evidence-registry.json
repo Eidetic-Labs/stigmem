@@ -71,7 +71,7 @@
         "spec/security/threat-model.md",
         "spec/security/federation-control-review.md",
         "docs/docs/security/key-rotation.md",
-        "docs/adr/007-argon2id.md"
+        "docs/adr/archive/007-argon2id.md"
       ],
       "review_decision": "accept-as-is",
       "notes": "Current mitigation includes enforced expiry/max-age plus alpha-line Argon2id API-key hashing. Legacy SHA-256 rows verify during the v0.9.x migration window and opportunistically rehash to Argon2id with an api_key_rehashed audit event."
@@ -242,7 +242,7 @@
         "spec/security/threat-model.md",
         "docs/docs/security/scenarios.md",
         "docs/adr/003-prompt-injection.md",
-        "docs/adr/018-security-documentation-colocation.md"
+        "docs/adr/archive/018-security-documentation-colocation.md"
       ],
       "review_decision": "patch",
       "notes": "Cross-cutting risk spanning prompt-injection capability separation, read/write graph isolation, adapter hardening, and federation egress. Structural controls landed across #371 and #394: session read/write graph isolation, provenance summaries, supported SDK/adapter session propagation, and outbound pull exclusion for provenance-derived facts. Remains in review until release certification and operator validation complete."

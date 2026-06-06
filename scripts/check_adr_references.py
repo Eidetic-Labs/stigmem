@@ -85,6 +85,13 @@ SKIP_SUFFIXES = {
 
 ADR_REF = re.compile(r"ADR-0(\d\d)\b")
 
+# Path reference to an ADR *file*, e.g. ``docs/adr/007-argon2id.md`` or
+# ``docs/adr/archive/007-argon2id.md``. group(1) is ``archive/`` when the path
+# already points at the frozen copy; group(2) is the number. This catches stale
+# file-path references (in JSON registries, link hrefs, etc.) to ADRs that were
+# moved to ``archive/`` — a class the ``ADR-0NN`` token regex alone misses.
+ADR_PATH_REF = re.compile(r"adr/(archive/)?0(\d\d)-[A-Za-z0-9._-]+\.md")
+
 # A living ADR line is a fold/supersession bookkeeping line when it mentions any
 # of these tokens (case-insensitive). Such lines are allowed to name folded
 # numbers because that *is* their purpose.
@@ -207,7 +214,7 @@ def check_paths(paths: list[Path]) -> list[str]:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if "ADR-0" not in text:
+        if "ADR-0" not in text and "adr/0" not in text:
             continue
 
         is_living_doc = _is_living_adr_doc(path)
@@ -263,6 +270,30 @@ def check_paths(paths: list[Path]) -> list[str]:
                     f"{display}:{index}: stale reference to folded ADR-0{number} "
                     f"(redirect to its surviving ADR): {line.strip()}"
                 )
+
+            for pmatch in ADR_PATH_REF.finditer(line):
+                points_at_archive = pmatch.group(1) is not None
+                pnum = pmatch.group(2)
+                if points_at_archive or pnum in living:
+                    # Frozen-copy path, or a surviving ADR still at docs/adr/0NN- — fine.
+                    continue
+                if in_archived_section or _is_bookkeeping_line(line):
+                    continue
+                try:
+                    display = path.relative_to(ROOT).as_posix()
+                except ValueError:
+                    display = path.as_posix()
+                if pnum not in resolvable:
+                    failures.append(
+                        f"{display}:{index}: dangling ADR file path docs/adr/0{pnum}-... "
+                        f"(no such ADR): {line.strip()}"
+                    )
+                else:
+                    failures.append(
+                        f"{display}:{index}: stale path to moved ADR file "
+                        f"docs/adr/0{pnum}-... (now under docs/adr/archive/): "
+                        f"{line.strip()}"
+                    )
 
     return failures
 
