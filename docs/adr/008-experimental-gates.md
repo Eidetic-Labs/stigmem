@@ -516,6 +516,18 @@ After v1.0.0 GA, the first feature to attempt re-introduction will
 road-test the process. Lessons learned from that road-test feed an
 ADR-008 amendment if needed.
 
+## Amendments
+
+- **2026-06-06 — de-contrition consolidation.** Gate 4 changed from a mandatory
+  30-day external-operator soak to an internal-quality bar (eval/regression
+  harness green + structural CI guards + immutability/provenance/audit
+  invariants preserved); external-operator validation relocated to the 1.0 GA
+  stability gate in ADR-001. Folded in ADR-012 (version-aware feature exposure)
+  and ADR-013 (deprecation policy). Rationale: the external-soak precondition
+  deadlocked pre-1.0 graduation — nothing could graduate until an external
+  tester existed, and testers won't engage features held in `experimental/`.
+  The `0.x` version line is the pre-stability signal.
+
 ---
 
 *Accepted by: @offbyonce (founder), 2026-05-07. Per ADR-001 §Contributor

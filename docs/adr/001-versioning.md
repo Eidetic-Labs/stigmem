@@ -433,6 +433,14 @@ PR.
 
 These are deferred to follow-up ADRs as the questions become live.
 
+## Amendments
+
+- **2026-06-06 — de-contrition consolidation.** Folded in ADR-019 (PEP 440
+  alpha/beta/rc prerelease string convention, now canonical; the
+  `v0.9.0-preview` literal is retired). Added the §1.0 GA stability gate:
+  external-operator validation is a precondition for declaring 1.0 stability,
+  relocated here from the per-feature graduation gates in ADR-008.
+
 ---
 
 *Accepted by: @offbyonce (founder), 2026-05-07. Per ADR-001 §Contributor

@@ -1,24 +1,28 @@
 # Architecture Decision Records (ADRs)
 
-<p className="stigmem-meta"><span>4 min read</span><span>Reference</span><span>Updated 2026-05-19</span></p>
+<p className="stigmem-meta"><span>4 min read</span><span>Reference</span><span>Updated 2026-06-06</span></p>
 
 <div className="stigmem-lead">
 
 **What you'll find here**
 
 The full ADR index, the format Stigmem ADRs follow, the lifecycle
-rules, and when to write a new one. ADRs are immutable after
-acceptance — supersession is how the record evolves.
+rules, and when to write a new one. ADRs are living documents — git
+holds the full history, and a material decision change is recorded as
+a visible dated amendment (or a superseding ADR), never a silent
+overwrite.
 
 </div>
 
 <div className="stigmem-keypoint">
 
-**One decision per ADR. Immutable after acceptance.**
+**One decision per ADR. Revise in the open — never silently overwrite a decision.**
 
-When circumstances change, write a new ADR that supersedes the old
-one. Don't edit an accepted ADR — that breaks the institutional
-memory the format exists to preserve.
+Editorial changes (framing, folding, fixing stale references) are made
+in place; git holds the full history. A material *decision* change is
+recorded visibly — a dated `## Amendments` entry in the ADR, or a new
+superseding ADR for a large reversal. This is the same model Stigmem
+applies to facts: revisable, but supersession always leaves a record.
 
 </div>
 
@@ -27,7 +31,7 @@ memory the format exists to preserve.
 **ADR** stands for **Architecture Decision Record** (sometimes
 "Architectural Decision Record" — the terms are interchangeable).
 
-An ADR is a short, dated, immutable document that captures **a single
+An ADR is a short, dated, versioned document that captures **a single
 significant decision**, why we made it, what alternatives we
 considered, and what the consequences are. ADRs live in the repo
 under `docs/adr/`, are numbered sequentially (`ADR-001`, `ADR-002`,
@@ -97,11 +101,11 @@ Be honest about the costs. ADRs that only list benefits are marketing docs.
 ## Rules
 
 <ol className="stigmem-steps">
-<li><strong>ADRs are immutable after acceptance.</strong> When circumstances change, write a new ADR that supersedes the old one. Don't edit an accepted ADR.</li>
+<li><strong>ADRs are living; decisions are never silently overwritten.</strong> Editorial edits are made in place (git is the history). A material decision change is recorded as a dated <code>## Amendments</code> entry in the ADR, or a superseding ADR for a large reversal.</li>
 <li><strong>One decision per ADR.</strong> Two related decisions get two ADRs that reference each other.</li>
 <li><strong>Specific over abstract.</strong> ADRs that describe a <em>concrete</em> decision survive contact with implementation. ADRs that describe a <em>direction</em> don't.</li>
 <li><strong>Numbered sequentially, never reused.</strong> If <code>ADR-005</code> is rejected, the number is still retired. Future ADRs are <code>ADR-006</code> onwards.</li>
-<li><strong>Status changes are themselves a decision.</strong> When an ADR moves from <code>Accepted</code> to <code>Superseded</code>, the new ADR captures that change with a <code>Supersedes:</code> reference.</li>
+<li><strong>Status and decision changes are recorded, not silent.</strong> When an ADR is superseded, the new ADR captures that with a <code>Supersedes:</code> reference; when a living ADR's decision changes in place, it gets a dated <code>## Amendments</code> entry.</li>
 <li><strong>Approval: two contributors or the founder alone.</strong> Founder solo-approval exists because the project has a small team. When the founder signs off alone, they take responsibility for the validation discipline that two-person review otherwise provides. See ADR-001 § <em>Contributor approval rule</em> for the full statement.</li>
 </ol>
 

@@ -591,3 +591,11 @@ This ADR is implemented when:
 - High-level docs link to feature records instead of duplicating feature detail
   where practical.
 - Migration sequencing is tracked outside the ADR.
+
+## Amendments
+
+- **2026-06-06 — de-contrition consolidation.** Status moved Proposed → Accepted
+  (the feature-record and projection tooling already ships). Folded in ADR-005
+  (docs IA), ADR-009 (repository structure), ADR-010 (modular per-topic specs),
+  ADR-014 (compatibility matrix), and ADR-018 (security-documentation
+  colocation), retaining each one's mechanics.
