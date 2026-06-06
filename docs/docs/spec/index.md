@@ -16,7 +16,7 @@ sidebar_position: 6
 
 A navigator that maps every legacy section-based docs page to its
 maintained component spec home. Section-based pages remain
-compatibility entry points for older links while ADR-010 extraction
+compatibility entry points for older links while ADR-020 §9 (modular specs) extraction
 finishes.
 
 </div>
@@ -190,7 +190,7 @@ Report vulnerabilities via the
 <div>
 <dt><a href="./content-addressed-fact-ids">Content-Addressed Fact IDs</a></dt>
 <dt><span className="stigmem-fields__type"><a href="./specs/content-addressed-ids">Spec-21-Content-Addressed-IDs</a></span></dt>
-<dd>Core CIDs per ADR-017.</dd>
+<dd>Core CIDs per ADR-011.</dd>
 </div>
 
 </div>

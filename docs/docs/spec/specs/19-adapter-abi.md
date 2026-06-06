@@ -31,7 +31,7 @@ component specs.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for the adapter ABI.
+This file contains the ADR-020 §9 (modular specs) prose extraction for the adapter ABI.
 
 Legacy version labels from archived source material are normalized
 to the current `v0.9.0a1` protocol line here. Historical wording

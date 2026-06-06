@@ -19,7 +19,7 @@ opened.
 | --- | --- | --- | --- |
 | Supply-chain evidence | Sigstore, reproducible-source evidence, SBOM, Rekor/operator verification | Publishing stable releases before hardened-core exit | #440 |
 | External adoption | 3+ external organizations with pairwise federation and review posture | Internal-only validation as GA evidence | #441 |
-| Compatibility | Wire-format freeze and v1.x compatibility commitment | Premature v1.0.0 promises | ADR-013, #442 |
+| Compatibility | Wire-format freeze and v1.x compatibility commitment | Premature v1.0.0 promises | ADR-008 §Deprecation policy, #442 |
 
 ## Detailed Scope
 
@@ -43,7 +43,7 @@ opened.
 
 RC/GA entry is blocked on hardened-core exit. Stable release claims require
 wire-format commitment, supply-chain evidence, external operator evidence, and
-the compatibility commitment required by ADR-013.
+the compatibility commitment required by ADR-008 §Deprecation policy.
 
 ## Evidence Gates
 
@@ -51,7 +51,7 @@ the compatibility commitment required by ADR-013.
 | --- | --- | --- |
 | Hardened-core exit | Hardened-core gate complete | Future gate |
 | v1.0.0 stable shipped | Stable tag and release notes | Future gate |
-| Wire format committed | Compatibility commitment doc per ADR-013 honored across v1.x | Future gate |
+| Wire format committed | Compatibility commitment doc per ADR-008 §Deprecation policy honored across v1.x | Future gate |
 | External organizations | 3+ production external operators | Future gate |
 
 ## Release Notes Candidates

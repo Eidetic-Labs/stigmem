@@ -17,7 +17,7 @@ events, validity bounds, and transparency-log evidence used by federation trust.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for manifest publication and
+This file contains the ADR-020 §9 (modular specs) prose extraction for manifest publication and
 verification. It intentionally does **not** define peer admission policy,
 replication authorization, or capability-token grants; those belong in
 `Spec-05-Federation-Trust` and `Spec-06-Capability-Tokens`.

@@ -28,7 +28,7 @@ predictable failure behavior.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for ADR-006 batch
+This file contains the ADR-020 §9 (modular specs) prose extraction for ADR-006 batch
 assert semantics. Batch assert is not part of the `v0.9.0a1` stable
 surface.
 

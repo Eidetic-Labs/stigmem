@@ -46,7 +46,7 @@ Issue #554 validates that CID remains a core feature for the a3 release line:
 
 | Gate | Evidence |
 | --- | --- |
-| Core ownership | `feature_type: core`, `default_surface: default`, ADR-017 reference, and no `stigmem-plugin-cids` package. |
+| Core ownership | `feature_type: core`, `default_surface: default`, ADR-011 reference, and no `stigmem-plugin-cids` package. |
 | Feature-owned spec | `features/content-addressed-ids/spec.md` is canonical; `spec/specs/21-content-addressed-ids.md` points back to it. |
 | Compatibility projection | `docs/compatibility-matrix.yaml` lists `content-addressed-ids` with release lines `v0.9.0a1` and `v0.9.0a3`. |
 | Implementation coverage | Core node, migration, route, CLI, SDK helper, federation, and conformance paths are listed above. |

@@ -20,6 +20,9 @@ could go wrong) and §22.3 (what we record at the event-type level).
 The threat model says what could go wrong. §22.3 says what we record.
 This ADR says **what we monitor, alert on, and respond to**.
 
+Scope note: this is federation-future (roadmap Wave 3) work — it lands
+with cross-organizational federation, not the single-node wedge.
+
 </div>
 
 **Date:** 2026-05-06 · **Authors:** Eidetic Labs · **Related:** threat model §22.3, R-19; `OPERATING.md`; [ADR-002](./002-v1-scope)

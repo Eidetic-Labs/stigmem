@@ -26,7 +26,7 @@ and the convention is already partially violated by core paths.
 
 </div>
 
-**Date:** 2026-05-07 · **Authors:** Eidetic Labs · **Related:** [ADR-001](./001-versioning), [ADR-003](./003-prompt-injection) (load-bearing dependency on immutability), [ADR-011](./011-cross-cutting-extraction), [ADR-017](./017-amendment-to-adr-011-cids-as-core); threat model R-09, **R-23 (admin-level storage tampering)**
+**Date:** 2026-05-07 · **Authors:** Eidetic Labs · **Related:** [ADR-001](./001-versioning), [ADR-003](./003-prompt-injection) (load-bearing dependency on immutability), [ADR-011](./011-cross-cutting-extraction) (CIDs-as-core); threat model R-09, **R-23 (admin-level storage tampering)**
 
 ## Context
 
@@ -202,7 +202,7 @@ recomputed and compared.
 
 **This requires moving CIDs from a plugin (per ADR-011 C1 architecture) back to core.**
 
-ADR-017 commits to that move. CIDs are no longer opt-in; they are part
+ADR-011 commits to that move. CIDs are no longer opt-in; they are part
 of the v1.0 critical path because R-23 mitigation depends on them.
 
 </div>
@@ -271,7 +271,7 @@ this fact's chain index.
 
 Federation peers do this verification automatically on inbound
 replication. Clients can opt in via a `Stigmem-Verify: full` header
-(per ADR-012's `Stigmem-Version` model).
+(per ADR-008 §Version exposure's `Stigmem-Version` model).
 
 <div className="stigmem-keypoint">
 
@@ -329,7 +329,7 @@ Stigmem core ships compatibly with them but does not require them.
 <div>
 <dt>Defer immutability to v2.0; document gap in LIMITATIONS.md</dt>
 <dt><span className="stigmem-fields__type">rejected</span></dt>
-<dd>ADR-003's defenses already accepted with the assumption storage is immutable. Deferring means ADR-003's claims are aspirational, not architecturally enforced. The retraction of v1.0 was caused by exactly this kind of mismatch.</dd>
+<dd>ADR-003's defenses already accepted with the assumption storage is immutable. Deferring means ADR-003's claims are aspirational, not architecturally enforced — a mismatch between claimed and enforced guarantees that the immutability stack exists to close.</dd>
 </div>
 
 <div>
@@ -433,14 +433,14 @@ The immutability stack lands in Phase B. Sequenced to minimize parallel
 risk.
 
 <ol className="stigmem-steps">
-<li><strong>B.1 · ADR-017 amendment to ADR-011 (move CIDs to core).</strong> ~1 day. Lands first because it changes the plugin scope of CIDs.</li>
+<li><strong>B.1 · ADR-011 amendment to ADR-011 (move CIDs to core).</strong> ~1 day. Lands first because it changes the plugin scope of CIDs.</li>
 <li><strong>B.2 · L1 architectural refactor.</strong> ~1–2 weeks. Adds projection tables; refactors all seven mutation paths. CI gate: existing tests pass; new property test verifies <code>facts</code> table only ever sees INSERT.</li>
 <li><strong>B.3 · L2 SQLite triggers.</strong> ~3 days. New migration. CI gate: triggers exercised by negative tests.</li>
 <li><strong>B.4 · L3 CID enforcement.</strong> ~1 week. Per spec §25 design. Verification at read time. CI gate: tamper test mutates a fact's <code>value_v</code> directly via SQL; recall returns integrity error.</li>
 <li><strong>B.5 · L4 hash chain.</strong> ~2 weeks. New <code>fact_chain</code> table; chain computation on every insert; chain proof in recall responses. CI gate: chain-rewrite test detects manual rewrite.</li>
 <li><strong>B.6 · L5 Rekor integration.</strong> ~2–3 weeks. Rekor SDK in node, checkpoint commit (every Nth fact or every 60 seconds), inclusion proof in recall responses, verification helper in SDK, operator runbook for Rekor unavailability.</li>
-<li><strong>B.7 · Client / peer verification.</strong> ~1 week. Verification helpers in Python SDK, federation inbound automatic verification, <code>Stigmem-Verify</code> header support per ADR-012.</li>
-<li><strong>B.8 · Operator hardening doc.</strong> ~3–5 days. <code>docs/Operate/Hardening</code> and <code>docs/Secure/Immutability-and-attestation</code> per ADR-005 IA.</li>
+<li><strong>B.7 · Client / peer verification.</strong> ~1 week. Verification helpers in Python SDK, federation inbound automatic verification, <code>Stigmem-Verify</code> header support per ADR-008 §Version exposure.</li>
+<li><strong>B.8 · Operator hardening doc.</strong> ~3–5 days. <code>docs/Operate/Hardening</code> and <code>docs/Secure/Immutability-and-attestation</code> per ADR-020 §12 (docs IA) IA.</li>
 </ol>
 
 **Total Phase B addition:** ~6–9 weeks.
@@ -450,8 +450,8 @@ risk.
 <div className="stigmem-grid">
 
 <div><h4>ADR-003</h4><p>Storage immutability is named as a precondition; ADR-016 satisfies it. No ADR-003 amendment needed.</p></div>
-<div><h4>ADR-011 via ADR-017</h4><p>CIDs to core. Does not invalidate ADR-011's plugin architecture for the other six features.</p></div>
-<div><h4>ADR-014</h4><p>Compatibility matrix gains a feature row for "storage immutability" with required versions.</p></div>
+<div><h4>ADR-011 via ADR-011</h4><p>CIDs to core. Does not invalidate ADR-011's plugin architecture for the other six features.</p></div>
+<div><h4>ADR-020 §10 (compatibility matrix)</h4><p>Compatibility matrix gains a feature row for "storage immutability" with required versions.</p></div>
 <div><h4>Threat model</h4><p>R-23 added in <code>stigmem/security/threat-model-new-entries.md</code>.</p></div>
 
 </div>

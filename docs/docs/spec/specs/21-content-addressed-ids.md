@@ -35,7 +35,7 @@ lineage.
 
 <div className="stigmem-keypoint">
 
-**CIDs are core Stigmem behavior per ADR-017.**
+**CIDs are core Stigmem behavior per ADR-011.**
 
 They are not an experimental plugin feature, and a conforming
 default node MUST compute CIDs for new facts.

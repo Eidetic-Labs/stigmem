@@ -9,7 +9,7 @@
 | First release | `0.9.0a1` spec lineage |
 | Default surface | `opt-in` |
 
-Decay remains outside the default supported surface per ADR-002 and ADR-009.
+Decay remains outside the default supported surface per ADR-002 and ADR-020 §13 (repo structure).
 The repo contains implementation and test evidence for decay sweep behavior,
 but release-facing support still requires ADR-008 gate completion.
 
@@ -26,7 +26,7 @@ but release-facing support still requires ADR-008 gate completion.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Record stale-data, quota, and tombstone interaction risks. | Partial | `features/decay/security.md` |
-| ADR alignment | Preserve deferred experimental status and Spec-X ownership. | Partial | ADR-002, ADR-008, ADR-010, ADR-020 |
+| ADR alignment | Preserve deferred experimental status and Spec-X ownership. | Partial | ADR-002, ADR-008, ADR-020 §9 (modular specs), ADR-020 |
 | Conformance vectors | Validate sweeper bounds, dry-run, scope, and system-fact exclusions. | Partial | `node/tests/recall/test_synthesis_decay.py` |
 | External operator soak | Validate production-like decay policies. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | In progress | This feature record. |

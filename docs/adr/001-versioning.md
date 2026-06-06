@@ -7,10 +7,12 @@
 **What this ADR decides**
 
 The versioning scheme for Stigmem: SemVer for externally-facing labels
-(`v0.9.0-preview` → `v0.9.x` → `v1.0.0-rc.N` → `v1.0.0` → `v1.x` →
-`v2.0.0-experimental.N`), internal phase markers kept out of public
-surfaces, and a CI gate (`scripts/check_version_consistency.py`) that
-fails any PR introducing version drift.
+using the PEP 440 / semver alpha-beta-rc convention as the canonical
+pre-release spelling (`v0.9.0a1` → `v0.9.0b1` → `v1.0.0rc1` → `v1.0.0`
+→ `v1.x` → `v2.0.0-experimental.N`), internal phase markers kept out of
+public surfaces, and a CI gate (`scripts/check_version_consistency.py`)
+that fails any PR introducing version drift. External operator
+validation is the 1.0 GA stability gate (see §1.0 GA stability gate).
 
 </div>
 
@@ -18,7 +20,7 @@ fails any PR introducing version drift.
 
 **Status: Accepted.**
 
-Amended by [ADR-019](./019-amendment-to-adr-001-prerelease-version-strings) (2026-05-08) — pre-release version-string convention updated from `v0.9.0-preview` to PEP 440 / semver alpha-beta-rc; per-ecosystem spelling spelled out; surface inventory delegated to `release/version-surfaces.yaml`. ADR-001's body is preserved as the historical record of the original decision; readers should consult ADR-019 for the current convention.
+Folds in ADR-019 (de-contrition consolidation, 2026-06-06): the PEP 440 / semver alpha-beta-rc convention is the canonical pre-release spelling — `v0.9.0a1` (alpha) → `v0.9.0b1` (beta) → `v1.0.0rc1` (release candidate) → `v1.0.0` (GA). Git tags use the `v`-prefixed PEP 440 shorthand; tooling emits the bare PEP 440 string (PyPI/pyproject) and the hyphenated semver string (npm/Helm). A normalizer maps both spellings to one canonical key in `scripts/check_version_consistency.py`. The surface inventory lives in `release/version-surfaces.yaml` (validated by `scripts/validate_version_surfaces.py`), not in this ADR. The original [ADR-019](./archive/019-amendment-to-adr-001-prerelease-version-strings) text is retained in `docs/adr/archive/` for history.
 
 </div>
 
@@ -136,21 +138,21 @@ externally-facing version labels.
 </div>
 
 <div>
-<dt><code>v0.9.0-preview</code></dt>
+<dt><code>v0.9.0a1</code> … <code>v0.9.0aN</code></dt>
 <dt><span className="stigmem-fields__type">unstable</span></dt>
-<dd>Hardened-core development; not for adversarial deployment. Breaking changes during the window are expected and called out in the changelog.</dd>
+<dd>Alpha series — the first build line. Pre-stable; not for adversarial deployment. Breaking changes during the window are expected and called out in the changelog.</dd>
 </div>
 
 <div>
-<dt><code>v0.9.x</code></dt>
+<dt><code>v0.9.0b1</code> … <code>v0.9.0bN</code></dt>
 <dt><span className="stigmem-fields__type">unstable</span></dt>
-<dd>Successive preview releases as Phase B work lands.</dd>
+<dd>Beta series as hardened-core work lands.</dd>
 </div>
 
 <div>
-<dt><code>v1.0.0-rc.N</code></dt>
+<dt><code>v1.0.0rc1</code> … <code>v1.0.0rcN</code></dt>
 <dt><span className="stigmem-fields__type">frozen at v1.0</span></dt>
-<dd>Release candidates after Phase B is feature-complete. RC is announced with the start of the 30-day external operator soak. Bug-fixes only.</dd>
+<dd>Release candidates after the beta line is feature-complete. RC is announced alongside the 1.0 GA external-operator validation (see §1.0 GA stability gate). Bug-fixes only.</dd>
 </div>
 
 <div>
@@ -225,6 +227,38 @@ the strengthening plan. They **must not** appear in:
 </div>
 
 </div>
+
+### 1.0 GA stability gate — external operator validation
+
+External operator validation is a precondition for declaring **1.0
+stability**, not for pre-1.0 feature graduation. Pre-1.0 feature
+graduation is governed by the internal-quality bar in
+[ADR-008](./008-experimental-gates); external soak was relocated here
+during the de-contrition consolidation (2026-06-06) because external
+validation gating 1.0 is legitimate, whereas gating every pre-1.0
+graduation deadlocks the roadmap (nothing graduates until external
+testers exist, but external testers won't engage a product whose
+features are all held pre-graduation).
+
+<div className="stigmem-keypoint">
+
+**Declaring `v1.0.0` GA requires external operator validation.**
+
+</div>
+
+<div className="stigmem-grid">
+
+<div><h4>Independent operators</h4><p>At least one external operator (not a stigmem contributor) runs the candidate in a real workload during the RC window, with public bug reporting in the stigmem GitHub issues.</p></div>
+<div><h4>RC-gated</h4><p>The external-operator validation runs against the <code>v1.0.0rcN</code> series — a behaviorally-frozen candidate, not a moving target. GA (<code>v1.0.0</code>) does not ship until the validation closes.</p></div>
+<div><h4>Wire-format freeze</h4><p>The wire format is committed at GA; the external validation is the evidence that the committed surface holds under a workload the authors did not write.</p></div>
+
+</div>
+
+This gate is a **stability-tier** gate: it scales the rigor of
+external sign-off to the version line that actually carries a
+backwards-compatibility promise. Pre-1.0 lines carry no such promise
+(see §Stability commitments per release), so they do not carry the
+external precondition.
 
 ### Version-consistency enforcement
 
@@ -398,6 +432,14 @@ PR.
 </div>
 
 These are deferred to follow-up ADRs as the questions become live.
+
+## Amendments
+
+- **2026-06-06 — de-contrition consolidation.** Folded in ADR-019 (PEP 440
+  alpha/beta/rc prerelease string convention, now canonical; the
+  `v0.9.0-preview` literal is retired). Added the §1.0 GA stability gate:
+  external-operator validation is a precondition for declaring 1.0 stability,
+  relocated here from the per-feature graduation gates in ADR-008.
 
 ---
 

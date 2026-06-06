@@ -32,7 +32,7 @@ Audit logs (plugin registration per ADR-011, PR approval records, ADR sign-off c
 
 When the C1 plugin architecture (ADR-011) ships its production signing infrastructure, **Eidetic Labs** is the default trusted publisher for stigmem core plugins (the seven cross-cutting feature plugins shipped in the v0.9.0aN alpha series). Operators may add additional trusted publishers in their own deployments.
 
-The Sigstore identity mapping for Eidetic Labs is documented separately in `docs/Operate/Plugins/signing.md` (per ADR-005 IA, lands in v0.9.0aN docs work).
+The Sigstore identity mapping for Eidetic Labs is documented separately in `docs/Operate/Plugins/signing.md` (per ADR-020 §12 (docs IA) IA, lands in v0.9.0aN docs work).
 
 ---
 

@@ -1,7 +1,7 @@
 # Stigmem File Structure & Size — Best Practices and Decomposition Plan
 
 > Survey of file-size and structure issues in the current repo, calibrated to industry best practices.
-> Intended as an early hardened-core deliverable in the strengthening plan, sequenced after ADR-009 (repo structure) lands.
+> Intended as an early hardened-core deliverable in the strengthening plan, sequenced after ADR-020 §13 (repo structure) (repo structure) lands.
 
 > 2026-05-17 adoption note: this document preserves the 2026-05-06 baseline
 > analysis that motivated the gate. Several examples in the baseline have since
@@ -46,7 +46,7 @@ A synthesis of widely-adopted conventions:
 
 These thresholds apply to source files. Auto-generated files (TypeScript types from OpenAPI, lock files) are exempt and explicitly identified.
 
-For markdown specs, the same thresholds apply *after* ADR-010 modular-specs decomposition lands. Pre-decomposition, the monolithic spec files are exceptions.
+For markdown specs, the same thresholds apply *after* ADR-020 §9 (modular specs) modular-specs decomposition lands. Pre-decomposition, the monolithic spec files are exceptions.
 
 For tests, the soft limit is doubled (1000 lines) because parameterized test classes can legitimately exceed source-file size for the equivalent surface.
 
@@ -73,12 +73,12 @@ For tests, the soft limit is doubled (1000 lines) because parameterized test cla
 
 | File | Lines | Disposition |
 |---|---|---|
-| `spec/stigmem-spec-v2.0.md` | 3517 | Archive per ADR-010; no decomposition needed |
+| `spec/stigmem-spec-v2.0.md` | 3517 | Archive per ADR-020 §9 (modular specs); no decomposition needed |
 | `spec/stigmem-spec-v1.1-draft.md` | 3508 | Archive (and there's a duplicate copy in `spec/archive/`) |
 | `spec/stigmem-spec-v0.8-draft.md` | 2597 | Archive |
 | Older drafts | 800–1700 | Archive |
 
-The monolithic specs become irrelevant once ADR-010 modular specs land. Each `Spec-NN-Topic-Name.md` is targeted at <500 lines.
+The monolithic specs become irrelevant once ADR-020 §9 (modular specs) modular specs land. Each `Spec-NN-Topic-Name.md` is targeted at <500 lines.
 
 ### Auto-generated files (legitimately large)
 
@@ -239,7 +239,7 @@ node/src/stigmem_node/
 
 After organization, each sub-package contains 3–8 focused files. The top of `node/src/stigmem_node/` shrinks to about 6 files (entrypoint + 4 cross-cutting essentials).
 
-**Effort:** 1 week. This is a substantial refactor that should NOT happen in Phase A of the strengthening plan. Sequence it for v0.9.x, after the experimental cuts (ADR-009 PR 1) and the cross-cutting extractions (ADR-011) have largely landed.
+**Effort:** 1 week. This is a substantial refactor that should NOT happen in Phase A of the strengthening plan. Sequence it for v0.9.x, after the experimental cuts (ADR-020 §13 (repo structure) PR 1) and the cross-cutting extractions (ADR-011) have largely landed.
 
 ---
 
@@ -380,7 +380,7 @@ This work is **not Phase A strengthening-plan work.** It comes after the v0.9.0a
 - Adopt the best-practices doc (drop into the repo).
 - Add `scripts/check_file_sizes.py` as a CI step.
 - Apply `AUTO-GENERATED` markers to existing generated files.
-- Banner the monolithic specs as archive (lands as part of ADR-010 spec decomposition anyway).
+- Banner the monolithic specs as archive (lands as part of ADR-020 §9 (modular specs) spec decomposition anyway).
 
 ### v0.9.x (alongside cross-cutting extractions per ADR-011)
 
@@ -408,4 +408,4 @@ The thresholds exist to make the question routine, not to mandate a specific ans
 
 ---
 
-*This analysis is calibrated to the v0.9.0a1 reset and ADR-009/010/011. As the cross-cutting extractions complete, the file-size landscape changes; revisit the recommendations here at v1.0.0-rc.0.*
+*This analysis is calibrated to the v0.9.0a1 reset and ADR-020 §13 (repo structure)/010/011. As the cross-cutting extractions complete, the file-size landscape changes; revisit the recommendations here at v1.0.0-rc.0.*

@@ -1,4 +1,4 @@
-// Audience taxonomy per ADR-005 + master-checklist §4.3a:
+// Audience taxonomy per ADR-020 (docs IA) + master-checklist §4.3a:
 //   - Evaluator  — first-time visitor assessing whether stigmem fits.
 //   - Integrator — developer writing code against stigmem.
 //   - Operator   — running a node in production.
@@ -6,7 +6,7 @@
 //   - Spec       — protocol contributor or spec implementer.
 //
 // Pre-reset taxonomy was 3 values (Operator/Integrator/Spec); extended to 5
-// during sub-phase 2.5.I per ADR-005 §8.4. Per-page backfill against the new
+// during sub-phase 2.5.I per ADR-020 (docs IA). Per-page backfill against the new
 // 5-value vocabulary is acknowledged as a follow-up sweep; this commit
 // extends the validator to accept the new values without forcing the
 // backfill in one pass.

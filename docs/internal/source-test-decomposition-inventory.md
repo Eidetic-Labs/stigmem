@@ -80,7 +80,7 @@ explicit domain modules such as `stigmem_node.models.facts` or
 the historical broad import path working for external consumers.
 
 Do not add a runtime deprecation warning to `stigmem_node.models` during the
-pre-rc import sweep. Per ADR-013, deprecating a public API surface requires a
+pre-rc import sweep. Per ADR-008 §Deprecation policy, deprecating a public API surface requires a
 release-scoped deprecation PR with replacement guidance and release artifacts.
 The earliest appropriate retirement point for the compatibility shim is a
 future major-version deprecation/removal cycle after v1.0.0 GA.

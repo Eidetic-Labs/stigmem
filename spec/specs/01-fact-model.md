@@ -16,7 +16,7 @@ rules used by the `v0.9.0a1` protocol line.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for the fact model component.
+This file contains the ADR-020 §9 (modular specs) prose extraction for the fact model component.
 It intentionally does **not** include HTTP routes, schema migrations, adapter ABI,
 lint semantics, or CID behavior; those belong in their own component specs.
 Legacy version labels from archived source material are normalized to the

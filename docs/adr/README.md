@@ -1,24 +1,28 @@
 # Architecture Decision Records (ADRs)
 
-<p className="stigmem-meta"><span>4 min read</span><span>Reference</span><span>Updated 2026-05-19</span></p>
+<p className="stigmem-meta"><span>4 min read</span><span>Reference</span><span>Updated 2026-06-06</span></p>
 
 <div className="stigmem-lead">
 
 **What you'll find here**
 
 The full ADR index, the format Stigmem ADRs follow, the lifecycle
-rules, and when to write a new one. ADRs are immutable after
-acceptance — supersession is how the record evolves.
+rules, and when to write a new one. ADRs are living documents — git
+holds the full history, and a material decision change is recorded as
+a visible dated amendment (or a superseding ADR), never a silent
+overwrite.
 
 </div>
 
 <div className="stigmem-keypoint">
 
-**One decision per ADR. Immutable after acceptance.**
+**One decision per ADR. Revise in the open — never silently overwrite a decision.**
 
-When circumstances change, write a new ADR that supersedes the old
-one. Don't edit an accepted ADR — that breaks the institutional
-memory the format exists to preserve.
+Editorial changes (framing, folding, fixing stale references) are made
+in place; git holds the full history. A material *decision* change is
+recorded visibly — a dated `## Amendments` entry in the ADR, or a new
+superseding ADR for a large reversal. This is the same model Stigmem
+applies to facts: revisable, but supersession always leaves a record.
 
 </div>
 
@@ -27,7 +31,7 @@ memory the format exists to preserve.
 **ADR** stands for **Architecture Decision Record** (sometimes
 "Architectural Decision Record" — the terms are interchangeable).
 
-An ADR is a short, dated, immutable document that captures **a single
+An ADR is a short, dated, versioned document that captures **a single
 significant decision**, why we made it, what alternatives we
 considered, and what the consequences are. ADRs live in the repo
 under `docs/adr/`, are numbered sequentially (`ADR-001`, `ADR-002`,
@@ -97,11 +101,11 @@ Be honest about the costs. ADRs that only list benefits are marketing docs.
 ## Rules
 
 <ol className="stigmem-steps">
-<li><strong>ADRs are immutable after acceptance.</strong> When circumstances change, write a new ADR that supersedes the old one. Don't edit an accepted ADR.</li>
+<li><strong>ADRs are living; decisions are never silently overwritten.</strong> Editorial edits are made in place (git is the history). A material decision change is recorded as a dated <code>## Amendments</code> entry in the ADR, or a superseding ADR for a large reversal.</li>
 <li><strong>One decision per ADR.</strong> Two related decisions get two ADRs that reference each other.</li>
 <li><strong>Specific over abstract.</strong> ADRs that describe a <em>concrete</em> decision survive contact with implementation. ADRs that describe a <em>direction</em> don't.</li>
-<li><strong>Numbered sequentially, never reused.</strong> If <code>ADR-005</code> is rejected, the number is still retired. Future ADRs are <code>ADR-006</code> onwards.</li>
-<li><strong>Status changes are themselves a decision.</strong> When an ADR moves from <code>Accepted</code> to <code>Superseded</code>, the new ADR captures that change with a <code>Supersedes:</code> reference.</li>
+<li><strong>Numbered sequentially, never reused.</strong> If an ADR number is rejected or consolidated away, that number is still retired — new ADRs always take the next free number, never a recycled one.</li>
+<li><strong>Status and decision changes are recorded, not silent.</strong> When an ADR is superseded, the new ADR captures that with a <code>Supersedes:</code> reference; when a living ADR's decision changes in place, it gets a dated <code>## Amendments</code> entry.</li>
 <li><strong>Approval: two contributors or the founder alone.</strong> Founder solo-approval exists because the project has a small team. When the founder signs off alone, they take responsibility for the validation discipline that two-person review otherwise provides. See ADR-001 § <em>Contributor approval rule</em> for the full statement.</li>
 </ol>
 
@@ -205,13 +209,6 @@ When referencing, use relative links from the ADR's location.
 <span>Per-peer drift tracking, pull-loop visibility, and the incident-response surface federation operators need.</span>
 </a>
 
-<a className="stigmem-adr-card" href="./005-docs-ia">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-005</span>
-<strong>Documentation information architecture</strong>
-<span>Learn / Build / Operate / Secure as the top-level IA. Lead Secure with the risk register.</span>
-</a>
-
 <a className="stigmem-adr-card" href="./006-batch-assert">
 <span className="stigmem-adr-card__status">Accepted</span>
 <span className="stigmem-adr-card__id">ADR-006</span>
@@ -219,60 +216,18 @@ When referencing, use relative links from the ADR's location.
 <span>Atomic multi-fact write semantics. All-or-nothing commit, single audit entry.</span>
 </a>
 
-<a className="stigmem-adr-card" href="./007-argon2id">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-007</span>
-<strong>Argon2id migration for API key hashing</strong>
-<span>Replacement of the legacy hash with Argon2id; transparent migration on next valid use.</span>
-</a>
-
 <a className="stigmem-adr-card" href="./008-experimental-gates">
 <span className="stigmem-adr-card__status">Accepted</span>
 <span className="stigmem-adr-card__id">ADR-008</span>
-<strong>Re-introduction gates for v2.0.0-experimental features</strong>
-<span>The gates an experimental surface must pass before re-entering the supported core.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./009-repo-structure">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-009</span>
-<strong>Repository structure and execution flow</strong>
-<span>The repo layout — <code>spec/</code>, <code>node/</code>, <code>experimental/</code>, <code>adapters/</code>, <code>sdks/</code>, <code>docs/</code>.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./010-modular-specs">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-010</span>
-<strong>Modular per-topic specs with independent versioning</strong>
-<span>Per-topic spec modules version independently. Each module carries its own changelog and compatibility table.</span>
+<strong>Feature lifecycle, version exposure &amp; deprecation</strong>
+<span>The five graduation gates (Gate 4 is an internal-quality bar), the <code>&lt;Stability/&gt;</code> + version-header exposure model (folds ADR-012), and the <code>stable→deprecated→removed</code> policy (folds ADR-013).</span>
 </a>
 
 <a className="stigmem-adr-card" href="./011-cross-cutting-extraction">
 <span className="stigmem-adr-card__status">Accepted</span>
 <span className="stigmem-adr-card__id">ADR-011</span>
-<strong>Plugin architecture for cross-cutting features (C1)</strong>
-<span>Multi-tenant, billing, source attestation, embeddings → extracted plugin packages with stable registration surface.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./012-version-aware-feature-exposure">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-012</span>
-<strong>Version-aware feature exposure</strong>
-<span>Per-feature minimum version gates, surface manifest delegation, version-aware OpenAPI annotations.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./013-deprecation-policy">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-013</span>
-<strong>Deprecation policy</strong>
-<span>How features deprecate — warning windows, supported-version overlap, and the removal gate.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./014-compatibility-matrix">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-014</span>
-<strong>Compatibility matrix</strong>
-<span><code>docs/compatibility-matrix.yaml</code> as the canonical compatibility table. Node × SDK × adapter version pairs.</span>
+<strong>Plugin architecture &amp; CIDs-as-core (C1)</strong>
+<span>Six cross-cutting plugins with a stable registration surface, plus CIDs as unconditional core (folds ADR-017).</span>
 </a>
 
 <a className="stigmem-adr-card" href="./015-adversarial-conformance-and-model-certification">
@@ -289,35 +244,100 @@ When referencing, use relative links from the ADR's location.
 <span>L1–L5 stack (append-only journal · SQLite triggers · CIDs · local hash chain · Sigstore Rekor) to mitigate admin-level tampering.</span>
 </a>
 
-<a className="stigmem-adr-card" href="./017-amendment-to-adr-011-cids-as-core">
-<span className="stigmem-adr-card__status">Accepted · Amendment</span>
-<span className="stigmem-adr-card__id">ADR-017</span>
-<strong>Amendment: CIDs as core (not plugin)</strong>
-<span>Content-addressable identifiers move out of the plugin layer and into the core fact surface.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./018-security-documentation-colocation">
-<span className="stigmem-adr-card__status">Accepted</span>
-<span className="stigmem-adr-card__id">ADR-018</span>
-<strong>Per-feature security documentation colocation</strong>
-<span>Security notes ship next to the feature they describe — not in a single security appendix.</span>
-</a>
-
-<a className="stigmem-adr-card" href="./019-amendment-to-adr-001-prerelease-version-strings">
-<span className="stigmem-adr-card__status">Accepted · Amendment</span>
-<span className="stigmem-adr-card__id">ADR-019</span>
-<strong>Amendment: PEP 440 / semver alpha-beta-rc convention</strong>
-<span>Per-ecosystem spelling of pre-release labels; surface-manifest delegation; supersedes the original v1 → v0.9.0a1 reset.</span>
-</a>
-
 <a className="stigmem-adr-card" href="./020-feature-owned-product-structure">
-<span className="stigmem-adr-card__status">Proposed</span>
+<span className="stigmem-adr-card__status">Accepted</span>
 <span className="stigmem-adr-card__id">ADR-020</span>
 <strong>Feature-owned product structure and projection model</strong>
-<span>Feature records become the canonical source for specs, status, evidence, security, and feature changelogs; high-level docs become projections or hubs.</span>
+<span>Feature records become the canonical source for specs, status, evidence, security, and feature changelogs; high-level docs become projections or hubs. Folds the docs IA (ADR-005), modular specs (ADR-010), compatibility matrix (ADR-014), and per-feature security taxonomy (ADR-018).</span>
 </a>
 
 </div>
+
+## Archived / superseded
+
+These ADRs were consolidated during the de-contrition pass
+(2026-06-06). Their full text is retained in
+[`docs/adr/archive/`](./archive/) as the historical record. Folded
+ADRs point to the surviving ADR that now carries their substance;
+ADR-007 is an archived settled migration with no fold target.
+
+<div className="stigmem-adr-grid">
+
+<a className="stigmem-adr-card" href="./archive/005-docs-ia">
+<span className="stigmem-adr-card__status">Superseded by ADR-020</span>
+<span className="stigmem-adr-card__id">ADR-005</span>
+<strong>Documentation information architecture</strong>
+<span>Four-tab IA + risk-register-first Secure tab. Folded into ADR-020 §12.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/007-argon2id">
+<span className="stigmem-adr-card__status">Archived</span>
+<span className="stigmem-adr-card__id">ADR-007</span>
+<strong>Argon2id migration for API key hashing</strong>
+<span>Settled one-time SHA-256→Argon2id migration. Durable fact lives in the security feature record.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/009-repo-structure">
+<span className="stigmem-adr-card__status">Superseded by ADR-020</span>
+<span className="stigmem-adr-card__id">ADR-009</span>
+<strong>Repository file structure</strong>
+<span>Top-level layout + adapter/plugin distinction. <code>experimental/</code>→metadata dissolution folded into ADR-020 §13.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/010-modular-specs">
+<span className="stigmem-adr-card__status">Superseded by ADR-020</span>
+<span className="stigmem-adr-card__id">ADR-010</span>
+<strong>Modular per-topic specs with independent versioning</strong>
+<span>Independent-SemVer-per-spec + generated <code>spec/PROTOCOL.md</code>. Folded into ADR-020 §9.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/012-version-aware-feature-exposure">
+<span className="stigmem-adr-card__status">Superseded by ADR-008</span>
+<span className="stigmem-adr-card__id">ADR-012</span>
+<strong>Version-aware feature exposure</strong>
+<span><code>&lt;Stability/&gt;</code> frontmatter + <code>Stigmem-Version</code>/<code>Stigmem-Beta</code> headers. Folded into ADR-008 §Version exposure.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/013-deprecation-policy">
+<span className="stigmem-adr-card__status">Superseded by ADR-008</span>
+<span className="stigmem-adr-card__id">ADR-013</span>
+<strong>Deprecation policy</strong>
+<span>The <code>stable→deprecated→removed</code> version-distance policy. Folded into ADR-008 §Deprecation policy.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/014-compatibility-matrix">
+<span className="stigmem-adr-card__status">Superseded by ADR-020</span>
+<span className="stigmem-adr-card__id">ADR-014</span>
+<strong>Compatibility matrix</strong>
+<span><code>docs/compatibility-matrix.yaml</code> as a projection over feature metadata. Folded into ADR-020 §10.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/017-amendment-to-adr-011-cids-as-core">
+<span className="stigmem-adr-card__status">Superseded by ADR-011</span>
+<span className="stigmem-adr-card__id">ADR-017</span>
+<strong>Amendment: CIDs as core (not plugin)</strong>
+<span>CIDs are unconditional core. Folded into ADR-011's plugins-vs-core scope.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/018-security-documentation-colocation">
+<span className="stigmem-adr-card__status">Superseded by ADR-020</span>
+<span className="stigmem-adr-card__id">ADR-018</span>
+<strong>Per-feature security documentation colocation</strong>
+<span>Owned-vs-contributed risk taxonomy. Folded into ADR-020 §11.</span>
+</a>
+
+<a className="stigmem-adr-card" href="./archive/019-amendment-to-adr-001-prerelease-version-strings">
+<span className="stigmem-adr-card__status">Superseded by ADR-001</span>
+<span className="stigmem-adr-card__id">ADR-019</span>
+<strong>Amendment: PEP 440 / semver alpha-beta-rc convention</strong>
+<span>Per-ecosystem pre-release spelling. Folded into ADR-001 as the canonical convention.</span>
+</a>
+
+</div>
+
+Numbering is not reused: the gaps left by consolidation (005, 007,
+009, 010, 012, 013, 014, 017, 018, 019) stay retired. New ADRs
+continue from ADR-021.
 
 ---
 

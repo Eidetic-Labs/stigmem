@@ -55,6 +55,10 @@ Thumbs.db
 # Local Codex project instructions
 AGENTS.md
 
+# Local agent/session tooling (not project source)
+.codex/
+.superpowers/
+
 # Docker
 *.log
 

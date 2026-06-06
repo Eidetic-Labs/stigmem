@@ -19,7 +19,7 @@ to promote memory into instruction.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for ADR-003 capability-based
+This file contains the ADR-020 §9 (modular specs) prose extraction for ADR-003 capability-based
 instruction handling. The first implementation slice shipped in #373:
 `FactValue.interpret_as` exists, local instruction writes require
 `instruction:write`, and recall preserves instruction/content channels. The

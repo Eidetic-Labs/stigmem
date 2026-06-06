@@ -2,7 +2,7 @@
 title: Compatibility
 sidebar_label: Compatibility
 audience: Operator
-description: Cross-package compatibility matrix per ADR-014.
+description: Cross-package compatibility matrix per ADR-020 §10 (compatibility matrix).
 ---
 
 # Compatibility
@@ -13,7 +13,7 @@ description: Cross-package compatibility matrix per ADR-014.
 
 **What this page covers**
 
-The cross-package compatibility matrix per [ADR-014](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/014-compatibility-matrix.md).
+The cross-package compatibility matrix per [ADR-020](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/020-feature-owned-product-structure.md) §10 (compatibility matrix).
 The source-of-truth YAML is at
 [`docs/compatibility-matrix.yaml`](https://github.com/eidetic-labs/stigmem/blob/main/docs/compatibility-matrix.yaml).
 This page renders the YAML as human-readable tables.
@@ -174,7 +174,7 @@ compatibility remains in [`docs/compatibility-matrix.yaml`](https://github.com/e
 <div>
 <dt>Argon2id API key hashing</dt>
 <dt><span className="stigmem-fields__type">Current alpha line</span></dt>
-<dd>Per <a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/007-argon2id.md">ADR-007</a>; new API keys use Argon2id in the current alpha implementation.</dd>
+<dd>Per <a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/007-argon2id.md">ADR-007</a>; new API keys use Argon2id in the current alpha implementation.</dd>
 </div>
 
 </div>
@@ -202,8 +202,8 @@ for the architectural-gap acknowledgment.
 <div className="stigmem-grid">
 
 <div><h4>Source-of-truth YAML</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/compatibility-matrix.yaml"><code>docs/compatibility-matrix.yaml</code></a></p></div>
-<div><h4>ADR-014</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/014-compatibility-matrix.md">Compatibility matrix</a></p></div>
-<div><h4>ADR-013</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md">Deprecation policy</a></p></div>
+<div><h4>ADR-020 §10 (compatibility matrix)</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/014-compatibility-matrix.md">Compatibility matrix</a></p></div>
+<div><h4>ADR-008 §Deprecation policy</h4><p><a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/archive/013-deprecation-policy.md">Deprecation policy</a></p></div>
 <div><h4>Commitment</h4><p><a href="../security/compatibility-commitment.md">Compatibility commitment</a> — written commitment scaled to v0.9.0a1.</p></div>
 
 </div>

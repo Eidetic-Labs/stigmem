@@ -224,7 +224,7 @@ reassert the correct values.
 
 TLS 1.3 protects the transport when end-to-end. If TLS terminates at
 a proxy, the internal path between proxy and node MUST also be
-encrypted. CIDs (core in v0.9.0a1 per [ADR-017](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/017-amendment-to-adr-011-cids-as-core.md))
+encrypted. CIDs (core in v0.9.0a1 per [ADR-011](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/011-cross-cutting-extraction.md))
 provide tamper detection at the fact level once verification is
 enabled on the read path.
 

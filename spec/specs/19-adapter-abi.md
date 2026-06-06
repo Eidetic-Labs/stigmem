@@ -20,7 +20,7 @@ Stigmem into agent runtimes, tools, and platform hooks.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for the adapter ABI. It focuses
+This file contains the ADR-020 §9 (modular specs) prose extraction for the adapter ABI. It focuses
 on adapter behavior and failure contracts. Protocol-wide conformance vectors
 belong to their owning component specs.
 

@@ -12,7 +12,7 @@ description: >
 
 :::warning Retracted: this v1.0 announcement was withdrawn
 
-This post announced stigmem v1.0 on 2026-05-03. **The v1.0 label was withdrawn shortly after.** The canonical version line of stigmem now begins at `v0.9.0a1` per [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md) and [ADR-019](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md). This post is preserved in place to keep external links from breaking; it is not the current state of the project.
+This post announced stigmem v1.0 on 2026-05-03. **The v1.0 label was withdrawn shortly after.** The canonical version line of stigmem now begins at `v0.9.0a1` per [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md) and [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md). This post is preserved in place to keep external links from breaking; it is not the current state of the project.
 
 For the current posture, the retraction's reasoning, and what changed, see [the retraction post on dev.to](https://dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0) and [LIMITATIONS.md](https://github.com/eidetic-labs/stigmem/blob/main/LIMITATIONS.md).
 

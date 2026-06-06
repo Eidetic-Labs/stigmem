@@ -25,7 +25,7 @@ by the `v0.9.0a1` protocol line.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for the fact model
+This file contains the ADR-020 §9 (modular specs) prose extraction for the fact model
 component. It intentionally does **not** include HTTP routes, schema
 migrations, adapter ABI, lint semantics, or CID behavior; those
 belong in their own component specs.

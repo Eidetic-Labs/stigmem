@@ -4,9 +4,9 @@ This directory contains the canonical specification for the stigmem federated kn
 
 ## Canonical spec
 
-**[`stigmem-spec-v0.9.0a1.md`](stigmem-spec-v0.9.0a1.md)** is the canonical specification as of 2026-05-09. Per [ADR-001](../docs/adr/001-versioning.md) + [ADR-019](../docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md), v0.9.0a1 is the first build of stigmem; the version *markers* on earlier evolutionary checkpoints labeled internal development steps, not tagged releases.
+**[`stigmem-spec-v0.9.0a1.md`](stigmem-spec-v0.9.0a1.md)** is the canonical specification as of 2026-05-09. Per [ADR-001](../docs/adr/001-versioning.md) (versioning + per-ecosystem version-string convention), v0.9.0a1 is the first build of stigmem; the version *markers* on earlier evolutionary checkpoints labeled internal development steps, not tagged releases.
 
-The ADR-010 component specs are the active protocol decomposition. The
+The ADR-020 §9 (modular specs) component specs are the active protocol decomposition. The
 monolithic v0.9.0a1 file remains as the historical disposition map and bridge
 for legacy section numbers.
 
@@ -25,11 +25,11 @@ for legacy section numbers.
 | §22 Security Hardening | Stable | [`specs/09-audit-log.md`](specs/09-audit-log.md), [`specs/10-hardening.md`](specs/10-hardening.md), [`specs/11-replay-protection.md`](specs/11-replay-protection.md) |
 | §23 RTBF Tombstones | Deferred / experimental plugin | [`features/tombstones/spec.md`](../features/tombstones/spec.md) |
 | §24 Time-Travel Queries | Deferred / experimental plugin | [`features/time-travel/spec.md`](../features/time-travel/spec.md) |
-| §25 Content-Addressed Fact IDs (CIDs) | **Stable in core** per [ADR-017](../docs/adr/017-amendment-to-adr-011-cids-as-core.md) | [`features/content-addressed-ids/spec.md`](../features/content-addressed-ids/spec.md) |
+| §25 Content-Addressed Fact IDs (CIDs) | **Stable in core** per [ADR-011](../docs/adr/011-cross-cutting-extraction.md) | [`features/content-addressed-ids/spec.md`](../features/content-addressed-ids/spec.md) |
 
-## Modular spec migration (ADR-010)
+## Modular spec migration (ADR-020 §9 (modular specs))
 
-Per [ADR-010](../docs/adr/010-modular-specs.md), supported component specs live
+Per [ADR-020](../docs/adr/020-feature-owned-product-structure.md) §9 (modular specs), supported component specs live
 under [`spec/specs/`](specs/) with independent versioning. Experimental specs
 remain colocated with their feature code under
 [`experimental/<feature>/spec.md`](../experimental/). [`PROTOCOL.md`](PROTOCOL.md)
@@ -48,8 +48,8 @@ Conformance vectors at `data/conformance/<spec-version>/` — see `data/conforma
 
 - [`spec/stigmem-spec-v0.9.0a1.md`](stigmem-spec-v0.9.0a1.md) — canonical spec
 - [`spec/PROTOCOL.md`](PROTOCOL.md) — generated modular-spec protocol composition
-- [`spec/specs/`](specs/) — ADR-010 core spec files and frontmatter
-- [`experimental/<feature>/spec.md`](../experimental/) — ADR-010 experimental specs and frontmatter
+- [`spec/specs/`](specs/) — ADR-020 §9 (modular specs) core spec files and frontmatter
+- [`experimental/<feature>/spec.md`](../experimental/) — ADR-020 §9 (modular specs) experimental specs and frontmatter
 - [`spec/EVOLUTION.md`](EVOLUTION.md) — development-checkpoint history
 - [`spec/archive/evolution/`](archive/evolution/) — superseded evolutionary snapshots
 - [`spec/security/threat-model.md`](security/threat-model.md) — threat model

@@ -13,9 +13,9 @@ package: stigmem-plugin-lazy-instruction-discovery
 adr_refs:
   - ADR-003
   - ADR-008
-  - ADR-010
+  - ADR-020 §9 (modular specs)
   - ADR-011
-  - ADR-018
+  - ADR-020 §11 (security taxonomy)
   - ADR-020
 security_refs:
   - R-15

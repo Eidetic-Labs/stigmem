@@ -2,7 +2,7 @@
 
 > Public roadmap for stigmem. Milestone-gated, not time-gated — version lines complete when their exit criteria are met.
 >
-> **Current release candidate:** v0.9.0a10. **Active horizon:** adapter batch publication readiness only; no beta, RC, or GA milestone is open (per [ADR-001](docs/adr/001-versioning.md) + [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md)).
+> **Current release candidate:** v0.9.0a10. **Active horizon:** adapter batch publication readiness only; no beta, RC, or GA milestone is open (per [ADR-001](docs/adr/001-versioning.md) (versioning + per-ecosystem version-string convention)).
 > **Last updated:** 2026-05-26.
 
 ---
@@ -22,13 +22,13 @@ shipped.
 
 ## Version-line model
 
-The work is organized into sequential version lines per [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md). Only one alpha artifact refresh is opened as an active release target at a time; future beta, release-candidate, and GA lines stay as policy horizons until alpha exit evidence justifies opening them.
+The work is organized into sequential version lines per [ADR-001](docs/adr/001-versioning.md). Only one alpha artifact refresh is opened as an active release target at a time; future beta, release-candidate, and GA lines stay as policy horizons until alpha exit evidence justifies opening them.
 
 | Version line | Goal |
 |---|---|
-| **`v0.9.0aN` — alpha series** | Public posture matches reality. v0.9.0a1 reset; a2+ artifact refreshes correct ClawHub/OpenClaw alpha framing; docs site restructured; modular spec migration completed per [ADR-010](docs/adr/010-modular-specs.md); cross-cutting features extracted to plugins per [ADR-011](docs/adr/011-cross-cutting-extraction.md). |
-| **Future beta line — hardened core** | Opens only after alpha exit evidence supports it. Every Open risk in the v1.0.0 critical-path threat model must close before beta exit: capability redesign, federation hardening, Argon2id migration, OpenClaw safety, per-feature security colocation, storage immutability stack, and 30-day external operator soak. No active GitHub milestone exists yet. |
-| **Future release-candidate and GA lines** | Opens only after hardened-core exit. Sigstore-signed releases; reproducible builds; SBOM; 3+ external operators in production. Wire format frozen. No active GitHub milestone exists yet. |
+| **`v0.9.0aN` — alpha series** | Single-org, single-node, audit-first scope. Artifact refreshes align ClawHub/OpenClaw alpha framing; docs site restructured; modular spec migration completed per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §9 (modular specs); cross-cutting features extracted to plugins per [ADR-011](docs/adr/011-cross-cutting-extraction.md). |
+| **Future beta line — hardened core** | Opens only after alpha exit evidence supports it. Every Open risk in the v1.0.0 critical-path threat model must close before beta exit: capability redesign, federation hardening, Argon2id migration, OpenClaw safety, and per-feature security colocation. The storage-immutability stack has landed on `main`; remaining hardening (Rekor anchoring cadence, mandatory SDK verify-by-default) continues in this line. No active GitHub milestone exists yet. |
+| **Future release-candidate and GA lines** | Opens only after hardened-core exit. Sigstore-signed releases; reproducible builds; SBOM; external operator validation in production (per [ADR-001](docs/adr/001-versioning.md) 1.0 GA criteria). Wire format frozen. No active GitHub milestone exists yet. |
 | **`v1.x.y` — post-GA expansion** | Experimental features graduate into the supported surface via [ADR-008](docs/adr/008-experimental-gates.md) reintroduction gates; cross-cutting features remain opt-in plugins per ADR-011; modular spec evolution. |
 
 ---
@@ -93,18 +93,18 @@ review checklist live in
 
 ## Spec naming convention
 
-Per [ADR-010](docs/adr/010-modular-specs.md): the canonical spec naming is **`Spec-NN-Topic-Name`** (or **`Spec-XN-Topic-Name`** for experimental specs), with stable two-digit identifiers and descriptive names.
+Per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §9 (modular specs): the canonical spec naming is **`Spec-NN-Topic-Name`** (or **`Spec-XN-Topic-Name`** for experimental specs), with stable two-digit identifiers and descriptive names.
 
 | Prefix | Meaning | Example |
 |---|---|---|
 | `Spec-NN-` | Supported protocol component spec; in-tree at `spec/specs/NN-topic-name.md` | `Spec-01-Fact-Model`, `Spec-09-Audit-Log` |
-| `Spec-XN-` | Experimental spec; lives at `experimental/<feature>/spec.md` per ADR-009's experimental-feature layout | `Spec-X1-Lazy-Instruction-Discovery` |
+| `Spec-XN-` | Experimental spec; lives at `experimental/<feature>/spec.md` per ADR-020 §13 (repo structure)'s experimental-feature layout | `Spec-X1-Lazy-Instruction-Discovery` |
 
 **The number is stable across renames.** If a spec's topic name changes, the number stays. New specs get the next available number; numbers are never reused.
 
 ### Why Legacy Section Numbering Is Still Visible
 
-The pre-reset stigmem spec was a single monolithic document with sections
+The original stigmem spec was a single monolithic document with sections
 numbered 1 through 25. ADR-010 supersedes that model. The supported component
 specs now live under `spec/specs/`, experimental specs live under
 `experimental/<feature>/spec.md`, and `spec/PROTOCOL.md` is generated from
@@ -159,16 +159,16 @@ their frontmatter.
 
 - **Public engineering log:** Friday weekly post in `docs/blog/` (alpha-series onwards).
 - **CHANGELOG.md** at repo root — Keep-a-Changelog format.
-- **GitHub Project — "Stigmem GA Readiness Plan":** [eidetic-labs/projects/1](https://github.com/orgs/eidetic-labs/projects/1) (flips public at v0.9.0a1 retraction).
+- **GitHub Project — "Stigmem GA Readiness Plan":** [eidetic-labs/projects/1](https://github.com/orgs/eidetic-labs/projects/1).
 - **ADR index:** [`docs/adr/README.md`](docs/adr/README.md).
-- **Compatibility matrix** (lands during the future hardened-core line): published at `docs.stigmem.dev/operate/compatibility`.
-- **Model certification list** (lands during the future hardened-core line, per ADR-015): published at `docs.stigmem.dev/secure/model-certification`.
+- **Compatibility matrix** (planned): to be published at `docs.stigmem.dev/operate/compatibility`.
+- **Model certification list** (per [ADR-015](docs/adr/015-adversarial-conformance-and-model-certification.md)): the `corpus-v1` adversarial conformance corpus (80 patterns) and certification runner ship today; the reviewed *public* model-results list is still pending and will be published at `docs.stigmem.dev/secure/model-certification`.
 
 ---
 
 ## Stability commitments by version line
 
-Per [ADR-001](docs/adr/001-versioning.md) + [ADR-013](docs/adr/013-deprecation-policy.md):
+Per [ADR-001](docs/adr/001-versioning.md) + [ADR-008](docs/adr/008-experimental-gates.md) §Deprecation policy:
 
 - **Pre-1.0:** No stability guarantee. Breaking changes in any alpha or future pre-stable release; pin to specific versions; auto-upgrade is not safe.
 - **`v1.0.0` and `v1.x`:** Wire format and public Python API are stable. Removing a public API requires a deprecation in v1.x followed by removal no earlier than v2.0.0.

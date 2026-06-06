@@ -6,12 +6,11 @@
 [![PyPI version](https://img.shields.io/pypi/v/stigmem?include_prereleases&label=pypi)](https://pypi.org/project/stigmem/)
 [![npm version](https://img.shields.io/npm/v/@eidetic-labs/stigmem-mcp/alpha?label=npm%3A%40eidetic-labs%2Fstigmem-mcp)](https://www.npmjs.com/package/@eidetic-labs/stigmem-mcp)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Stability: preview alpha](https://img.shields.io/badge/stability-preview%20alpha-orange.svg)](#why-pre-stable)
 [![Discord](https://img.shields.io/discord/1502847943118684331?label=discord&logo=discord&logoColor=white&color=5865F2)](https://discord.gg/Z47Re7FjjV)
 
-> **Status: `v0.9.0a10` - preview alpha, pre-stable. Apache-2.0**
+> **Status: `v0.9.0a10` - Apache-2.0**
 > **Repository:** [github.com/eidetic-labs/stigmem](https://github.com/eidetic-labs/stigmem)
-> **Not yet recommended for production federation across organizational boundaries.** See [LIMITATIONS.md](LIMITATIONS.md).
+> **Single-org, single-node, audit-first memory.** Cross-organizational federation is on the roadmap. See [LIMITATIONS.md](LIMITATIONS.md) for current scope.
 
 Stigmem is the shared, persistent layer where AI agents and humans write typed,
 traceable facts that travel across tools, platforms, and organizations. Every
@@ -25,24 +24,7 @@ replayable, and revocable.
 
 ---
 
-## Why pre-stable
-
-The public version line was reset from an earlier `v1.0` announcement to
-`v0.9.0a1` so the release label matches the validated stability posture.
-Controls our threat model identifies as required for production -
-mTLS-default federation, persistent audit log, per-principal rate limits,
-capability-level validation for cross-org instructions, bounded HLC skew
-enforcement - remain hardened-core work rather than shipped GA guarantees.
-
-`v0.9.0a1` is the **first build of stigmem** under the canonical version line.
-Earlier markers (`v0.2` through `v2.0`) labeled internal development
-checkpoints, not tagged releases anyone deployed. Spec content under those
-markers is real and being forward-migrated section by section under
-[ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md).
-
-Full retraction post: [dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0](https://dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0).
-In-repo canonical copy: [`archive/devto-stigmem-v0.9.0a1-retraction.md`](archive/devto-stigmem-v0.9.0a1-retraction.md).
-Progress notes: [`LOG.md`](LOG.md).
+> Pre-1.0: the wire format and public APIs may change between releases. Pin to a specific version.
 
 ## Quickstart - 60 seconds to a running node
 
@@ -315,7 +297,7 @@ The **Memory** half reflects persistence and decay: facts have `valid_until` exp
 
 The canonical specification lives in [`spec/`](spec/). See [`spec/README.md`](spec/README.md) for the section-by-section status table.
 
-The spec is being reviewed and improved into the v0.9.0a1 canonical structure: core sections first, then experimental sections move to `experimental/<feature>/spec.md` per [ADR-008](docs/adr/008-experimental-gates.md) and [ADR-010](docs/adr/010-modular-specs.md). Earlier evolutionary spec files (`stigmem-spec-pre-reset.md` through `stigmem-spec-pre-reset draft.md`) move to `spec/archive/evolution/` after their content has been forward-migrated. Nothing from the spec is being deleted.
+The spec is being reviewed and improved into the v0.9.0a1 canonical structure: core sections first, then experimental sections move to `experimental/<feature>/spec.md` per [ADR-008](docs/adr/008-experimental-gates.md) and [ADR-020](docs/adr/020-feature-owned-product-structure.md) §9 (modular specs). Earlier evolutionary spec files (`stigmem-spec-pre-reset.md` through `stigmem-spec-pre-reset draft.md`) move to `spec/archive/evolution/` after their content has been forward-migrated. Nothing from the spec is being deleted.
 
 ---
 

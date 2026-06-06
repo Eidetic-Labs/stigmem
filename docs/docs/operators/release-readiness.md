@@ -13,7 +13,7 @@ audience: Operator
 
 **What this page covers**
 
-A single pivot for "what shipped in release X, what remains in release Y, and what's the gate between them." Active release rows mirror live GitHub milestones. Future beta, release-candidate, and GA rows are gated horizons from [ROADMAP.md](https://github.com/eidetic-labs/stigmem/blob/main/ROADMAP.md), not active milestones. For the deeper version-string conventions, see [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md) and [ADR-019](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md).
+A single pivot for "what shipped in release X, what remains in release Y, and what's the gate between them." Active release rows mirror live GitHub milestones. Future beta, release-candidate, and GA rows are gated horizons from [ROADMAP.md](https://github.com/eidetic-labs/stigmem/blob/main/ROADMAP.md), not active milestones. For the deeper version-string conventions, see [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md) and [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md).
 
 </div>
 
@@ -216,7 +216,7 @@ Scope per [ROADMAP future beta line](https://github.com/eidetic-labs/stigmem/blo
 </div>
 
 <div>
-<dt>Modular spec migration ([ADR-010](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/010-modular-specs.md))</dt>
+<dt>Modular spec migration ([ADR-020](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/020-feature-owned-product-structure.md) §9 (modular specs))</dt>
 <dt><span className="stigmem-fields__type">partial</span></dt>
 <dd>Structural migration shipped in Phase A; spec evolution continues.</dd>
 </div>
@@ -337,7 +337,7 @@ Scope per [ROADMAP future release-candidate and GA horizons](https://github.com/
 
 **Wire format committed; compatibility commitment honored across v1.x.**
 
-Scope per [ROADMAP future release-candidate and GA exit criteria](https://github.com/eidetic-labs/stigmem/blob/main/ROADMAP.md#future-release-candidate-and-ga-lines): stable release shipped, wire format committed, compatibility commitment doc per [ADR-013](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md) honored across the v1.x line.
+Scope per [ROADMAP future release-candidate and GA exit criteria](https://github.com/eidetic-labs/stigmem/blob/main/ROADMAP.md#future-release-candidate-and-ga-lines): stable release shipped, wire format committed, compatibility commitment doc per [ADR-008](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/008-experimental-gates.md) §Deprecation policy honored across the v1.x line.
 
 </div>
 
@@ -362,7 +362,7 @@ Scope per [ROADMAP future release-candidate and GA exit criteria](https://github
 </div>
 
 <div>
-<dt>Compatibility commitment ([ADR-013](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md))</dt>
+<dt>Compatibility commitment ([ADR-008](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/008-experimental-gates.md) §Deprecation policy)</dt>
 <dt><span className="stigmem-fields__type">pending</span></dt>
 <dd>Deprecation policy honored across the v1.x line; breaking changes only at v2.0.</dd>
 </div>

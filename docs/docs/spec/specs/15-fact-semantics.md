@@ -28,7 +28,7 @@ conflict entities.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for fact semantics.
+This file contains the ADR-020 §9 (modular specs) prose extraction for fact semantics.
 Atomic fact shape is owned by `Spec-01-Fact-Model`; scope
 enforcement is owned by `Spec-02-Scopes-and-ACL`; HTTP route shape
 is owned by `Spec-03-HTTP-API`.

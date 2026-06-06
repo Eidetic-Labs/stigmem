@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Version consistency check (manifest-driven, per ADR-019).
+"""Version consistency check (manifest-driven, per ADR-001).
 
 Reads release/version-surfaces.yaml, derives the canonical release from the
 PEP 440 anchor (root pyproject.toml), then asserts every other surface in the
@@ -7,7 +7,8 @@ manifest references the same release — normalized across PEP 440 and semver
 spellings to a canonical key.
 
 Per ADR-001: version drift is a hard error.
-Per ADR-019: per-ecosystem spelling is expected; the normalizer maps
+Per ADR-001 (per-ecosystem version-string convention): per-ecosystem spelling
+    is expected; the normalizer maps
     0.9.0a1 (PEP 440) and 0.9.0-alpha.1 (semver) to the same canonical key.
 
 Usage:

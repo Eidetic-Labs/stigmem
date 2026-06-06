@@ -21,7 +21,7 @@ migrations are ordered and tracked, and what storage backends must guarantee.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for schema and migration
+This file contains the ADR-020 §9 (modular specs) prose extraction for schema and migration
 semantics. It intentionally describes schema contracts and migration behavior,
 not an exhaustive dump of every reference-node SQL migration.
 

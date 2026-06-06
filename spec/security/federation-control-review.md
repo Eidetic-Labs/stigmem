@@ -177,7 +177,7 @@ part of this federation-control review.
 **Decision**
 
 Accept as shipped control evidence for R-03 and R-10. The v1.0.0 GA retirement
-of legacy SHA-256 verification remains tracked separately as the ADR-007
+of legacy SHA-256 verification remains tracked separately as the [ADR-007](../../docs/adr/archive/007-argon2id.md)
 retirement item.
 
 ## Quota Buckets Migration

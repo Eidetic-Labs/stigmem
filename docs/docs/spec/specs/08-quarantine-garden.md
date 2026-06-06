@@ -27,7 +27,7 @@ failed-validation sources before they reach the main recall surface.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for quarantine
+This file contains the ADR-020 §9 (modular specs) prose extraction for quarantine
 semantics. General garden ACL is owned by `Spec-02-Scopes-and-ACL`;
 federation source trust is owned by `Spec-05-Federation-Trust`;
 route shape is owned by `Spec-03-HTTP-API`.

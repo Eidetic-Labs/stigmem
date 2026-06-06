@@ -1,6 +1,6 @@
 # ADR-020: Feature-owned product structure and projection model
 
-<p className="stigmem-meta"><span>8 min read</span><span>Proposed</span><span>Recorded 2026-05-21</span></p>
+<p className="stigmem-meta"><span>9 min read</span><span>Accepted</span><span>Recorded 2026-05-21</span></p>
 
 <div className="stigmem-lead">
 
@@ -27,7 +27,13 @@ evidence. This ADR makes the feature record universal.
 
 </div>
 
-**Status:** Proposed · **Date:** 2026-05-21 · **Authors:** Eidetic Labs · **Amends:** [ADR-009](./009-repo-structure), [ADR-010](./010-modular-specs), [ADR-012](./012-version-aware-feature-exposure), [ADR-018](./018-security-documentation-colocation) · **Related:** [ADR-001](./001-versioning), [ADR-002](./002-v1-scope), [ADR-008](./008-experimental-gates), [ADR-011](./011-cross-cutting-extraction), [ADR-013](./013-deprecation-policy), [ADR-014](./014-compatibility-matrix), [ADR-019](./019-amendment-to-adr-001-prerelease-version-strings)
+**Status:** Accepted · **Date:** 2026-05-21 (accepted 2026-06-06; tooling already ships) · **Authors:** Eidetic Labs · **Folds:** [ADR-005](./archive/005-docs-ia) (docs IA), [ADR-009](./archive/009-repo-structure) (`experimental/`→metadata dissolution), [ADR-010](./archive/010-modular-specs) (modular per-topic specs), [ADR-014](./archive/014-compatibility-matrix) (compatibility-matrix projection), [ADR-018](./archive/018-security-documentation-colocation) (owned-vs-contributed security taxonomy) · **Related:** [ADR-001](./001-versioning), [ADR-002](./002-v1-scope), [ADR-008](./008-experimental-gates), [ADR-011](./011-cross-cutting-extraction)
+
+<div className="stigmem-keypoint">
+
+**Folds in five ADRs (de-contrition consolidation, 2026-06-06).** This ADR is the canonical home for the feature-owned product structure and its projections: it absorbs ADR-009's `experimental/`→metadata dissolution, ADR-010's modular per-topic spec mechanics (independent SemVer per spec + generated `spec/PROTOCOL.md`), ADR-014's compatibility matrix as a projection over feature metadata, ADR-018's owned-vs-contributed security-risk taxonomy, and ADR-005's docs IA (the four-tab Learn / Build / Operate / Secure structure, leading the Secure tab with the risk register). Each folded ADR's full text is retained in `docs/adr/archive/` for history. Status flipped Proposed → Accepted: the feature-record tooling (the `check_feature_*.py` validators + populated `features/`) already ships.
+
+</div>
 
 ## Context
 
@@ -78,14 +84,15 @@ This creates three recurring problems:
 
 </div>
 
-The existing ADRs already point toward feature ownership:
+The prior ADRs already pointed toward feature ownership (each now folded
+into this ADR or ADR-008):
 
 - ADR-008 treats the feature as the unit of reintroduction readiness.
-- ADR-010 colocates experimental specs with the features they describe.
-- ADR-012 says stability and since-version should be visible on feature pages.
-- ADR-018 says feature security should live with the feature.
+- ADR-010 (folded into §9) colocates experimental specs with the features they describe.
+- ADR-012 (folded into ADR-008 §Version exposure) says stability and since-version should be visible on feature pages.
+- ADR-018 (folded into §11) says feature security should live with the feature.
 
-They do not establish a single feature-owned record across core and
+They did not establish a single feature-owned record across core and
 experimental features. This ADR fills that gap.
 
 ## Decision
@@ -214,7 +221,7 @@ Allowed values:
 | `feature_type` | `core`, `plugin`, `adapter`, `sdk`, `deployment`, `protocol`, `tooling`, `docs` |
 | `default_surface` | `default`, `opt-in`, `experimental`, `internal`, `external` |
 
-`stability` follows ADR-012. `status` describes implementation and planning
+`stability` follows ADR-008 §Version exposure. `status` describes implementation and planning
 state. A feature can be `status: shipped` and `stability: experimental`.
 
 ### 4 · Core and plugin implementation modes are both valid
@@ -302,6 +309,143 @@ allowlist is not a permanent exception mechanism.
 This ADR defines the target product/documentation architecture. Migration
 sequence, pilot features, wrappers, tooling rollout, and PR slicing are tracked
 outside the ADR in internal planning documents and release roadmaps.
+
+## Folded mechanics
+
+The sections below carry the load-bearing mechanics absorbed from the
+folded ADRs. They are retained verbatim-in-substance so the surviving
+ADR is self-sufficient; the original ADRs remain in `docs/adr/archive/`.
+
+### 9 · Modular per-topic specs (folds ADR-010)
+
+The protocol is not a single monolithic document. Each topic gets its
+own spec file with its own version and its own status track; a
+generated meta-document names which combination of specs constitutes a
+release.
+
+<div className="stigmem-grid">
+
+<div><h4>Naming + stable numbers</h4><p>Specs use <code>Spec-NN-Topic-Name</code>; <code>NN</code> is a stable two-digit identifier (X-prefix for experimental specs, e.g. <code>Spec-X3-Time-Travel-Queries</code>). The number is stable across renames; numbers are never reused.</p></div>
+<div><h4>Independent SemVer per spec</h4><p>Each spec follows SemVer 2.0.0 <em>for itself</em>. <code>Spec-01-Core</code> can be at v1.2.0 while <code>Spec-13-Capability-Instructions</code> is at v0.4.0-draft. A breaking change bumps only that spec's major. The protocol release version (per ADR-001) is a separate, higher-level commitment naming a specific combination of spec versions.</p></div>
+<div><h4>Per-spec status track</h4><p><code>Draft · Experimental · Stable · Superseded · Deprecated</code>, independent per spec. A spec can be Stable while a sibling is Experimental.</p></div>
+<div><h4>Per-spec frontmatter</h4><p><code>spec_id</code>, <code>version</code>, <code>status</code>, <code>applies_to</code>, <code>supersedes</code>, <code>deprecated_by</code>, <code>depends_on</code> (with version ranges). Parseable; the meta-document is generated from it.</p></div>
+
+</div>
+
+<div className="stigmem-keypoint">
+
+**`spec/PROTOCOL.md` is generated, not hand-written.**
+
+`scripts/generate_protocol_md.py` reads spec frontmatter and produces
+`spec/PROTOCOL.md` (the index + release-composition document). A CI
+step runs the generator and fails on diff — only the generator can
+write it. A core spec MUST NOT have a hard dependency on an
+experimental spec; experimental specs may depend on core specs, and
+circular dependencies are CI-blocked. In the feature-owned model,
+`spec/PROTOCOL.md` is a projection over feature specs and protocol
+specs (see §6); `spec/specs/*.md` are compatibility/generated views
+during migration, not independent feature truth once migrated.
+
+</div>
+
+### 10 · Compatibility matrix as a projection (folds ADR-014)
+
+`docs/compatibility-matrix.yaml` is the single source of truth for
+compatibility relationships across the node, SDKs, adapters, host
+connectors, and protocol versions — and, in the feature-owned model, a
+**projection over feature metadata, package surfaces, and release
+support** (per §6). It declares `packages`, `connectors`, `features`
+(each with a `requires` map and optional `spec_section` / `stability`),
+and `protocol_compatibility` (with deprecation windows). A Docusaurus
+plugin renders three tables at `Operate → Compatibility`: package
+versions, connector compatibility, feature compatibility.
+
+`scripts/check_compatibility_matrix.py` validates in CI that every
+package version corresponds to a real tagged release (or
+`unreleased` with a banner), every `requires`/`spec_section` reference
+resolves, and no matrix version is below the corresponding feature's
+`since:`. A release PR cannot ship without updating the matrix;
+`make compatibility-matrix-check` runs the validator locally.
+
+### 11 · Owned-vs-contributed security taxonomy (folds ADR-018)
+
+Security documentation is two-tiered, mirroring the spec model.
+Cross-cutting risks live at protocol level in `spec/security/`
+(unified risk register, architecture, disclosure, advisories,
+scenarios); per-feature security analysis colocates with the feature
+— in the feature-owned model, in the feature record's `security.md`
+(per §2).
+
+<div className="stigmem-keypoint">
+
+**A risk has exactly one owning feature and zero or more contributing features.**
+
+The owning feature's `security.md` carries the canonical analysis
+(Risk ID, STRIDE category, description, likelihood, impact, severity,
+control, status, mitigation). Contributing features carry brief
+cross-listings that link to the canonical entry. Cross-cutting risks
+(those with no single owning feature — e.g. HLC, embedding poisoning,
+supply chain, admin storage tampering, the worm vector) live
+exclusively at protocol level. Risk status tracks independently
+(`Mitigated / Residual / Open / Accepted`); a risk owned by an
+experimental feature can be `Open` without affecting other features.
+
+</div>
+
+`scripts/check_security_documentation.py` validates in CI that every
+protocol-level `R-XX` resolves to full analysis or a per-feature
+`security.md`, every "owned risk" in a per-feature doc has a
+protocol-level entry, status is consistent across canonical entry and
+cross-listings, frontmatter validates, and no cross-reference is
+broken. This taxonomy supplies the `security.md` half of the feature
+record and the feature-security projection in root `SECURITY.md`
+(per §6).
+
+### 12 · Docs information architecture (folds ADR-005)
+
+The docs site at `docs.stigmem.dev` is organized into four top-level
+tabs — **Learn · Build · Operate · Secure** — each self-contained for
+its audience. The `audience` frontmatter taxonomy is five values
+aligned with the tabs (`Evaluator → Learn`, `Integrator → Build`,
+`Operator → Operate`, `Security → Secure`, `Spec → Secure`); the
+`validate-audience` plugin enforces it. The Reference and Community
+tabs dissolve into the four canonical homes (API Reference → Build;
+Specification → Secure; Release Notes → top-level; etc.).
+
+<div className="stigmem-keypoint">
+
+**Secure is a peer tab, and it leads with the risk register.**
+
+For a category where trust *is* the product, demoting security to a
+sub-section sends the wrong signal — Secure is one of the four ways you
+engage with the product, not an appendix. The Secure tab leads with the
+current Mitigated / Residual / Open / Accepted risk register at the top
+of the Threat Model page; the protocol specification lives under Secure
+because the spec *is* a security artifact. This decision is load-bearing
+and is not dropped by the fold.
+
+</div>
+
+In the feature-owned model these tabs are docs **projections**: public
+feature pages (`docs/docs/concepts/features.md`) project over feature
+metadata, and the Secure tab's risk register projects over the
+protocol-level register plus per-feature `security.md` files (per §6).
+One canonical page per topic; retired URLs get `client-redirects`.
+
+### 13 · `experimental/` dissolves into metadata (folds ADR-009)
+
+The folded ADR-009's repository structure stands for the top-level shape (the
+public adopter surface, build/config, critical-path code, and the
+distinction between adapters — clients of stigmem's API — and plugins —
+packages registering against the core hook system per ADR-011). What
+this ADR changes is the treatment of `experimental/` as a documentation
+category: maturity is metadata (`stability: experimental` +
+`default_surface: opt-in` on the feature record), not directory
+placement (per §1, §3, §5). Existing `experimental/<feature>/`
+directories may persist during migration as wrappers linking to the
+canonical `features/<feature-slug>/` record, but they are no longer the
+canonical home for feature truth. CIDs remain core (not under
+`experimental/`) per ADR-011's folded ADR-017 decision.
 
 ## Alternatives considered
 
@@ -408,7 +552,7 @@ outside the ADR in internal planning documents and release roadmaps.
 
 ## Repository contracts
 
-This ADR does not replace ADR-009's full repository structure. It amends the
+This ADR does not replace the folded ADR-009's full repository structure. It amends the
 parts that define feature ownership:
 
 ```text
@@ -448,3 +592,11 @@ This ADR is implemented when:
 - High-level docs link to feature records instead of duplicating feature detail
   where practical.
 - Migration sequencing is tracked outside the ADR.
+
+## Amendments
+
+- **2026-06-06 — de-contrition consolidation.** Status moved Proposed → Accepted
+  (the feature-record and projection tooling already ships). Folded in:
+  ADR-005 (docs IA); folded ADR-009 (repository structure); folded ADR-010
+  (modular per-topic specs); folded ADR-014 (compatibility matrix); and
+  folded ADR-018 (security-documentation colocation), retaining each one's mechanics.

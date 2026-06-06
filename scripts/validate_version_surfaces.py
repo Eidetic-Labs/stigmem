@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Schema validator for release/version-surfaces.yaml.
 
-Per ADR-019 §Surface manifest: every release surface that emits or references
+Per ADR-001 (version-surface manifest convention): every release surface that emits or references
 a stigmem version string is registered in release/version-surfaces.yaml. This
 script asserts the manifest itself is well-formed before check_version_consistency.py
 consumes it.

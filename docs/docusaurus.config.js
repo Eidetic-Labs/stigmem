@@ -42,10 +42,10 @@ const config = {
           docItemComponent: '@theme/ApiItem',
           remarkPlugins: [remarkGlossaryLink, remarkSpecLink],
           // Single-version mode for the current v0.9.0 alpha line (canonical first build per
-          // ADR-001 + ADR-019). Pre-reset versioned snapshots (v0.2, v1.1)
+          // ADR-001). Pre-reset versioned snapshots (v0.2, v1.1)
           // and the v2.0-draft "current" label labeled internal development
           // checkpoints, not tagged releases. Snapshots preserved at
-          // docs/archive/snapshots/. The rendered docs now use ADR-005's
+          // docs/archive/snapshots/. The rendered docs now use ADR-020's
           // Learn / Build / Operate / Secure information architecture.
           //
           // Multi-version configuration will be reintroduced when v0.9.0a2
@@ -159,7 +159,7 @@ const config = {
         title: 'Stigmem',
         logo: { alt: 'Stigmem by Eidetic Labs', src: 'img/logo.svg' },
         items: [
-          // Four-tab IA per ADR-005: Learn / Build / Operate / Secure.
+          // Four-tab IA per ADR-020: Learn / Build / Operate / Secure.
           // Reference dissolves: API → Build, Specification → Secure,
           // Architecture splits Build/Operate, Glossary → footer utility.
           // Community dissolves: security-disclosure → Secure,

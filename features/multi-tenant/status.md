@@ -28,7 +28,7 @@ tenant resolution.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Record R-01, R-02, and R-21 contributions. | Recorded | `features/multi-tenant/security.md` |
-| ADR alignment | Preserve default-surface exclusion and plugin-boundary decisions. | Covered for a8 | ADR-002, ADR-008, ADR-009, ADR-011, ADR-020 |
+| ADR alignment | Preserve default-surface exclusion and plugin-boundary decisions. | Covered for a8 | ADR-002, ADR-008, ADR-020 §13 (repo structure), ADR-011, ADR-020 |
 | Conformance vectors | Validate default collapse, plugin-enabled tenant isolation, and current federation default-tenant-only behavior. | Covered for a8; promotion gaps remain | `features/multi-tenant/evidence.md` |
 | External operator soak | Validate shared-node deployments with independent tenants. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | Covered for a8 | This feature record; public docs projections. |

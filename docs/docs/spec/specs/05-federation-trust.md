@@ -28,7 +28,7 @@ audit boundaries.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for federation
+This file contains the ADR-020 §9 (modular specs) prose extraction for federation
 trust. It intentionally does **not** define manifest shape
 (`Spec-04-Manifests`), capability-token structure
 (`Spec-06-Capability-Tokens`), quarantine moderation

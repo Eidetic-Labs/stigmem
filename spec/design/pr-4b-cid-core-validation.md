@@ -8,7 +8,7 @@ Parent: [#301](https://github.com/eidetic-labs/stigmem/issues/301)
 PR 4b should proceed as validation and closeout work, not as a new CID
 implementation and not as a plugin extraction.
 
-ADR-017 keeps content-addressed fact IDs in core. The current `main` branch
+ADR-011 keeps content-addressed fact IDs in core. The current `main` branch
 already implements the core CID surface described by
 `Spec-21-Content-Addressed-IDs`: CID computation, storage persistence, alias
 lookup, verify endpoint, and backfill support. No `stigmem-plugin-cids` package
@@ -43,7 +43,7 @@ The core implementation is present in these locations:
   - covers CID response shape, unknown-CID lookup, verify endpoint behavior, and
     auth-gated backfill status.
 
-## Alignment With ADR-017 And Spec-21
+## Alignment With ADR-011 And Spec-21
 
 | Requirement | Current state |
 |---|---|

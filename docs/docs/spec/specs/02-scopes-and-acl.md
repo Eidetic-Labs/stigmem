@@ -26,7 +26,7 @@ enforcement plus the basic Memory Garden ACL layer retained in the
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for scope
+This file contains the ADR-020 §9 (modular specs) prose extraction for scope
 enforcement and basic Memory Garden ACL behavior. It intentionally
 does **not** include API-key credential shape, peer-token signing,
 federation replication rules, quarantine garden moderation, advanced

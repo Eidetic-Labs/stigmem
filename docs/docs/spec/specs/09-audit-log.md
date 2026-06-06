@@ -26,7 +26,7 @@ retention, and export boundaries.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for audit-log
+This file contains the ADR-020 §9 (modular specs) prose extraction for audit-log
 semantics. Component specs define which events they emit; this
 spec defines common event requirements.
 

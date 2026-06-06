@@ -18,7 +18,7 @@ ecosystem maturity, modular spec evolution, and ongoing evidence maintenance.
 | --- | --- | --- | --- |
 | Experimental graduation | ADR-008 gates for supported-surface promotion | Skipping gate artifacts | ADR-008 |
 | Plugin stewardship | Cross-cutting features remain opt-in plugins unless a future ADR changes that boundary | Treating plugin extraction as temporary by default | ADR-011 |
-| Spec evolution | Modular spec evolution | Reopening pre-reset monolithic spec structure | ADR-010 |
+| Spec evolution | Modular spec evolution | Reopening pre-reset monolithic spec structure | ADR-020 §9 (modular specs) |
 | Evidence maintenance | Dependency/security evidence maintenance | One-time checklist closure | evidence maintenance docs |
 
 ## Detailed Scope
@@ -52,7 +52,7 @@ graduation follows ADR-008 and security colocation remains feature-owned.
 | --- | --- | --- |
 | v1.0.0 GA | Stable release shipped | Future gate |
 | ADR-008 graduation | Five gate artifacts for each feature | Future gate |
-| Compatibility | ADR-013 commitment honored | Future gate |
+| Compatibility | ADR-008 §Deprecation policy commitment honored | Future gate |
 
 ## Release Notes Candidates
 

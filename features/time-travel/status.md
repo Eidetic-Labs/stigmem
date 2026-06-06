@@ -30,7 +30,7 @@ supported surface.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Record contributed risks and reintroduction blockers. | Complete for a4 read-path validation | `features/time-travel/security.md` |
-| ADR alignment | Preserve experimental and plugin-boundary decisions. | Complete for a4 read-path validation | ADR-008, ADR-010, ADR-011, ADR-020 |
+| ADR alignment | Preserve experimental and plugin-boundary decisions. | Complete for a4 read-path validation | ADR-008, ADR-020 §9 (modular specs), ADR-011, ADR-020 |
 | Conformance vectors | Split default fail-closed, operator-disabled, and plugin-enabled behavior. | Complete for a4 read-path validation | `node/tests/plugins/test_time_travel_plugin_validation.py`; `node/tests/time_travel/test_phase13_time_travel_cid.py` |
 | External operator soak | Validate production-like workloads. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | Complete for a4 read-path validation | This feature record; `docs/docs/spec/experimental/time-travel-queries.md` |

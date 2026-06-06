@@ -147,7 +147,7 @@ testpaths = [
 ]
 ```
 
-Experimental features per ADR-009 will live at `experimental/<feature>/tests/`. Add them to `testpaths` only when they pass ADR-008 gates and rejoin the v1 critical-path.
+Experimental features per ADR-020 §13 (repo structure) will live at `experimental/<feature>/tests/`. Add them to `testpaths` only when they pass ADR-008 gates and rejoin the v1 critical-path.
 
 ---
 
@@ -268,7 +268,7 @@ Three options for each:
 
 For `adapters/mcp/`: this is v1.0 critical-path and currently has zero tests. Add tests as part of the strengthening plan's hardened-core work alongside the OpenClaw audit-driven changes is reasonable.
 
-For the others: they're all moving to experimental per ADR-009, so the empty `tests/` directories disappear with the relocation.
+For the others: they're all moving to experimental per ADR-020 §13 (repo structure), so the empty `tests/` directories disappear with the relocation.
 
 ---
 

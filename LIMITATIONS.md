@@ -1,6 +1,6 @@
 # LIMITATIONS
 
-> **Stigmem v0.9.0a10.** Not yet suitable for production federation across organizational boundaries. Read this before deploying.
+> **Stigmem v0.9.0a10.** Scoped for single-organization, single-node deployment. Cross-organizational federation is on the roadmap, not yet production-ready. Read this before deploying.
 >
 > Last updated: 2026-05-26 · Applies to: v0.9.0a10
 
@@ -12,13 +12,13 @@ A plain-English statement of what stigmem cannot safely do in its current state,
 
 If the threat model tells you *what the threats are*, this document tells you *what to actually do or not do today*. It is updated on every release. The contents below apply to **v0.9.0a10** specifically; future versions will close some of these gaps and may open new ones (each new feature lands with its own limitations entry).
 
-If after reading this you're unsure whether your use case is safe, the answer is: ask in [Discussions](https://github.com/eidetic-labs/stigmem/discussions) before deploying. We'd rather lose an integration than have you hit one of these gaps in production.
+If after reading this you're unsure whether your use case is safe, ask in [Discussions](https://github.com/eidetic-labs/stigmem/discussions) before deploying.
 
 ---
 
 ## Current state in one sentence
 
-Stigmem v0.9.0a10 is a working federated-memory reference node with a documented threat model and several controls our own threat model identifies as required for safe deployment that have not yet shipped. Those controls remain future hardened-core work (see [ROADMAP.md](ROADMAP.md)); no beta, release-candidate, or GA milestone is active today. Until the controls ship, the deployment recommendations below are the responsible defaults.
+Stigmem v0.9.0a10 is a working federated-memory reference node with a documented threat model. Several controls the threat model identifies as required for cross-organizational deployment have not yet shipped; they are on the roadmap (see [ROADMAP.md](ROADMAP.md)). Until they ship, the deployment recommendations below are the responsible defaults.
 
 ---
 
@@ -118,7 +118,7 @@ The capability-based redesign is present on `main`; release posture, certificati
 
 ### 8. Long-lived API keys with weak hashing and no rotation
 
-**Status:** New API keys use Argon2id hashing at rest (`node/src/stigmem_node/auth.py:_hash_key`) with the ADR-007 parameters. Legacy v0.9.0a1 SHA-256 rows remain valid during the v0.9.x migration window and are opportunistically rehashed to Argon2id on first successful use. **Separately:** automated rotation and an "expiring soon" admin surface are not yet available.
+**Status:** New API keys use Argon2id hashing at rest (`node/src/stigmem_node/auth.py:_hash_key`) with the [ADR-007](docs/adr/archive/007-argon2id.md) parameters. Legacy v0.9.0a1 SHA-256 rows remain valid during the v0.9.x migration window and are opportunistically rehashed to Argon2id on first successful use. **Separately:** automated rotation and an "expiring soon" admin surface are not yet available.
 
 **What this means:** an attacker who obtains the api_keys table (e.g., via R-23 admin-level storage compromise, or via a separate exfiltration vector) faces Argon2id for new keys. Any legacy SHA-256 rows that have not been used or explicitly rotated still retain the older fast-hash posture until migration completes.
 
@@ -287,13 +287,13 @@ Reading our threat model, comparing it to your own requirements, and giving us f
 
 Read this document, read the threat model, run `make demo` locally, and decide whether the design fits your problem. Don't deploy yet.
 
-### If you have already integrated against v1.0
+### If you integrated against an earlier version
 
-Your code does not need to change today; the wire format hasn't changed. **Do not deploy in cross-org federation configurations.** Pin to the current alpha line and expect breaking changes before any stable release. Read [the retraction post](https://dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0) for context on the version change.
+Your code does not need to change today; the wire format hasn't changed. **Do not deploy in cross-org federation configurations.** Pin to the current alpha line and expect breaking changes before any stable release.
 
-### If you want to be our first external operator
+### If you want to help drive stigmem toward 1.0
 
-We're looking for one organization willing to run a stigmem node for 30 days against a real (non-critical) workload, with public bug reporting. We'll help you set up, watch you hit issues we couldn't anticipate, and credit you in the v1.0.0 release notes. [Open an issue](https://github.com/eidetic-labs/stigmem/issues) tagged `operator-candidate`.
+External operator validation is one of the gates for the v1.0.0 stable release (see [ADR-001](docs/adr/001-versioning.md)). We're looking for organizations willing to run a stigmem node against a real (non-critical) workload, with public bug reporting. We'll help you set up, surface issues we couldn't anticipate ourselves, and credit you in the v1.0.0 release notes. [Open an issue](https://github.com/eidetic-labs/stigmem/issues) tagged `operator-candidate`.
 
 ### If you are auditing the security posture
 
@@ -322,31 +322,27 @@ After hardened-core controls ship and a 30-day operator soak completes, this doc
 
 ---
 
-## v0.9.0a1 architecture in flight
+## Default-install scope and the plugin boundary
 
-The default install of v0.9.0a1 ships with feature-specific code in `node/src/stigmem_node/` — `tombstones.py`, `instruction_migrate.py`, `card_materializer.py`, `source_trust.py`, `decay.py`, and others — for features that are deferred from v1.0 critical-path scope per [ADR-002](docs/adr/002-v1-scope.md).
+The default install matches the v1.0 critical-path scope from [ADR-002](docs/adr/002-v1-scope.md): cross-cutting features are expressed through the hook registry and ship as opt-in plugins per [ADR-011](docs/adr/011-cross-cutting-extraction.md)'s C1 plugin architecture, with content-addressed fact IDs (CIDs) the one deliberate exception that stays in core.
 
-This is by design as the alpha-line iteration semantics ([ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md)) support: each PR in the v0.9.0a series extracts one cross-cutting feature into a plugin per [ADR-011](docs/adr/011-cross-cutting-extraction.md)'s C1 plugin architecture.
+**The extraction train is complete.** As of the v0.9.0a8 → v0.9.0a9 line, lazy instruction discovery, time-travel queries, RTBF tombstones, memory-garden advanced ACL, source attestation, and multi-tenant isolation are extracted into opt-in plugin source packages under `experimental/`. Core no longer carries this feature-specific behavior in the default request path.
 
-**What this means for you as an adopter today.** The v0.9.0a1 artifact still carries some deferred-feature code while the alpha extraction line catches up. On current `main`, lazy instruction discovery, time-travel queries, and RTBF tombstones are no longer available as default-install behavior: they require explicit experimental plugin registration, and `as_of` requests fail closed without `stigmem-plugin-time-travel`. A single-org adopter running `make demo` experiences single-tenant behavior with no tombstones, time-travel, lazy-instruction-discovery, advanced memory-garden ACL, or source-attestation activated. The v1.0 critical-path scope claim describes user-visible *behavior*, not code architecture.
+**What this means for you as an adopter today.** A single-org adopter running `make demo` gets single-tenant behavior with no tombstones, time-travel, lazy-instruction-discovery, advanced memory-garden ACL, or source-attestation activated. Each of those requires explicit experimental plugin registration; for example, `as_of` requests fail closed without `stigmem-plugin-time-travel`. The v1.0 critical-path scope claim describes user-visible *behavior* as well as code architecture.
 
-**What changes between now and v1.0.0.** v0.9.0a2 through v0.9.0a8 each extract one cross-cutting feature into a separate plugin package (`stigmem-plugin-<feature>`). After v0.9.0a8, the default install will be true to ADR-011's commitment: core has no feature-specific code; cross-cutting concerns are expressed exclusively through the hook registry; plugins are opt-in.
+**Plugin runtime status.** Core ships the registry foundation, stable 22-hook call surface, entry-point discovery, dependency ordering, lifecycle health checks, operator CLI inspection, production signing/trust policy, and author/operator documentation. The v0.9.0a10 line validates the standalone plugin artifacts (package metadata, conformance, release evidence) ahead of publication; see [ROADMAP.md](ROADMAP.md) for the publication-readiness workstream.
 
-**Current implementation status.** Main now includes the registry foundation, stable 22-hook call surface, entry-point discovery, dependency ordering, lifecycle health checks, operator CLI inspection, production signing/trust policy, and author/operator documentation needed to test extension points against the default install. Lazy instruction discovery, time-travel queries, and RTBF tombstones have been extracted into opt-in experimental plugin source packages under `experimental/`. Signed/package artifact evidence is deferred until the planned plugin set is built, so these packages should not yet be described as released installable artifacts.
+| Cross-cutting feature | Home | Spec reference | Extracted in |
+|---|---|---|---|
+| Lazy instruction discovery | `experimental/lazy-instruction-discovery/` plugin; default routes require plugin registration | `Spec-X1-Lazy-Instruction-Discovery` | v0.9.0a2 |
+| Content-addressed fact IDs | `node/src/stigmem_node/cid.py` | `Spec-21-Content-Addressed-IDs`; **stays in core** ([ADR-011](docs/adr/011-cross-cutting-extraction.md)) | core (n/a) |
+| Time-travel queries | `experimental/time-travel/` plugin; default `as_of` requests fail closed without plugin registration | `Spec-X3-Time-Travel-Queries` | v0.9.0a4 |
+| RTBF tombstones | `experimental/tombstones/` plugin; default routes and filters require plugin registration | `Spec-X2-RTBF-Tombstones` | v0.9.0a5 |
+| Memory-garden advanced ACL | `experimental/memory-garden-acl/` plugin; default deployments enforce only direct `garden_id` guards | `Spec-X5-Memory-Garden-Advanced-ACL` | v0.9.0a6 |
+| Source attestation | `experimental/source-attestation/` plugin; default installs are source-attestation-inert | `Spec-X6-Source-Attestation` | v0.9.0a7 |
+| Multi-tenant isolation | `experimental/multi-tenant/` plugin; default installs collapse callers to the `default` tenant | Deferred plugin work; no supported protocol spec yet | v0.9.0a8 |
 
-[The retraction post](https://dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0) calls this gap out explicitly. We chose to ship the honest reset before completing the architectural cleanup so adopters read against the actual shipped artifacts rather than future-state claims.
-
-| Cross-cutting feature | Current home | Spec reference | Plugin destination | Target release |
-|---|---|---|---|---|
-| Lazy instruction discovery | `experimental/lazy-instruction-discovery/` source package; default routes require plugin registration/configuration | `Spec-X1-Lazy-Instruction-Discovery` | extracted opt-in plugin source; artifact evidence deferred | v0.9.0a2 |
-| Content-addressed fact IDs | `node/src/stigmem_node/cid.py` | `Spec-21-Content-Addressed-IDs`; **stays in core** ([ADR-017](docs/adr/017-amendment-to-adr-011-cids-as-core.md)) | n/a | v0.9.0a3 |
-| Time-travel queries | `experimental/time-travel/` source package; default `as_of` requests fail closed without plugin registration | `Spec-X3-Time-Travel-Queries` | extracted opt-in plugin source; artifact evidence deferred | v0.9.0a4 |
-| RTBF tombstones | `experimental/tombstones/` source package; default routes and filters require plugin registration/configuration | `Spec-X2-RTBF-Tombstones` | extracted opt-in plugin source; artifact evidence deferred | v0.9.0a6 |
-| Memory-garden advanced ACL | `node/src/stigmem_node/garden_acl.py` | `Spec-X5-Memory-Garden-Advanced-ACL` | `experimental/memory-garden-acl/` plugin | v0.9.0a6 |
-| Source attestation | `node/src/stigmem_node/source_trust.py` | `Spec-X6-Source-Attestation` | `experimental/source-attestation/` plugin | v0.9.0a8 |
-| Multi-tenant isolation | `tenant_id` in 23 core files | Deferred plugin work; no supported protocol spec yet | `experimental/multi-tenant/` plugin | v0.9.0a8 |
-
-The CID exception is deliberate. CIDs are load-bearing for the storage immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md) L3) and the prompt-injection trust boundary ([ADR-003](docs/adr/003-prompt-injection.md) L1–L2). Keeping CIDs as a plugin would mean default install lacks integrity verification that the spec's claims depend on; ADR-017 corrects that.
+The CID exception is deliberate. CIDs are load-bearing for the storage immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md) L3) and the prompt-injection trust boundary ([ADR-003](docs/adr/003-prompt-injection.md) L1–L2). Keeping CIDs as a plugin would mean default install lacks integrity verification that the spec's claims depend on; ADR-011 corrects that.
 
 ---
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Translate a stigmem release version between PEP 440 and semver spellings.
 
-Per ADR-019 §Per-ecosystem spelling: stigmem releases are spelled differently
+Per ADR-001 (per-ecosystem version-string convention): stigmem releases are spelled differently
 in different ecosystems. The git tag uses PEP 440 shorthand (e.g. v0.9.0a1).
 This script translates that shorthand to:
   - canonical PEP 440 (drops the leading v): 0.9.0a1

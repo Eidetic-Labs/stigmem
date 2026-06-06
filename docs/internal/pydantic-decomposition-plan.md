@@ -37,7 +37,7 @@ node/src/stigmem_node/models/
 └── provenance.py # ProvenanceEntry / ProvenanceResponse
 ```
 
-Experimental domains move to their `experimental/<feature>/` directories per ADR-009/011:
+Experimental domains move to their `experimental/<feature>/` directories per ADR-020 §13 (repo structure)/011:
 
 ```
 experimental/23-rtbf-tombstones/src/stigmem_tombstones/models.py

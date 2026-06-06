@@ -10,7 +10,7 @@
 | Default surface | `opt-in` |
 
 Synthesis remains outside the default supported surface per ADR-002 and
-ADR-009. The repo contains implementation and test evidence for synthesis
+ADR-020 §13 (repo structure). The repo contains implementation and test evidence for synthesis
 behavior, but release-facing support still requires ADR-008 gate completion.
 
 ## Release History
@@ -26,7 +26,7 @@ behavior, but release-facing support still requires ADR-008 gate completion.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Record prompt-injection and feedback-loop implications. | Partial | `features/synthesis/security.md` |
-| ADR alignment | Preserve deferred experimental status and Spec-X ownership. | Partial | ADR-002, ADR-008, ADR-010, ADR-020 |
+| ADR alignment | Preserve deferred experimental status and Spec-X ownership. | Partial | ADR-002, ADR-008, ADR-020 §9 (modular specs), ADR-020 |
 | Conformance vectors | Validate confidence filtering and contradiction presentation. | Partial | `node/tests/recall/test_synthesis_decay.py` |
 | External operator soak | Validate synthesis output in production-like agent workflows. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | In progress | This feature record. |

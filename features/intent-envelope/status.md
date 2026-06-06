@@ -26,7 +26,7 @@ point and must pass ADR-008 gates.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Define prompt-injection and instruction-authority impact. | Open | `features/intent-envelope/security.md` |
-| ADR alignment | Preserve ADR-001 deferral and ADR-008 reintroduction gates. | Partial | ADR-001, ADR-008, ADR-010, ADR-020 |
+| ADR alignment | Preserve ADR-001 deferral and ADR-008 reintroduction gates. | Partial | ADR-001, ADR-008, ADR-020 §9 (modular specs), ADR-020 |
 | Conformance vectors | Define wire-format and validation differences from ordinary facts. | Open | None currently recorded. |
 | External operator soak | Identify an adapter or deployment that uses intent envelopes. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | In progress | This feature record. |

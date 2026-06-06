@@ -22,7 +22,7 @@ input, partial replication failure, and replay attempts.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for failure-mode acceptance
+This file contains the ADR-020 §9 (modular specs) prose extraction for failure-mode acceptance
 scenarios. It defines scenario intent and expected outcomes. Concrete test
 harness layout and fixture implementation remain implementation details.
 

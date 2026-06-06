@@ -125,7 +125,7 @@ decide whether the evidence is good enough; reviewers still own that judgment.
 
 ## Experimental feature security docs
 
-Per ADR-018, experimental features keep feature-owned security analysis beside
+Per ADR-020 §11 (security taxonomy), experimental features keep feature-owned security analysis beside
 the feature at `experimental/<feature>/security.md`. Use this file for Gate 1
 threat-model deltas, owned R-XX risks, contributed risks, operator scenarios,
 conformance pointers, reintroduction gates, and cross-references back to the

@@ -1,6 +1,8 @@
 # ADR-013: Deprecation policy
 
-<p className="stigmem-meta"><span>5 min read</span><span>Accepted</span><span>Recorded 2026-05-06</span></p>
+> **Superseded by ADR-008.** Content folded into ADR-008 (de-contrition consolidation, 2026-06-06). Full text retained here for history.
+
+<p className="stigmem-meta"><span>5 min read</span><span>Superseded by ADR-008</span><span>Recorded 2026-05-06</span></p>
 
 <div className="stigmem-lead">
 

@@ -202,7 +202,7 @@ The contract-checks CI job fails on uncommitted drift.
 
 If you add a new release surface (e.g., publishing to a new registry):
 
-1. Add an entry to `release/version-surfaces.yaml` per the schema in [ADR-019 § Surface manifest](../../docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md#surface-manifest).
+1. Add an entry to `release/version-surfaces.yaml` per the schema in [ADR-001 (version-string convention)](../../docs/adr/001-versioning.md).
 2. Run `python scripts/validate_version_surfaces.py` locally.
 3. Run `python scripts/check_version_consistency.py` locally.
 4. Commit. The CI gate will run the same checks.

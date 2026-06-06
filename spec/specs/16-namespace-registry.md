@@ -17,7 +17,7 @@ meta-facts, and protocol-owned relations.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for the namespace registry.
+This file contains the ADR-020 §9 (modular specs) prose extraction for the namespace registry.
 Atomic fact shape and relation field rules are owned by `Spec-01-Fact-Model`;
 conflict and TTL semantics are owned by `Spec-15-Fact-Semantics`.
 
