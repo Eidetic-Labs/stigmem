@@ -163,10 +163,10 @@ def _is_under_archive(path: Path) -> bool:
     # Exempt any file inside a ``docs/adr/archive`` directory, wherever rooted
     # (the real tree or a test fixture).
     parts = path.parts
-    for i in range(len(parts) - 2):
-        if parts[i] == "adr" and parts[i + 1] == "archive":
-            return True
-    return False
+    return any(
+        parts[i] == "adr" and parts[i + 1] == "archive"
+        for i in range(len(parts) - 2)
+    )
 
 
 def _is_living_adr_doc(path: Path) -> bool:
@@ -174,10 +174,13 @@ def _is_living_adr_doc(path: Path) -> bool:
     if path.suffix != ".md":
         return False
     for i in range(len(parts) - 1):
-        if parts[i] == "adr" and not _is_under_archive(path):
-            # A markdown file directly under an ``adr`` directory (not archive).
-            if path.parent.name == "adr":
-                return True
+        # A markdown file directly under an ``adr`` directory (not archive).
+        if (
+            parts[i] == "adr"
+            and not _is_under_archive(path)
+            and path.parent.name == "adr"
+        ):
+            return True
     return False
 
 
