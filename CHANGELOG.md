@@ -125,9 +125,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ## [0.9.0a8] — 2026-05-23
 
-**Status:** preview alpha — pre-stable, not for production federation across
-organizational boundaries. Multi-tenant scoping remains experimental, opt-in,
-and operator-gated.
+**Status:** alpha (pre-stable). Multi-tenant scoping remains experimental,
+opt-in, and operator-gated.
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a8`, `stigmem-py 0.9.0a8`, `stigmem-node 0.9.0a8`, and `stigmem-openclaw 0.9.0a8` (PEP 440).
@@ -162,9 +161,8 @@ and operator-gated.
 
 ## [0.9.0a7] — 2026-05-23
 
-**Status:** preview alpha — pre-stable, not for production federation across
-organizational boundaries. Source attestation remains experimental, opt-in, and
-operator-gated.
+**Status:** alpha (pre-stable). Source attestation remains experimental,
+opt-in, and operator-gated.
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a7`, `stigmem-py 0.9.0a7`, `stigmem-node 0.9.0a7`, and `stigmem-openclaw 0.9.0a7` (PEP 440).
@@ -200,9 +198,8 @@ operator-gated.
 
 ## [0.9.0a6] — 2026-05-22
 
-**Status:** preview alpha — pre-stable, not for production federation across
-organizational boundaries. Memory Garden advanced ACL remains experimental,
-opt-in, and operator-gated.
+**Status:** alpha (pre-stable). Memory Garden advanced ACL remains
+experimental, opt-in, and operator-gated.
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a6`, `stigmem-py 0.9.0a6`, `stigmem-node 0.9.0a6`, and `stigmem-openclaw 0.9.0a6` (PEP 440).
@@ -248,9 +245,8 @@ opt-in, and operator-gated.
 
 ## [0.9.0a5] — 2026-05-22
 
-**Status:** preview alpha — pre-stable, not for production federation across
-organizational boundaries. RTBF tombstones remain experimental, opt-in, and
-operator-gated.
+**Status:** alpha (pre-stable). RTBF tombstones remain experimental, opt-in,
+and operator-gated.
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a5`, `stigmem-py 0.9.0a5`, `stigmem-node 0.9.0a5`, and `stigmem-openclaw 0.9.0a5` (PEP 440).
@@ -283,9 +279,8 @@ operator-gated.
 
 ## [0.9.0a4] — 2026-05-22
 
-**Status:** preview alpha — pre-stable, not for production federation across
-organizational boundaries. Time-travel historical reads remain experimental,
-opt-in, and operator-gated.
+**Status:** alpha (pre-stable). Time-travel historical reads remain
+experimental, opt-in, and operator-gated.
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a4`, `stigmem-py 0.9.0a4`, `stigmem-node 0.9.0a4`, and `stigmem-openclaw 0.9.0a4` (PEP 440).
@@ -334,8 +329,7 @@ opt-in, and operator-gated.
 
 ## [0.9.0a3] — 2026-05-22
 
-**Status:** preview alpha — pre-stable, not for production federation across
-organizational boundaries.
+**Status:** alpha (pre-stable).
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a3`, `stigmem-py 0.9.0a3`, `stigmem-node 0.9.0a3`, and `stigmem-openclaw 0.9.0a3` (PEP 440).
@@ -417,7 +411,7 @@ root changelog projection used during release prep.
 
 ## [0.9.0a2] — 2026-05-18
 
-**Status:** preview alpha — pre-stable, not for production federation across organizational boundaries. See [LIMITATIONS.md](LIMITATIONS.md).
+**Status:** alpha (pre-stable). See [LIMITATIONS.md](LIMITATIONS.md).
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a2`, `stigmem-py 0.9.0a2`, `stigmem-node 0.9.0a2`, and `stigmem-openclaw 0.9.0a2` (PEP 440). The `stigmem` meta-package now depends on the alpha.2 package line by default.
@@ -464,7 +458,7 @@ The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled inter
 
 ## [0.9.0a1] — 2026-05-08
 
-**Status:** preview alpha — pre-stable, not for production federation across organizational boundaries. See [LIMITATIONS.md](LIMITATIONS.md).
+**Status:** alpha (pre-stable). See [LIMITATIONS.md](LIMITATIONS.md).
 
 **Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a1` (PEP 440) — **meta-package**: empty wheel that depends on `stigmem-py>=0.9.0a1,<1.0.0` by default. Extras: `stigmem[node]` adds the server, `stigmem[openclaw]` adds the adapter, `stigmem[all]` adds everything. Real code ships under `stigmem-py`, `stigmem-node`, `stigmem-openclaw`. The bare `stigmem` name is the convenience entry-point for adopters who want the SDK with one command (matches the convention of `redis`, `psycopg`, `elasticsearch`, `pymongo` — bare-name = client SDK).
@@ -478,7 +472,7 @@ The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled inter
   - `LIMITATIONS.md` at repo root — adopter-facing constraints, known gaps, deployment-pattern guidance.
   - `MAINTAINERS.md` at repo root — current maintainers and the [ADR-001 §Contributor approval rule](docs/adr/001-versioning.md).
   - `release/version-surfaces.yaml` — canonical inventory of release surfaces and their per-ecosystem spellings; consumed by `scripts/check_version_consistency.py`.
-  - `scripts/check_version_consistency.py`, `scripts/validate_version_surfaces.py`, and `.github/workflows/version-consistency.yml` — CI gate preventing the version-state inconsistency that triggered the v1.0 retraction.
+  - `scripts/check_version_consistency.py`, `scripts/validate_version_surfaces.py`, and `.github/workflows/version-consistency.yml` — CI gate enforcing version-state consistency across release surfaces.
   - 19 ADRs committed under `docs/adr/` (per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §12 (docs IA), [ADR-020](docs/adr/020-feature-owned-product-structure.md) §13 (repo structure)).
   - **README §Security posture** — at-a-glance security entry point with links to LIMITATIONS, threat-model, SECURITY.md, security architecture, and operator hardening.
   - **README §AI-authorship disclosure** — names which paths have been human-reviewed in depth and which haven't.
@@ -494,15 +488,15 @@ The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled inter
 
 ### Security
 
-- **Threat model status header** updated to v0.9.0a1 posture. Risks the original v1.0 announcement claimed mitigated but had not (mTLS-default federation, persistent audit log, per-principal rate limits, capability validation, bounded HLC skew) are now correctly listed as Open or Residual, scheduled for the v0.9.0bN beta series per [`ROADMAP.md`](ROADMAP.md).
-- **R-23** (admin-level storage tampering / fact mutation) added to the risk register; mitigation is the [ADR-016](docs/adr/016-storage-immutability-enforcement.md) L1–L5 storage-immutability stack, scheduled for the v0.9.0bN beta series.
-- **No CVE-class fixes in this release.** This is a posture reset, not a security-patch release.
+- **Threat model status header** updated to v0.9.0a1 posture. The controls required for cross-organizational production deployment (mTLS-default federation, persistent audit log, per-principal rate limits, capability validation, bounded HLC skew) are listed as Open or Residual and tracked on [`ROADMAP.md`](ROADMAP.md).
+- **R-23** (admin-level storage tampering / fact mutation) added to the risk register; mitigation is the [ADR-016](docs/adr/016-storage-immutability-enforcement.md) L1–L5 storage-immutability stack. The L1–L5 stack has since landed on `main` (migrations `033`–`036`, `fact_chain.py`, `lifecycle/immutability.py`); remaining hardening (Rekor anchoring cadence, mandatory SDK verify-by-default) is still future work.
+- **No CVE-class fixes in this release.**
 
 ### Deprecated
 
 - **No PyPI deprecation of the canonical packages needed.** Audit on 2026-05-08 confirmed `stigmem 1.0.0rc1` was never actually published to PyPI; the canonical `stigmem` name was unclaimed before the v0.9.0a1 first publish.
 
-- **`stigmem-openclaw` 1.0.3 and 1.0.5 are yanked** (PEP 592). Both versions declared `stigmem-py>=1.0.0rc1` as a hard dependency; `stigmem-py 1.0.0rc1` was never published, so both adapter versions were end-to-end **uninstallable** since publish (verified 2026-05-09 via `uv pip install --dry-run stigmem-openclaw==1.0.5` — fails with "stigmem-py was not found in the package registry"). The retraction-narrative concern that motivated the version reset — declaring maturity not yet earned — applies as much to these adapter publishes as it did to the v1.0 announcement; the yanks correct the record. Pinned installs of `==1.0.3` or `==1.0.5` continue to resolve to those versions (PEP 592 yank does not remove); new resolutions skip them. **`stigmem-openclaw 0.9.0a1`** is the first version that is actually installable.
+- **`stigmem-openclaw` 1.0.3 and 1.0.5 are yanked** (PEP 592). Both versions declared `stigmem-py>=1.0.0rc1` as a hard dependency; `stigmem-py 1.0.0rc1` was never published, so both adapter versions were end-to-end **uninstallable** since publish (verified 2026-05-09 via `uv pip install --dry-run stigmem-openclaw==1.0.5` — fails with "stigmem-py was not found in the package registry"). The yanks correct the record. Pinned installs of `==1.0.3` or `==1.0.5` continue to resolve to those versions (PEP 592 yank does not remove); new resolutions skip them. **`stigmem-openclaw 0.9.0a1`** is the first version that is actually installable.
 - **No npm package was previously published**, so there is nothing to deprecate on npm. `@eidetic-labs/stigmem-ts@0.9.0-alpha.1` is the **first** npm release of the TypeScript SDK; it ships in PR 0 alongside the PyPI release.
 
 ### Stability commitment
@@ -517,7 +511,7 @@ The following changes have landed on `main` after the v0.9.0a1 first build and a
 - **Deferred-feature extraction path.** The next alpha releases continue the C1 plugin architecture: lazy instruction discovery first, then time-travel, tombstones, memory-garden advanced ACL, source attestation, and multi-tenant isolation. CIDs remain core per ADR-011.
 - **Large-file refactors.** The major `cli.py`, federation-route, and facts-route split work has landed on `main`; it is no longer a blocker for the next alpha.
 - **Quality ratchets.** Lint-baseline tightening, coverage lift, and complexity cleanup remain active quality-improvement tracks for the alpha series.
-- **Published-artifact follow-ups.** The live retraction-post URL, TypeScript SDK README, npm dist-tag convention, ClawHub skill naming/versioning notes, GHCR `latest` tag policy, Python SDK version literal, and `stigmem-node` wheel migration packaging fix are all tracked for pickup in the next alpha artifacts where applicable. The v0.9.0a1 registry artifacts themselves remain immutable.
+- **Published-artifact follow-ups.** The TypeScript SDK README, npm dist-tag convention, ClawHub skill naming/versioning notes, GHCR `latest` tag policy, Python SDK version literal, and `stigmem-node` wheel migration packaging fix are all tracked for pickup in the next alpha artifacts where applicable. The v0.9.0a1 registry artifacts themselves remain immutable.
 
 ---
 

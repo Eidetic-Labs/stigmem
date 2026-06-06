@@ -15,8 +15,7 @@ Stigmem follows the alpha-beta-rc pre-release convention per [ADR-001](docs/adr/
 | `0.9.0a*` (the v0.9.0aN alpha series — current) | Yes — current pre-release line. **No stability guarantee.** Breaking changes during the hardening window are expected and documented in [CHANGELOG.md](CHANGELOG.md). |
 | Future beta line | Will be supported if and when a beta artifact is published; no active beta milestone exists today. |
 | Future release-candidate / GA lines | Will be supported if and when those artifacts are published; no active RC or GA milestone exists today. |
-| `1.0.0rc1` (retracted label, never shipped) | **N/A.** The label was announced publicly in 2026-05-03 but the package was never actually published to PyPI (audit 2026-05-08: `pypi.org/pypi/stigmem` returns 404). Nothing to install; nothing to yank. The label was withdrawn — see the retraction post linked from [README §Why v0.9.0a1 and not v1.0](README.md#why-v090a1-and-not-v10). |
-| `< 0.9.0a1` (development checkpoints — `v0.2` through `v2.0`) | **No.** These were internal development checkpoints, not tagged releases. The canonical version line begins at `v0.9.0a1`. |
+| `< 0.9.0a1` (earlier development checkpoints) | **No.** These were internal development checkpoints, not tagged releases. The canonical version line begins at `v0.9.0a1`. |
 
 ## Reporting a Vulnerability
 
@@ -323,22 +322,20 @@ above.
 
 ## Security Posture — v0.9.0a2 (2026-05-18)
 
-> **Posture-reset note.** Stigmem's `v1.0` announcement was withdrawn on 2026-05-08; the canonical version line was reset to `v0.9.0a1` per [ADR-001](docs/adr/001-versioning.md) and [ADR-001](docs/adr/001-versioning.md). The dependency-alert triage in this section was originally compiled for `the pre-reset v1.0-rc snapshot` on 2026-05-03 and is **carried forward to v0.9.0a2** because the underlying dependency upgrades remain in effect — the same or newer fixed package versions that resolved the alerts at the pre-reset v1.0-rc snapshot are installed at v0.9.0a2. The supported-version posture changed (see "Supported Versions" above); the dependency-fix evidence did not.
->
-> **Open security gaps named explicitly:** several controls our threat model identifies as required for stable production — mTLS-default federation, persistent audit log, per-principal rate limits, capability-level validation for cross-org instructions, bounded HLC skew enforcement, the storage-immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md)) — remain future hardened-core work and are **not yet in effect at v0.9.0a2**. Adopters running federation across organizational boundaries should wait until those controls ship in a later hardened-core line per [LIMITATIONS.md](LIMITATIONS.md). No beta, release-candidate, or GA milestone is active today.
+> **Open security gaps named explicitly:** several controls the threat model identifies as required for cross-organizational production deployment — mTLS-default federation, persistent audit log, per-principal rate limits, capability-level validation for cross-org instructions, bounded HLC skew enforcement — are not yet in effect. (The storage-immutability stack [ADR-016](docs/adr/016-storage-immutability-enforcement.md) has since landed on `main`.) Do not federate across organizational boundaries until the remaining controls ship; see [LIMITATIONS.md](LIMITATIONS.md).
 
-This section documents the current security posture of the stigmem `v0.9.0a2` release, including Dependabot and CodeQL triage carried forward from the 2026-05-03 pre-reset v1.0-rc snapshot plus follow-up dependency patches through 2026-05-18.
+This section documents the current security posture of the stigmem `v0.9.0a2` release, including Dependabot and CodeQL triage carried forward from the 2026-05-03 dependency sweep plus follow-up dependency patches through 2026-05-18.
 
 ### Summary
 
 | Category | Source | Count |
 | -------- | ------ | ----- |
-| Dependabot — alerts addressed by the pre-reset v1.0-rc snapshot dep upgrade sweep + follow-up patch sweeps | Dependency advisories | 27 |
+| Dependabot — alerts addressed by the 2026-05-03 dep upgrade sweep + follow-up patch sweeps | Dependency advisories | 27 |
 | Dependabot — alerts in docs build toolchain (non-exploitable, suppressed) | Dependency advisories | 7 |
 | CodeQL — conditional SQL-fragment assembly (false positives, closed by structural constant-SQL refactor) | Static dataflow analysis | 8 |
 | Unaddressed / escalated blockers | — | 0 |
 
-**Net result: zero unaddressed security alerts at v0.9.0a2.** Dependabot alerts are a *dependency* concern and CodeQL alerts are a *static-analysis* concern — both are separate from the threat-model risks named in the posture-reset banner above.
+**Net result: zero unaddressed security alerts at v0.9.0a2.** Dependabot alerts are a *dependency* concern and CodeQL alerts are a *static-analysis* concern — both are separate from the threat-model risks named in the open-security-gaps note above.
 
 ### Internal audit dispositions — v0.9.0a2
 
@@ -523,7 +520,7 @@ The stigmem reference node (`stigmem/node/`) is implemented in Python with FastA
 
 ### Security Controls in Effect (v0.9.0a2)
 
-> The controls listed here are **dependency- and code-level controls** that are in effect at v0.9.0a2. **Federation-level and threat-model-level controls** named in the posture-reset banner at the top of this section (mTLS-default, audit log, rate limits, capability validation, bounded HLC skew, storage-immutability stack) are **not yet in effect** and remain future hardened-core work, not an active beta milestone.
+> The controls listed here are **dependency- and code-level controls** that are in effect at v0.9.0a2. **Federation-level controls** named in the open-security-gaps note at the top of this section (mTLS-default, audit log, rate limits, capability validation, bounded HLC skew) are **not yet in effect** and remain on the roadmap. The storage-immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md)) has since landed on `main`.
 
 - **Authentication:** API keys enforced on all write endpoints; per-scope restrictions supported by `Spec-02-Scopes-and-ACL` and `Spec-06-Capability-Tokens`.
 - **Federation:** Peer handshake uses Ed25519 signing; replay attack resistance via HLC timestamps per `Spec-05-Federation-Trust` and `Spec-11-Replay-Protection`.

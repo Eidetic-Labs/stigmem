@@ -26,9 +26,9 @@ The work is organized into sequential version lines per [ADR-001](docs/adr/001-v
 
 | Version line | Goal |
 |---|---|
-| **`v0.9.0aN` — alpha series** | Public posture matches reality. v0.9.0a1 reset; a2+ artifact refreshes correct ClawHub/OpenClaw alpha framing; docs site restructured; modular spec migration completed per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §9 (modular specs); cross-cutting features extracted to plugins per [ADR-011](docs/adr/011-cross-cutting-extraction.md). |
-| **Future beta line — hardened core** | Opens only after alpha exit evidence supports it. Every Open risk in the v1.0.0 critical-path threat model must close before beta exit: capability redesign, federation hardening, Argon2id migration, OpenClaw safety, per-feature security colocation, storage immutability stack, and 30-day external operator soak. No active GitHub milestone exists yet. |
-| **Future release-candidate and GA lines** | Opens only after hardened-core exit. Sigstore-signed releases; reproducible builds; SBOM; 3+ external operators in production. Wire format frozen. No active GitHub milestone exists yet. |
+| **`v0.9.0aN` — alpha series** | Single-org, single-node, audit-first scope. Artifact refreshes align ClawHub/OpenClaw alpha framing; docs site restructured; modular spec migration completed per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §9 (modular specs); cross-cutting features extracted to plugins per [ADR-011](docs/adr/011-cross-cutting-extraction.md). |
+| **Future beta line — hardened core** | Opens only after alpha exit evidence supports it. Every Open risk in the v1.0.0 critical-path threat model must close before beta exit: capability redesign, federation hardening, Argon2id migration, OpenClaw safety, and per-feature security colocation. The storage-immutability stack has landed on `main`; remaining hardening (Rekor anchoring cadence, mandatory SDK verify-by-default) continues in this line. No active GitHub milestone exists yet. |
+| **Future release-candidate and GA lines** | Opens only after hardened-core exit. Sigstore-signed releases; reproducible builds; SBOM; external operator validation in production (per [ADR-001](docs/adr/001-versioning.md) 1.0 GA criteria). Wire format frozen. No active GitHub milestone exists yet. |
 | **`v1.x.y` — post-GA expansion** | Experimental features graduate into the supported surface via [ADR-008](docs/adr/008-experimental-gates.md) reintroduction gates; cross-cutting features remain opt-in plugins per ADR-011; modular spec evolution. |
 
 ---
@@ -104,7 +104,7 @@ Per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §9 (modular spec
 
 ### Why Legacy Section Numbering Is Still Visible
 
-The pre-reset stigmem spec was a single monolithic document with sections
+The original stigmem spec was a single monolithic document with sections
 numbered 1 through 25. ADR-010 supersedes that model. The supported component
 specs now live under `spec/specs/`, experimental specs live under
 `experimental/<feature>/spec.md`, and `spec/PROTOCOL.md` is generated from
@@ -159,10 +159,10 @@ their frontmatter.
 
 - **Public engineering log:** Friday weekly post in `docs/blog/` (alpha-series onwards).
 - **CHANGELOG.md** at repo root — Keep-a-Changelog format.
-- **GitHub Project — "Stigmem GA Readiness Plan":** [eidetic-labs/projects/1](https://github.com/orgs/eidetic-labs/projects/1) (flips public at v0.9.0a1 retraction).
+- **GitHub Project — "Stigmem GA Readiness Plan":** [eidetic-labs/projects/1](https://github.com/orgs/eidetic-labs/projects/1).
 - **ADR index:** [`docs/adr/README.md`](docs/adr/README.md).
-- **Compatibility matrix** (lands during the future hardened-core line): published at `docs.stigmem.dev/operate/compatibility`.
-- **Model certification list** (lands during the future hardened-core line, per ADR-015): published at `docs.stigmem.dev/secure/model-certification`.
+- **Compatibility matrix** (planned): to be published at `docs.stigmem.dev/operate/compatibility`.
+- **Model certification list** (per [ADR-015](docs/adr/015-adversarial-conformance-and-model-certification.md)): the `corpus-v1` adversarial conformance corpus (80 patterns) and certification runner ship today; the reviewed *public* model-results list is still pending and will be published at `docs.stigmem.dev/secure/model-certification`.
 
 ---
 
