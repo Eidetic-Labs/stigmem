@@ -119,6 +119,7 @@ def _verify_inbound_cid(fact: dict[str, Any], sender_node_id: str) -> str | None
         source=str(fact.get("source", "")),
         scope=str(fact.get("scope", "")),
         confidence=float(fact.get("confidence", 1.0)),
+        interpret_as=str(value.get("interpret_as", "content")),
     )
     if stored_cid != computed_cid:
         raise FederationIntegrityError(
