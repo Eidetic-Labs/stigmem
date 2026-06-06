@@ -1,11 +1,18 @@
-"""Content-addressed fact IDs — spec §25.
+"""Content-addressed fact IDs — spec §25 (CID v2).
 
 CID = "sha256:" + hex_lowercase(SHA-256(RFC8785(canonical_fact_body)))
 
-The canonical body is a JSON object with exactly 7 fields in lexicographic key order:
-  confidence, entity, relation, scope, source, value_type, value_v
+**CID v2 (breaking change, 2026-06-06).** The canonical body is a JSON object
+with exactly 8 fields in lexicographic key order:
+  confidence, entity, interpret_as, relation, scope, source, value_type, value_v
 
-Security-relevant excluded fields (§25.2.1 rev 14):
+`interpret_as` is now bound (per ADR-003 / threat R-23): flipping a fact's
+interpretation between `content` and `instruction` changes the CID, so it is
+detected on the read path. **v1 CIDs (which omitted `interpret_as`) are NOT
+accepted** — pre-v2 facts must be upgraded via the CID backfill migration;
+until migrated they fail read-path verification (409 cid_mismatch).
+
+Security-relevant excluded fields (§25.2.1 rev 15):
   valid_until, derived_from, attestation_chain, source_trust, signature, reason
   (these require independent validation; CID coverage alone is not sufficient)
 
@@ -32,11 +39,17 @@ def compute_cid(
     source: str,
     scope: str,
     confidence: float = 1.0,
+    interpret_as: str = "content",
 ) -> str:
-    """Return the CID for a fact's canonical body (spec §25.2.1, §25.2.2)."""
+    """Return the CID v2 for a fact's canonical body (spec §25.2.1, §25.2.2).
+
+    `interpret_as` is part of the canonical body (CID v2); a flip between
+    `content` and `instruction` produces a different CID.
+    """
     body: dict[str, Any] = {
         "confidence": confidence,
         "entity": entity,
+        "interpret_as": interpret_as,
         "relation": relation,
         "scope": scope,
         "source": source,
@@ -60,6 +73,7 @@ def compute_cid_from_row(row: Any) -> str:
         source=row["source"],
         scope=row["scope"],
         confidence=float(row["confidence"]),
+        interpret_as=(_optional_row_value(row, "interpret_as") or "content"),
     )
 
 

@@ -338,6 +338,7 @@ def assert_fact_impl(
         source=source,
         scope=req.scope,
         confidence=req.confidence,
+        interpret_as=req.value.interpret_as,
     )
 
     _embed_enabled = _live_settings().embed_enabled
