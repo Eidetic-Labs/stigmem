@@ -329,7 +329,7 @@ Stigmem core ships compatibly with them but does not require them.
 <div>
 <dt>Defer immutability to v2.0; document gap in LIMITATIONS.md</dt>
 <dt><span className="stigmem-fields__type">rejected</span></dt>
-<dd>ADR-003's defenses already accepted with the assumption storage is immutable. Deferring means ADR-003's claims are aspirational, not architecturally enforced. The retraction of v1.0 was caused by exactly this kind of mismatch.</dd>
+<dd>ADR-003's defenses already accepted with the assumption storage is immutable. Deferring means ADR-003's claims are aspirational, not architecturally enforced — a mismatch between claimed and enforced guarantees that the immutability stack exists to close.</dd>
 </div>
 
 <div>

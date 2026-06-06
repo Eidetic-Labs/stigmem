@@ -1,15 +1,18 @@
-# ADR-008: Re-introduction gates for v2.0.0-experimental features
+# ADR-008: Feature lifecycle, version exposure & deprecation
 
-<p className="stigmem-meta"><span>4 min read</span><span>Accepted</span><span>Recorded 2026-05-06</span></p>
+<p className="stigmem-meta"><span>7 min read</span><span>Accepted</span><span>Recorded 2026-05-06</span></p>
 
 <div className="stigmem-lead">
 
 **What this ADR decides**
 
-A feature in `experimental/` returns to a default-on, supported state
-only after passing five sequential gates: threat-model delta, ADR,
-conformance vectors, 30-day external operator soak, documentation
-parity across the four tabs.
+The full feature lifecycle: the five sequential gates a feature in
+`experimental/` passes to reach a default-on, supported state
+(threat-model delta, ADR, conformance vectors, an internal-quality
+bar, documentation parity); how stability and version are exposed
+inline and on the wire (the `<Stability/>` frontmatter convention plus
+the `Stigmem-Version` / `Stigmem-Beta` headers); and the
+`stable → deprecated → removed` deprecation policy.
 
 </div>
 
@@ -17,8 +20,12 @@ parity across the four tabs.
 
 **Status: Accepted.**
 
-The process is costly enough that scope-creep is real friction, but
-not so costly that legitimately-ready features get permanently stuck.
+Folds in ADR-012 (version-aware feature exposure) and ADR-013
+(deprecation policy) as the "version exposure" and "deprecation"
+halves of one feature-lifecycle decision (de-contrition consolidation,
+2026-06-06). The process is costly enough that scope-creep is real
+friction, but not so costly that legitimately-ready features get
+permanently stuck.
 
 </div>
 
@@ -36,13 +43,12 @@ feature to come back?**
 
 <div className="stigmem-keypoint">
 
-**Without a structured process, one well-meaning PR away from v1.0 redux.**
+**A structured process keeps surface area from outrunning correctness.**
 
-Without structure, the project is one well-meaning PR away from
-re-creating the retracted v1.0 — surface area accumulating faster
-than correctness can keep up. With a structured process, every
-feature's return is a deliberate decision with measurable gates, and
-the v1.0 critical-path stability is preserved.
+Without structure, surface area accumulates faster than correctness
+can keep up. With a structured process, every feature's return is a
+deliberate decision with measurable gates, and the v1.0 critical-path
+stability is preserved.
 
 </div>
 
@@ -128,27 +134,34 @@ The feature's wire-format and behavioral contract are encoded at
 Vectors are wired into CI as a blocking job. PRs that break the
 conformance suite fail to merge.
 
-### Gate 4 · 30-day external operator soak
+### Gate 4 · Internal-quality bar
 
-At least one external operator runs the feature in a real workload
-for 30 days, with public bug reporting in the stigmem GitHub issues.
+The feature meets a demonstrable internal-quality bar before it
+graduates. No external sign-off is a precondition here.
 
 <div className="stigmem-keypoint">
 
-**Operator must not be the feature author.**
-
-Can be a community contributor, partner organization, or paid soak
-partner — the only requirement is independence from the original
-author.
+**Green against the internal harness, with the invariants intact.**
 
 </div>
 
-The soak produces:
-
 <div className="stigmem-grid">
 
-<div><h4>Public <code>LOG.md</code> entry</h4><p>Summarizing what was found, what was fixed, what remains open.</p></div>
-<div><h4>At least one closed issue</h4><p>Tagged <code>&lt;feature&gt;-soak-finding</code>. Soaks that produce zero findings are suspect — Gate 4 fails.</p></div>
+<div><h4>Eval / regression harness</h4><p>The feature runs green in the internal eval-harness / regression suite against a representative workload.</p></div>
+<div><h4>Structural CI guards</h4><p>All structural CI guards pass (writer-coverage, auth-coverage, transitive-reachability, and the other guards in <code>check.sh</code>).</p></div>
+<div><h4>Invariants preserved</h4><p>The immutability, provenance, and audit invariants are demonstrably preserved — these are the properties that actually protect the product.</p></div>
+
+</div>
+
+<div className="stigmem-keypoint">
+
+**External operator soak is a 1.0 GA criterion, not a per-feature gate.**
+
+External operator validation was relocated to the 1.0 GA stability
+gate in [ADR-001](./001-versioning) (de-contrition consolidation,
+2026-06-06). Gating every pre-1.0 graduation on external testers
+deadlocks the roadmap; gating 1.0 stability on external validation is
+legitimate. See ADR-001 §1.0 GA stability gate.
 
 </div>
 
@@ -203,10 +216,10 @@ driver doesn't need Learn coverage), that's documented in the ADR
 
 Gate 1 (threat model) before Gate 2 (ADR), because the design decision
 should be informed by the security analysis. Gate 3 (conformance)
-before Gate 4 (soak), because the operator should soak against a
-behaviorally-defined contract, not a moving target. Gate 5 (docs) at
-the end, because docs against a still-changing implementation rot
-before they ship.
+before Gate 4 (internal-quality bar), because the harness verifies
+against a behaviorally-defined contract, not a moving target. Gate 5
+(docs) at the end, because docs against a still-changing implementation
+rot before they ship.
 
 </div>
 
@@ -224,6 +237,180 @@ it wasn't tested on enough operating systems.
 
 **The default is all five gates. Skipping is exception, not rule.**
 
+## Version exposure (folds ADR-012)
+
+Stability and version-introduced state are visible inline on every
+feature page and on the wire, so readers never have to parse a
+CHANGELOG to know what they can rely on.
+
+### Frontmatter convention
+
+Every concept, feature, SDK, operator, security, and spec page carries:
+
+```yaml
+---
+stability: stable | beta | experimental | deprecated
+since: 0.9.0a1
+applies_to_version: 0.9.0+
+spec_section: §17 (optional, for spec-bound features)
+removed_in: 2.0.0 (only on deprecated entries)
+replacement: ./new-feature-page.md (only on deprecated entries)
+---
+```
+
+The four stability tiers carry concrete promises:
+
+<div className="stigmem-fields">
+
+<div>
+<dt><code>stable</code></dt>
+<dt><span className="stigmem-fields__type">no breaks within major</span></dt>
+<dd>Spec section normative. In production. Eval-covered. No breaking changes planned within the major version.</dd>
+</div>
+
+<div>
+<dt><code>beta</code></dt>
+<dt><span className="stigmem-fields__type">minor breaks possible</span></dt>
+<dd>Spec normative. Feature-flagged or in early adopters. Minor breaking changes possible before next major.</dd>
+</div>
+
+<div>
+<dt><code>experimental</code></dt>
+<dt><span className="stigmem-fields__type">breaks expected</span></dt>
+<dd>Implemented behind a flag. Spec section may be <code>draft</code>. Breaking changes expected. Use in production at your own risk.</dd>
+</div>
+
+<div>
+<dt><code>deprecated</code></dt>
+<dt><span className="stigmem-fields__type">marked for removal</span></dt>
+<dd>Still operational; replacement available. See the deprecation policy below for the removal timeline.</dd>
+</div>
+
+</div>
+
+### `<Stability />` component
+
+A custom Docusaurus React component renders a colored banner at the top
+of every feature page from frontmatter:
+
+```tsx
+<Stability level="experimental" since="0.9.0a1" specSection="§21" />
+```
+
+For deprecated features, the banner additionally surfaces `removed_in`
+and a link to the `replacement` page. A CI validator (the
+`validate-audience` plugin, extended) asserts `stability:` is present,
+`since:` matches SemVer, enum values are valid, `removed_in:` is
+present iff `stability: deprecated`, and `replacement:` resolves. New
+pages cannot land without correct stability metadata. The standalone
+`experimental-features.md` page is replaced by an auto-generated index
+of every page with `stability: experimental`.
+
+### Stripe-pattern wire-format pinning
+
+Two HTTP headers operate at the protocol level, parallel to the inline
+page-level annotations.
+
+<div className="stigmem-fields">
+
+<div>
+<dt><code>Stigmem-Version: 0.9.0a1</code></dt>
+<dt><span className="stigmem-fields__type">client version pinning</span></dt>
+<dd>Clients lock to a declared protocol version. Server honors it; future server versions stay backward-compatible to declared versions for at least one major release (per the deprecation policy below).</dd>
+</div>
+
+<div>
+<dt><code>Stigmem-Beta: feature-name</code></dt>
+<dt><span className="stigmem-fields__type">per-call opt-in</span></dt>
+<dd>Clients opt into experimental wire-level features per-call — a server-side feature flag at the protocol level. Supported beta names live at <code>/v1/.well-known/stigmem</code> in a <code>betas</code> field. When a beta feature reaches <code>stable</code>, the header retires (returns <code>410 Gone</code>).</dd>
+</div>
+
+</div>
+
+These map to Stripe's `Stripe-Version` and beta-gate headers and serve
+the same purpose: per-client stability isolation without forcing
+server-side state on every flag combination. SDKs pass both headers
+through.
+
+## Deprecation policy (folds ADR-013)
+
+A feature's lifecycle is `stable → deprecated → removed`. A written
+deprecation policy is part of credibility for infrastructure that
+expects serious operators.
+
+```
+stable → deprecated → removed
+                        (no earlier than next major)
+```
+
+<div className="stigmem-fields">
+
+<div>
+<dt>Stable</dt>
+<dt><span className="stigmem-fields__type">no breaks in vX.*</span></dt>
+<dd>Deprecated in vX.Y → supported through all vX.* → removable no earlier than vX+1.0.</dd>
+</div>
+
+<div>
+<dt>Beta</dt>
+<dt><span className="stigmem-fields__type">shorter commitment</span></dt>
+<dd>Deprecated in vX.Y → removable in vX.Y+1. Beta features are not stable promises.</dd>
+</div>
+
+<div>
+<dt>Experimental</dt>
+<dt><span className="stigmem-fields__type">no commitment</span></dt>
+<dd>May be removed without notice in the next release. Ship behind flags so users can try them, but no compatibility commitment applies.</dd>
+</div>
+
+</div>
+
+The version-distance model (Kubernetes-style) couples removal to
+release distance, not calendar dates — consistent with phase-gated
+conventions.
+
+### Required artifacts at deprecation
+
+When a feature is marked `stability: deprecated`, the same PR ships:
+the updated `<Stability level="deprecated" />` banner with `removed_in:`
+and `replacement:` set; a migration note on the feature page; a
+CHANGELOG entry under `### Deprecated`; an auto-generated row in the
+aggregate `Deprecated features` index; and, for wire-format
+deprecations, a documented `Stigmem-Version` upgrade path. The CI
+validator (extended from the version-exposure plugin) fails the PR if
+any artifact is missing.
+
+### Deprecation kinds
+
+<div className="stigmem-fields">
+
+<div>
+<dt>Wire-format deprecation</dt>
+<dt><span className="stigmem-fields__type">spec section</span></dt>
+<dd>Old wire format still accepted but warned. The server emits a <code>Stigmem-Deprecation: feature-name</code> response header on requests exercising the deprecated surface; SDKs surface it as a logged warning. Plus spec amendment.</dd>
+</div>
+
+<div>
+<dt>API surface deprecation</dt>
+<dt><span className="stigmem-fields__type">SDK method</span></dt>
+<dd>Method replaced. Plus SDK release note + runtime deprecation warning where idiomatic for the language.</dd>
+</div>
+
+<div>
+<dt>Operational deprecation</dt>
+<dt><span className="stigmem-fields__type">env var / config key</span></dt>
+<dd>Configuration replaced. Plus a startup log warning when the deprecated config is in use.</dd>
+</div>
+
+</div>
+
+A canonical compatibility-commitment page states the commitment in
+plain language; it is reviewed at every major release, and any
+tightening or loosening goes through an ADR amendment. The
+deprecation-without-replacement case is not allowed: if no replacement
+exists, the feature is `removed`, not `deprecated` — hard removal is
+honest; deprecation-without-replacement is theater.
+
 ## Alternatives considered
 
 <div className="stigmem-fields">
@@ -237,19 +424,19 @@ it wasn't tested on enough operating systems.
 <div>
 <dt>No gates; let maintainer judgment decide</dt>
 <dt><span className="stigmem-fields__type">rejected</span></dt>
-<dd>Maintainer judgment is exactly what produced the retracted v1.0. The gates exist precisely to provide structure that survives the temptation to "just include this one feature."</dd>
+<dd>Unstructured judgment lets surface area outrun correctness. The gates exist precisely to provide structure that survives the temptation to "just include this one feature."</dd>
 </div>
 
 <div>
-<dt>Fewer gates (drop the 30-day soak; rely on internal testing)</dt>
-<dt><span className="stigmem-fields__type">rejected</span></dt>
-<dd>The 30-day external operator soak is the single highest-value gate. Internal testing finds bugs the authors anticipated; external soak finds bugs the authors didn't think to test for.</dd>
+<dt>Make per-feature graduation depend on an external operator soak</dt>
+<dt><span className="stigmem-fields__type">rejected (relocated to 1.0 GA)</span></dt>
+<dd>An external precondition on every pre-1.0 graduation deadlocks: nothing graduates until external testers exist, but external testers won't engage a product whose features are all held pre-graduation. The internal-quality bar (Gate 4) protects the invariants that matter; external validation moves to the 1.0 GA stability gate in ADR-001.</dd>
 </div>
 
 <div>
 <dt>More gates (add an external auditor review)</dt>
 <dt><span className="stigmem-fields__type">considered for v1.0.0 GA, not per feature</span></dt>
-<dd>External auditing is a fit for major version releases; individual features get the threat-model delta plus conformance suite plus soak.</dd>
+<dd>External auditing is a fit for major version releases; individual features get the threat-model delta plus conformance suite plus the internal-quality bar.</dd>
 </div>
 
 <div>
@@ -302,13 +489,13 @@ it wasn't tested on enough operating systems.
 <div>
 <dt><code>R-GATE-1</code> · gate gaming</dt>
 <dt><span className="stigmem-fields__type">tracked</span></dt>
-<dd>An author who wants to ship faster might produce a perfunctory threat-model delta or a soak with one cooperative operator. Mitigation: contributors' sign-off on each gate; community can call out perfunctory artifacts publicly.</dd>
+<dd>An author who wants to ship faster might produce a perfunctory threat-model delta or wave the feature through the internal-quality bar without a representative workload. Mitigation: contributors' sign-off on each gate; the eval-harness and structural CI guards are machine-checked, not self-attested; community can call out perfunctory artifacts publicly.</dd>
 </div>
 
 <div>
 <dt><code>R-GATE-2</code> · features stuck behind one gate</dt>
 <dt><span className="stigmem-fields__type">tracked</span></dt>
-<dd>A feature with clear threat model and ADR but no available soak operator can't progress. Mitigation: contributors can act as soak operators in extreme cases (with soak duration extended to 60 days to compensate for existing familiarity).</dd>
+<dd>A feature with clear threat model and ADR but a thin eval workload can't credibly clear Gate 4. Mitigation: the internal-quality bar is reachable by the author directly — building a representative workload and wiring the invariants into CI is in-scope work, not a dependency on an external party.</dd>
 </div>
 
 <div>

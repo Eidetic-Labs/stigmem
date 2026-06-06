@@ -1,6 +1,8 @@
 # ADR-007: Argon2id migration for API key hashing
 
-<p className="stigmem-meta"><span>4 min read</span><span>Accepted</span><span>Recorded 2026-05-06</span></p>
+> **Archived.** Settled one-time migration (de-contrition consolidation, 2026-06-06). The durable fact (API keys are Argon2id-hashed, OWASP params) lives in the security feature record.
+
+<p className="stigmem-meta"><span>4 min read</span><span>Archived</span><span>Recorded 2026-05-06</span></p>
 
 <div className="stigmem-lead">
 
@@ -15,7 +17,7 @@ bulk re-hash at v1.0.0 stable.
 
 <div className="stigmem-keypoint">
 
-**Status: Accepted.**
+**Status: Archived.**
 
 Closes the discrepancy where v1.0 documentation said "Argon2id-hashed
 at rest" while the implementation used SHA-256.

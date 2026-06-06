@@ -1,6 +1,8 @@
 # ADR-005: Documentation information architecture
 
-<p className="stigmem-meta"><span>5 min read</span><span>Accepted</span><span>Recorded 2026-05-06</span></p>
+> **Superseded by ADR-020.** Content folded into ADR-020 (de-contrition consolidation, 2026-06-06). Full text retained here for history.
+
+<p className="stigmem-meta"><span>5 min read</span><span>Superseded by ADR-020</span><span>Recorded 2026-05-06</span></p>
 
 <div className="stigmem-lead">
 
@@ -16,7 +18,7 @@ five values aligned with the tabs.
 
 <div className="stigmem-keypoint">
 
-**Status: Accepted.**
+**Status: Superseded by ADR-020.**
 
 For a category where trust *is* the product, demoting security to a
 sub-section sends the wrong signal. Secure is a peer tab.

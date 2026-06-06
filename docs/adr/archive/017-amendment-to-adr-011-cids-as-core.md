@@ -1,6 +1,8 @@
 # ADR-017: Amendment to ADR-011 — CIDs as core (not plugin)
 
-<p className="stigmem-meta"><span>4 min read</span><span>Accepted</span><span>Recorded 2026-05-07</span></p>
+> **Superseded by ADR-011.** Content folded into ADR-011 (de-contrition consolidation, 2026-06-06). Full text retained here for history.
+
+<p className="stigmem-meta"><span>4 min read</span><span>Superseded by ADR-011</span><span>Recorded 2026-05-07</span></p>
 
 <div className="stigmem-lead">
 

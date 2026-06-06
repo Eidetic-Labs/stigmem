@@ -17,8 +17,8 @@ the list is — by definition — not in v1.0 and moves to
 
 **Status: Accepted.**
 
-Supersedes the implicit "ship everything we can build" scope of the
-withdrawn v1.0 release.
+Defines the v1.0 critical-path scope as an explicit, amendment-gated
+contract.
 
 </div>
 
@@ -26,15 +26,12 @@ withdrawn v1.0 release.
 
 ## Context
 
-The withdrawn v1.0 release contained substantial surface area —
-approximately 55,000 lines of code, an §1–§25 spec, multiple SDKs,
-multiple deployment targets, and a curator dashboard. The work is
-genuine engineering. What it lacked was independent validation: no
-operator soak, several known security gaps (per the OpenClaw audit
-and threat-model R-15), and a breadth that made it difficult to
-harden the core within a reasonable timeframe. v0.9.0-preview is the
-focused subset that the project can credibly commit to as v1.0 after
-Phase B hardening and operator validation.
+Stigmem's buildable surface is broad — an §1–§25 spec, multiple SDKs,
+multiple deployment targets, and a curator dashboard. Breadth is not
+the same as a defensible v1.0. The critical path is the focused subset
+the project commits to harden, validate, and support as v1.0; the rest
+lives in `experimental/` and returns individually through
+[ADR-008](./008-experimental-gates)'s gates.
 
 <div className="stigmem-keypoint">
 
@@ -275,14 +272,12 @@ re-introduction gates.
 
 ### Cross-references to security docs
 
-The threat model and scenarios should reflect this scope. Per the
-security-revisions punch list (P0-1), risks R-15 through R-18
-(associated with §21–§25 features) move to an
-`experimental-risks.md` companion document. Risks R-19 through R-22
-(HLC, embedding, worm vector, supply chain) stay on the v1.0 register.
-
-The OpenClaw audit's findings (C1, C4, H1, H2, H4, etc.) are all in
-v1.0 scope — the OpenClaw v0.9 adapter is a v1.0 deliverable.
+The threat model and scenarios reflect this scope. Risks associated
+with deferred §21–§25 features live with those features (per
+[ADR-018](./018-security-documentation-colocation)); cross-cutting
+risks (HLC, embedding, worm vector, supply chain) stay on the v1.0
+register. The OpenClaw v0.9 adapter is a v1.0 deliverable; its audit
+findings are in v1.0 scope.
 
 ## Amendment process
 

@@ -1,6 +1,8 @@
 # ADR-019: Amendment to ADR-001 — adopt PEP 440 / semver alpha-beta-rc convention for pre-release version strings
 
-<p className="stigmem-meta"><span>5 min read</span><span>Accepted</span><span>Recorded 2026-05-08</span></p>
+> **Superseded by ADR-001.** Content folded into ADR-001 (de-contrition consolidation, 2026-06-06). Full text retained here for history.
+
+<p className="stigmem-meta"><span>5 min read</span><span>Superseded by ADR-001</span><span>Recorded 2026-05-08</span></p>
 
 <div className="stigmem-lead">
 

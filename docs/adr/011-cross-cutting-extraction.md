@@ -16,12 +16,23 @@ install matches the v1.0 scope contract exactly.
 
 <div className="stigmem-keypoint">
 
-**Amended by ADR-017 (2026-05-07).**
+**Six cross-cutting plugins + CIDs-as-core.**
 
-CIDs were reclassified from plugin to core. Six cross-cutting features
-remain as plugins. ADR-011's body is preserved as the historical
-record; readers should consult ADR-017 for the current scope of
-plugins-vs-core.
+Folds in ADR-017 (de-contrition consolidation, 2026-06-06): content-
+addressed fact IDs (CIDs, §25) are **core, not a plugin** — default
+install computes CIDs on every fact write and verifies on every read,
+because CIDs are load-bearing for ADR-003's trust boundary and
+ADR-016's immutability stack (L3). The CID code lives in
+`node/src/stigmem_node/cid.py` (core); CID hooks (`pre_assert_transform`
+for generation, `federation_inbound_validate` for verification)
+register from node startup, not via plugin discovery. **Operators
+cannot disable CIDs — there is no `STIGMEM_CIDS_ENABLED=false`; the CID
+is part of fact identity.** The remaining six cross-cutting features
+(lazy instruction discovery, time-travel, RTBF tombstones,
+memory-garden advanced ACL, source attestation, multi-tenant) stay
+plugins per the C1 architecture below, which is otherwise unchanged.
+The original [ADR-017](./archive/017-amendment-to-adr-011-cids-as-core)
+text is retained in `docs/adr/archive/` for history.
 
 </div>
 
@@ -656,7 +667,10 @@ no plugins for those concerns are registered.
 
 ### Per-feature plugin manifests (Phase A scope)
 
-Seven plugins implemented in Phase A.
+Six cross-cutting plugins, plus CIDs as core (CIDs were originally
+scoped as the seventh plugin; the folded ADR-017 decision moved them to
+core — see the Status block). The manifest table below lists all seven
+as originally designed; the CID row is annotated as core.
 
 <div className="stigmem-fields">
 
@@ -675,7 +689,7 @@ Seven plugins implemented in Phase A.
 <div>
 <dt><code>stigmem-plugin-cids</code></dt>
 <dt><span className="stigmem-fields__type"><code>pre_assert_transform</code>, <code>federation_inbound_validate</code>, <code>migration_register</code> · 4–5 days</span></dt>
-<dd>§25 (NOTE: reclassified to core per ADR-017)</dd>
+<dd>§25 (NOTE: CIDs are core, not a plugin — folded from ADR-017; see Status block)</dd>
 </div>
 
 <div>

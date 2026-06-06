@@ -1,6 +1,8 @@
 # ADR-009: Repository file structure
 
-<p className="stigmem-meta"><span>9 min read</span><span>Accepted</span><span>Revised 2026-05-07</span></p>
+> **Superseded by ADR-020.** Content folded into ADR-020 (de-contrition consolidation, 2026-06-06). Full text retained here for history.
+
+<p className="stigmem-meta"><span>9 min read</span><span>Superseded by ADR-020</span><span>Revised 2026-05-07</span></p>
 
 <div className="stigmem-lead">
 
