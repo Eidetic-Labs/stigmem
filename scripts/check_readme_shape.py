@@ -13,7 +13,6 @@ README = ROOT / "README.md"
 PYPROJECT = ROOT / "pyproject.toml"
 
 REQUIRED_H2 = [
-    "Why pre-stable",
     "Quickstart - 60 seconds to a running node",
     "Install",
     "Plugins",
