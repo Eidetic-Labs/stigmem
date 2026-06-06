@@ -576,11 +576,23 @@ def _cmd_backfill_cids(args: argparse.Namespace) -> int:
         if not quiet:
             print(f"backfill-cids: processed {total_updated} facts…", file=sys.stderr)
 
+    # CID v2 migration: repoint existing facts' aliases to their v2 CID (binds
+    # interpret_as). Pre-v2 facts fail read-path verification until this runs.
+    from .lifecycle.immutability import rebind_facts_to_cid_v2
+
+    rebind_stats = rebind_facts_to_cid_v2(conn, batch_size=batch_size)
+
     conn.close()
     if not quiet:
         print(
             f"backfill-cids: done — {total_updated} facts updated"
-            + (f", {collision_skipped} CID collisions skipped" if collision_skipped else ""),
+            + (f", {collision_skipped} CID collisions skipped" if collision_skipped else "")
+            + f"; CID v2 rebind: {rebind_stats['rebound']} repointed"
+            + (
+                f", {rebind_stats['skipped_collision']} collisions skipped"
+                if rebind_stats["skipped_collision"]
+                else ""
+            ),
             file=sys.stderr,
         )
     return 0

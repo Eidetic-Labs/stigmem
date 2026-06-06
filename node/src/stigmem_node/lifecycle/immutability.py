@@ -170,3 +170,76 @@ def set_fact_cid_backfill_status(
         "updated_at = excluded.updated_at",
         (fact_id, status, utc_now_iso(), error, utc_now_iso()),
     )
+
+
+def rebind_facts_to_cid_v2(conn: Any, *, batch_size: int = 500) -> dict[str, int]:
+    """Re-point every fact's CID alias to its CID v2 (binds ``interpret_as``).
+
+    CID v2 added ``interpret_as`` to the canonical body. The immutable
+    ``facts.cid`` column is left untouched; the rebuildable ``fact_cid_aliases``
+    projection — which ``projected_cid`` reads and which the read-path CID
+    verification prefers — is repointed to the v2 CID so migrated facts verify
+    under CID v2. The pre-v2 (v1) alias is removed, so a lookup by a fact's old
+    v1 CID stops resolving (the accepted pre-1.0 clean break).
+
+    Idempotent and collision-safe. Returns ``{"rebound": n, "skipped_collision": n}``.
+    """
+    from ..cid import compute_cid
+
+    rebound = 0
+    skipped_collision = 0
+    last_id: str | None = None
+    while True:
+        if last_id is None:
+            rows = conn.execute(
+                "SELECT id, entity, relation, value_type, value_v, source, scope, "
+                "confidence, interpret_as FROM facts ORDER BY id LIMIT ?",
+                (batch_size,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, entity, relation, value_type, value_v, source, scope, "
+                "confidence, interpret_as FROM facts WHERE id > ? ORDER BY id LIMIT ?",
+                (last_id, batch_size),
+            ).fetchall()
+        if not rows:
+            break
+        for row in rows:
+            last_id = row["id"]
+            v2 = compute_cid(
+                entity=row["entity"],
+                relation=row["relation"],
+                value_type=row["value_type"],
+                value_v=row["value_v"] or "",
+                source=row["source"],
+                scope=row["scope"],
+                confidence=float(row["confidence"]),
+                interpret_as=(row["interpret_as"] or "content"),
+            )
+            existing = {
+                c["cid"]
+                for c in conn.execute(
+                    "SELECT cid FROM fact_cid_aliases WHERE fact_id = ?", (row["id"],)
+                ).fetchall()
+            }
+            if existing == {v2}:
+                set_fact_cid_backfill_status(conn, fact_id=row["id"], status="complete")
+                continue
+            owner = conn.execute(
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?", (v2,)
+            ).fetchone()
+            if owner is not None and owner["fact_id"] != row["id"]:
+                set_fact_cid_backfill_status(
+                    conn, fact_id=row["id"], status="skipped", error="cid_v2_collision"
+                )
+                skipped_collision += 1
+                continue
+            conn.execute("DELETE FROM fact_cid_aliases WHERE fact_id = ?", (row["id"],))
+            conn.execute(
+                "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid) VALUES (?, ?)",
+                (row["id"], v2),
+            )
+            set_fact_cid_backfill_status(conn, fact_id=row["id"], status="complete")
+            rebound += 1
+        conn.commit()
+    return {"rebound": rebound, "skipped_collision": skipped_collision}
