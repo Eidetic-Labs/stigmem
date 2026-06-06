@@ -27,6 +27,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ### Security
 
+- Bumped the `hono` workspace override from `>=4.12.18` to `>=4.12.23`
+  (resolving `hono@4.12.18` → `4.12.23`), clearing the four moderate Hono
+  advisories surfaced by `pnpm audit` (IP-restriction static-deny bypass,
+  cookie `sameSite` sanitization, JWT-middleware Authorization-scheme
+  acceptance, and `app.mount()` undecoded-prefix handling). `pnpm audit`
+  now reports no known vulnerabilities.
 - Updated the locked `aiohttp` transitive dependency from `3.13.5` to
   `3.14.0`, resolving Dependabot alerts GHSA-hg6j-4rv6-33pg and
   GHSA-jg22-mg44-37j8 in optional adapter/provider dependency paths.
