@@ -122,6 +122,7 @@ run_python() {
   timed_run python-mcp-readme-consistency uv run python scripts/check_mcp_readme_consistency.py
   timed_run python-readme-shape uv run python scripts/check_readme_shape.py
   timed_run python-facts-immutability-inventory uv run python scripts/check_facts_immutability_inventory.py
+  timed_run python-adr-references uv run python scripts/check_adr_references.py
   write_timing_report
 }
 
@@ -155,7 +156,7 @@ run_node() {
 run_go() {
   need_cmd go
   # Go SDK was deferred to experimental/ per PR 3 (ADR-002 critical-path
-  # cut + ADR-009 §4). Per master-checklist §4.4 "skip experimental/ in
+  # cut + ADR-020 repository contracts). Per master-checklist §4.4 "skip experimental/ in
   # default jobs"; this gate now runs only against the experimental tree
   # when an operator opts in.
   if [[ ! -d "$ROOT_DIR/experimental/sdk-go" ]]; then
@@ -188,7 +189,7 @@ run_docs() {
 run_obsidian() {
   need_cmd npm
   # Obsidian plugin was deferred to experimental/ per PR 3 (ADR-002 critical-
-  # path cut + ADR-009 §3). Per master-checklist §4.4 "skip experimental/
+  # path cut + ADR-020 repository contracts). Per master-checklist §4.4 "skip experimental/
   # in default jobs"; this gate now runs only against the experimental
   # tree when an operator opts in.
   if [[ ! -d "$ROOT_DIR/experimental/obsidian-adapter/plugin" ]]; then

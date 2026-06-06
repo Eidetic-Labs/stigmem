@@ -27,7 +27,7 @@ trust.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for manifest
+This file contains the ADR-020 §9 (modular specs) prose extraction for manifest
 publication and verification. It intentionally does **not** define
 peer admission policy, replication authorization, or
 capability-token grants; those belong in

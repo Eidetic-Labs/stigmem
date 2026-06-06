@@ -28,7 +28,7 @@ subject a verb on a specific object for a bounded time window.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for capability-token
+This file contains the ADR-020 §9 (modular specs) prose extraction for capability-token
 shape, issuance, verification, and revocation. It intentionally
 does **not** define peer admission, manifest schema, replay-window
 policy, or capability-based instruction semantics.

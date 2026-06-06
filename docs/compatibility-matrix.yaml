@@ -1,4 +1,4 @@
-# release/compatibility-matrix.yaml — per ADR-014
+# release/compatibility-matrix.yaml — per ADR-020 (compatibility matrix projection)
 #
 # Source-of-truth YAML for cross-package compatibility relationships.
 # Consumed by scripts/check_compatibility_matrix.py (CI validator) and a
@@ -71,7 +71,7 @@ features:
     requires:
       node: ">=0.9.0a1"
       python_sdk: ">=0.9.0a1"
-    notes: "Core data model. CIDs (§25) are stable in core per ADR-017."
+    notes: "Core data model. CIDs (§25) are stable in core per ADR-011."
 
   - id: scope-enforcement
     name: Scope enforcement (local/team/company/public)
@@ -102,7 +102,7 @@ features:
     stability: stable
     requires:
       node: ">=0.9.0a1"
-    notes: "Core feature per ADR-017 (amendment to ADR-011). Load-bearing for ADR-003 trust boundary + ADR-016 immutability stack."
+    notes: "Core feature per ADR-011 (CIDs-as-core). Load-bearing for ADR-003 trust boundary + ADR-016 immutability stack."
 
   - id: dashboard
     name: Dashboard
@@ -284,7 +284,7 @@ features:
     stability: documented
     requires:
       node: ">=0.9.0a1"
-    notes: "Header documented in v0.9.0a1; node-side honor is future hardened-core work per ADR-012."
+    notes: "Header documented in v0.9.0a1; node-side honor is future hardened-core work per ADR-008 (version exposure)."
 
   - id: argon2id-key-hashing
     name: Argon2id API key hashing

@@ -28,7 +28,7 @@ expiry.
 
 The canonical version line of stigmem begins at <code>v0.9.0a1</code>
 per [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md)
-+ [ADR-019](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md).
++ [ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md).
 Earlier version markers labeled internal development checkpoints, not
 tagged releases. Many features that earlier docs described as
 "Stable" were deferred per [ADR-002](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/002-v1-scope.md)
@@ -143,7 +143,7 @@ Read the spec at
 
 <div>
 <dt>Content-addressed fact IDs (CIDs)</dt>
-<dt><span className="stigmem-fields__type">Stable in core (ADR-017)</span></dt>
+<dt><span className="stigmem-fields__type">Stable in core (ADR-011)</span></dt>
 <dd>Spec-21-Content-Addressed-IDs</dd>
 </div>
 
@@ -239,7 +239,7 @@ Read the spec at
 
 <div>
 <dt>API-key authentication (per-scope)</dt>
-<dt><span className="stigmem-fields__type">Stable (Argon2id for new; SHA-256 rows rehash per ADR-007)</span></dt>
+<dt><span className="stigmem-fields__type">Stable (Argon2id for new; SHA-256 rows rehash per <a href="../../../docs/adr/archive/007-argon2id.md">ADR-007</a>)</span></dt>
 <dd>Spec-02-Scopes-and-ACL</dd>
 </div>
 
@@ -626,7 +626,7 @@ The v0.9.0a1 default install ships with feature-specific code in
 `node/src/stigmem_node/` for several deferred features
 (`tombstones.py`, `instruction_migrate.py`, `card_materializer.py`,
 `source_trust.py`, etc.). The routes are mounted but the features
-are dormant unless explicitly configured. Per ADR-019 iteration
+are dormant unless explicitly configured. Per ADR-001 iteration
 semantics, each v0.9.0aN extracts one cross-cutting feature into a
 plugin per ADR-011's C1 plugin architecture; after v0.9.0a8, default
 install will be true to ADR-011's commitment.

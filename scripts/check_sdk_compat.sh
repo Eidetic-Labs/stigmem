@@ -140,7 +140,7 @@ func main() {
 }
 EOF
 # Go SDK was deferred to experimental/sdk-go/ per PR 3 (ADR-002 critical-
-# path cut + ADR-009 §4). The compat smoke test now runs only when an
+# path cut + ADR-020 repository contracts). The compat smoke test now runs only when an
 # operator opts in by leaving the experimental Go SDK present.
 if [ -d "${ROOT_DIR}/experimental/sdk-go" ]; then
 	(cd "${ROOT_DIR}/experimental/sdk-go" && go run "${GO_SMOKE_FILE}" "${URL}")

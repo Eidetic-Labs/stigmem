@@ -82,7 +82,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Compute PEP 440 and semver forms from the tag (per ADR-019). The git
+      # Compute PEP 440 and semver forms from the tag (per ADR-001). The git
       # tag uses PEP 440 shorthand (v0.9.0a1); semver-strict consumers (npm,
       # docker/metadata-action `type=semver`) need 0.9.0-alpha.1.
       - name: Translate tag → PEP 440 + semver
@@ -214,7 +214,7 @@ jobs:
         run: pnpm --filter "./sdks/stigmem-ts" test
 
       # Translate the PEP-440-style git tag (v0.9.0a1) to the semver string
-      # npm requires (0.9.0-alpha.1). Per ADR-019 §Per-ecosystem spelling.
+      # npm requires (0.9.0-alpha.1). Per ADR-001 (per-ecosystem version-string convention).
       - name: Translate tag → PEP 440 + semver
         id: ver
         run: python3 scripts/translate_version.py "$GITHUB_REF_NAME" --gh-output

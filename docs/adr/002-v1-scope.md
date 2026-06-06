@@ -82,7 +82,7 @@ this list is, by definition, not in v1.0.
 
 <div className="stigmem-grid">
 
-<div><h4>Argon2id-hashed API keys</h4><p>Per <a href="./007-argon2id">ADR-007</a> migration.</p></div>
+<div><h4>Argon2id-hashed API keys</h4><p>Per <a href="./archive/007-argon2id">ADR-007</a> migration.</p></div>
 <div><h4>API key max-age</h4><p>Enforced default 90 days.</p></div>
 <div><h4>Per-principal token-bucket rate limits</h4></div>
 <div><h4>Capability-based instruction handling</h4><p><code>interpret_as</code> per <a href="./003-prompt-injection">ADR-003</a>.</p></div>
@@ -274,7 +274,7 @@ re-introduction gates.
 
 The threat model and scenarios reflect this scope. Risks associated
 with deferred §21–§25 features live with those features (per
-[ADR-018](./018-security-documentation-colocation)); cross-cutting
+[ADR-020](./020-feature-owned-product-structure) §11 (security taxonomy)); cross-cutting
 risks (HLC, embedding, worm vector, supply chain) stay on the v1.0
 register. The OpenClaw v0.9 adapter is a v1.0 deliverable; its audit
 findings are in v1.0 scope.

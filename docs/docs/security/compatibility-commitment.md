@@ -2,18 +2,18 @@
 title: Compatibility Commitment
 sidebar_label: Compatibility Commitment
 audience: Operator
-description: Stigmem's written compatibility commitment per ADR-013 deprecation policy.
+description: Stigmem's written compatibility commitment per ADR-008 §Deprecation policy deprecation policy.
 ---
 
 # Compatibility Commitment
 
-<p className="stigmem-meta"><span>3 min read</span><span>Operator-facing</span><span>Per ADR-013</span></p>
+<p className="stigmem-meta"><span>3 min read</span><span>Operator-facing</span><span>Per ADR-008 §Deprecation policy</span></p>
 
 <div className="stigmem-lead">
 
 **What this commits to**
 
-Per [ADR-013](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md).
+Per [ADR-008](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/008-experimental-gates.md) §Deprecation policy.
 This document is the written commitment about what stigmem will not
 break, scaled to project resources and the v0.9.0a1 reset posture.
 Reviewed at every major release; tightening or loosening goes through
@@ -70,7 +70,7 @@ an ADR amendment.
 
 ## Wire-format pinning via `Stigmem-Version` header
 
-Per [ADR-012](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/012-version-aware-feature-exposure.md):
+Per [ADR-008](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/008-experimental-gates.md) §Version exposure:
 clients lock to a declared protocol version via the `Stigmem-Version`
 request header. Server honors the pin; future server versions stay
 backward-compatible to declared protocol versions for at least one
@@ -130,7 +130,7 @@ feature.
 </a>
 
 <a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/013-deprecation-policy.md">
-<strong>ADR-013</strong>
+<strong>ADR-008 §Deprecation policy</strong>
 <span>Deprecation policy</span>
 <small>Lifecycle and required artifacts.</small>
 </a>

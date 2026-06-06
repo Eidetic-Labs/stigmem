@@ -26,7 +26,7 @@ keeps the advanced protocol horizon distinct from `Spec-07-Recall-Pipeline`.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Record embedding, graph traversal, and feedback-loop risks. | Partial | `features/recall-graph/security.md` |
-| ADR alignment | Preserve deferred experimental status and Spec-X ownership. | Partial | ADR-002, ADR-008, ADR-010, ADR-020 |
+| ADR alignment | Preserve deferred experimental status and Spec-X ownership. | Partial | ADR-002, ADR-008, ADR-020 §9 (modular specs), ADR-020 |
 | Conformance vectors | Validate graph depth, embeddings, cards, and traversal boundaries. | Partial | `node/tests/recall/`; `node/tests/time_travel/test_phase13_time_travel_cid.py` |
 | External operator soak | Validate production-like advanced recall workloads. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | In progress | This feature record. |

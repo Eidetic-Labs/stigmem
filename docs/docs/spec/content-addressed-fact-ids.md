@@ -7,7 +7,7 @@ description: "Spec-21-Content-Addressed-IDs rendered entry point — core SHA-25
 
 # Spec-21-Content-Addressed-IDs \{#section-25\}
 
-<p className="stigmem-meta"><span>1 min read</span><span>Spec contributor</span><span>Core per ADR-017</span></p>
+<p className="stigmem-meta"><span>1 min read</span><span>Spec contributor</span><span>Core per ADR-011</span></p>
 
 <div className="stigmem-lead">
 
@@ -15,7 +15,7 @@ description: "Spec-21-Content-Addressed-IDs rendered entry point — core SHA-25
 
 Rendered compatibility entry point for
 [`Spec-21-Content-Addressed-IDs`](https://github.com/eidetic-labs/stigmem/blob/main/spec/specs/21-content-addressed-ids.md),
-which is core behavior per ADR-017. Content-addressed fact IDs
+which is core behavior per ADR-011. Content-addressed fact IDs
 (CIDs) are now maintained in the modular protocol spec.
 
 </div>
@@ -29,7 +29,7 @@ which is core behavior per ADR-017. Content-addressed fact IDs
 </a>
 
 <a href="https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/017-amendment-to-adr-011-cids-as-core.md">
-<strong>ADR-017</strong>
+<strong>ADR-011</strong>
 <span>CIDs as core</span>
 <small>Amendment to ADR-011 moving CIDs from plugin to core.</small>
 </a>

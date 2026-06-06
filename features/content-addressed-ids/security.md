@@ -36,4 +36,4 @@ Related security references:
 
 - R-18 in `spec/security/threat-model.md`
 - ADR-016 storage immutability enforcement
-- ADR-017 CIDs as core behavior
+- ADR-011 CIDs as core behavior

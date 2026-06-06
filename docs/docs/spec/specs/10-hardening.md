@@ -29,7 +29,7 @@ baseline.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for supported
+This file contains the ADR-020 §9 (modular specs) prose extraction for supported
 hardening expectations. Replay windows are owned by
 `Spec-11-Replay-Protection`; audit record shape is owned by
 `Spec-09-Audit-Log`.

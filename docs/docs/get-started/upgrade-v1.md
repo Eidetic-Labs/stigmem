@@ -23,7 +23,7 @@ alpha reset. If you're installing fresh, skip this and read
 **v0.9.0a1 is the first build.**
 
 No <code>v1.0</code> or <code>v2.0</code> Stigmem release shipped
-publicly. Per ADR-001 and ADR-019, treat older <code>v0.x</code>,
+publicly. Per ADR-001 and ADR-001, treat older <code>v0.x</code>,
 <code>v1.x</code>, and <code>v2.0</code> labels in local branches,
 old docs, or unpublished artifacts as internal development
 checkpoints.

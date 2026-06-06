@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate colocated experimental security documentation.
 
-The validator enforces ADR-018's mechanical contract: per-feature security
+The validator enforces ADR-020's mechanical contract: per-feature security
 docs have frontmatter, owned risks are linked from the unified threat model,
 and public security docs do not depend on Internal-Comms paths.
 """

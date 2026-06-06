@@ -21,7 +21,7 @@ This feature spec owns the content-addressed fact ID material that previously
 lived in the monolithic `stigmem-spec-v0.9.0a1.md` lineage and the
 compatibility projection at `spec/specs/21-content-addressed-ids.md`.
 
-Content-addressed IDs are core Stigmem behavior per ADR-017. A conforming
+Content-addressed IDs are core Stigmem behavior per ADR-011. A conforming
 default node MUST compute CIDs for new facts.
 
 ## Purpose

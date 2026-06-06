@@ -26,7 +26,7 @@ that operationalizes L4 verification and L5–L6 transparency.
 
 </div>
 
-**Date:** 2026-05-07 · **Authors:** Eidetic Labs · **Related:** [ADR-003](./003-prompt-injection) (defines the L1–L6 boundary), [ADR-008](./008-experimental-gates), ADR-011, [ADR-012](./012-version-aware-feature-exposure); threat model R-05, R-15, R-21
+**Date:** 2026-05-07 · **Authors:** Eidetic Labs · **Related:** [ADR-003](./003-prompt-injection) (defines the L1–L6 boundary), [ADR-008](./008-experimental-gates), ADR-011, [ADR-008](./008-experimental-gates) §Version exposure; threat model R-05, R-15, R-21
 
 ## Context
 
@@ -271,7 +271,7 @@ Three feedback paths.
 <div>
 <dt>3 · Adapter contract evolution</dt>
 <dt><span className="stigmem-fields__type">adapter correct but contract weak</span></dt>
-<dd>If adapters correctly implement the contract but the contract itself is weak (e.g., <code>SYSTEM_PROMPT_DIRECTIVE</code> wording isn't strong enough), the contract is updated. Contract changes are MINOR protocol releases per ADR-013.</dd>
+<dd>If adapters correctly implement the contract but the contract itself is weak (e.g., <code>SYSTEM_PROMPT_DIRECTIVE</code> wording isn't strong enough), the contract is updated. Contract changes are MINOR protocol releases per ADR-008 §Deprecation policy.</dd>
 </div>
 
 </div>

@@ -39,7 +39,7 @@ When all five are `Done`, the feature is ready for promotion via an ADR-002 amen
 
 ### Gate 1 — Threat-model delta
 
-What new trust boundaries does this feature introduce? What new STRIDE entries? What new risks (R-XX)? Which existing risks does it widen or narrow? Per ADR-018, draft and maintain this analysis in `experimental/<feature>/security.md`; when the delta is merged into the unified threat model, link both artifacts here.
+What new trust boundaries does this feature introduce? What new STRIDE entries? What new risks (R-XX)? Which existing risks does it widen or narrow? Per ADR-020 §11 (security taxonomy), draft and maintain this analysis in `experimental/<feature>/security.md`; when the delta is merged into the unified threat model, link both artifacts here.
 
 ### Gate 2 — ADR
 
@@ -55,7 +55,7 @@ Candidate operators identified. Soak start date, planned duration, public-issue 
 
 ### Gate 5 — Documentation parity
 
-Per ADR-005, identify which of Learn / Build / Operate / Secure tabs the feature touches and what content each tab needs.
+Per ADR-020 §12 (docs IA), identify which of Learn / Build / Operate / Secure tabs the feature touches and what content each tab needs.
 
 ---
 

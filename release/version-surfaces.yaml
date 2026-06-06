@@ -3,7 +3,7 @@
 # Source of truth for stigmem's release surfaces and their canonical version-string
 # spellings. Consumed by scripts/check_version_consistency.py.
 #
-# Policy (the durable rules) lives in ADR-019.
+# Policy (the durable rules) lives in ADR-001.
 # This file is the operational inventory — current state of which surfaces stigmem
 # emits version strings on. Adding a new surface that uses an existing spelling
 # rule (pep440 / semver / shorthand) does NOT require an ADR amendment; just
@@ -119,12 +119,12 @@ surfaces:
   # ──────────────────────────────────────────────────────────────────────────
 
   # Helm chart metadata: retired from default version-consistency surfaces.
-  # Per ADR-002 + ADR-009, the Helm chart was deferred from v1 critical-path
+  # Per ADR-002 + ADR-020 repository contracts, the Helm chart was deferred from v1 critical-path
   # scope. Both infra/helm/ and deploy/helm/ consolidated to
   # experimental/deploy-helm/ in PR 3 (2026-05-09). The chart's appVersion
   # is no longer subject to the canonical version-consistency check;
   # operators installing the experimental chart pin to whatever the chart
-  # itself ships. Tombstone retained per ADR-019 §Retiring a release surface.
+  # itself ships. Tombstone retained per ADR-001 (release-surface manifest convention).
   - id: helm-infra-app-version
     kind: external-registry
     category: chart-metadata
@@ -158,7 +158,7 @@ surfaces:
     category: http-header
     spelling: shorthand
     sort_authority: pep440
-    spec: ADR-012
+    spec: ADR-008
     notes: >-
       `Stigmem-Version` HTTP header carries the wire-format version negotiated
       between client and node. Value is the shorthand form (`v0.9.0a1`).
@@ -170,9 +170,9 @@ surfaces:
     category: http-header
     spelling: shorthand
     sort_authority: pep440
-    spec: ADR-012
+    spec: ADR-008
     notes: >-
-      Beta-version HTTP header surface from ADR-012. Inventory-only until the
+      Beta-version HTTP header surface from ADR-008 (version exposure). Inventory-only until the
       implementation exposes a concrete file/field; skipped by the
       version-consistency check.
 
@@ -387,7 +387,7 @@ surfaces:
   # explicit recommendation. When we activate one, uncomment the entry, fill
   # in file/field if file-backed, and add publish steps to .github/workflows/
   # publish.yml. New entries do not require ADR amendment unless they
-  # introduce a new spelling rule (per ADR-019 §Adding a new release surface).
+  # introduce a new spelling rule (per ADR-001 release-surface manifest convention).
   # ──────────────────────────────────────────────────────────────────────────
   #
   # ─── Container images (recommended; partially wired) ──────────────────────

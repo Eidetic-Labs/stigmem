@@ -13,9 +13,9 @@ package: stigmem-plugin-multi-tenant
 adr_refs:
   - ADR-002
   - ADR-008
-  - ADR-009
+  - ADR-020 §13 (repo structure)
   - ADR-011
-  - ADR-018
+  - ADR-020 §11 (security taxonomy)
   - ADR-020
 security_refs:
   - R-01

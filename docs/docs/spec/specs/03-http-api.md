@@ -28,7 +28,7 @@ their component specs.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for the supported
+This file contains the ADR-020 §9 (modular specs) prose extraction for the supported
 HTTP API surface. It intentionally keeps detailed semantics in the
 owning specs: fact-model rules in `Spec-01-Fact-Model`, scope and
 garden ACL in `Spec-02-Scopes-and-ACL`, federation trust in

@@ -1,4 +1,4 @@
-# Per ADR-002 v1 critical-path + ADR-009 §2(b): only critical-path packages
+# Per ADR-002 v1 critical-path + ADR-020 repository contracts: only critical-path packages
 # in the default workspace. experimental/ is excluded so default
 # `pnpm install` doesn't build deferred-feature packages. The MCP adapter
 # (adapters/mcp) is in the critical-path scope per ADR-002 (minimal

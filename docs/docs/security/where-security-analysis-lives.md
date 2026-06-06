@@ -8,7 +8,7 @@ sidebar_position: 11
 
 # Where Security Analysis Lives
 
-<p className="stigmem-meta"><span>2 min read</span><span>Navigation</span><span>Per ADR-018</span></p>
+<p className="stigmem-meta"><span>2 min read</span><span>Navigation</span><span>Per ADR-020 §11 (security taxonomy)</span></p>
 
 <div className="stigmem-lead">
 
@@ -39,7 +39,7 @@ Cross-cutting protocol risks stay there.
 
 ## Feature-local security files
 
-Per ADR-018 and ADR-020, a feature that owns or materially contributes
+Per ADR-020 §11 (security taxonomy) and ADR-020, a feature that owns or materially contributes
 to a numbered risk keeps its feature analysis in its feature record.
 Legacy experimental security files may remain as compatibility
 pointers during migration.

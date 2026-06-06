@@ -1,10 +1,10 @@
 # archive/ — repo-root archive for blog-post sources and historical artifacts
 
-This directory holds files that should not be picked up by the Docusaurus blog plugin (anything under `docs/blog/` becomes a current blog post on the docs site) but **do** belong in the repo as either canonical sources for external publications or historical preservation per ADR-009 §11 + master-checklist §4.3a.
+This directory holds files that should not be picked up by the Docusaurus blog plugin (anything under `docs/blog/` becomes a current blog post on the docs site) but **do** belong in the repo as either canonical sources for external publications or historical preservation per ADR-020 §13 (repo structure) §11 + master-checklist §4.3a.
 
 ## Contents
 
-- `devto-lazy-discovery-tokenomics.md` — externally-published dev.to post from the pre-reset era (moved from `dogfood/` per PR 3 / ADR-009 §11). Historical record only; do not edit.
+- `devto-lazy-discovery-tokenomics.md` — externally-published dev.to post from the pre-reset era (moved from `dogfood/` per PR 3 / ADR-020 §13 (repo structure) §11). Historical record only; do not edit.
 - `devto-stigmem-v0.9.0a1-retraction.md` — **canonical source** of the dev.to retraction post that announces the v1.0 retraction and the v0.9.0a1 reset. The stigmem repo is the authoritative home for this post; the dev.to publication mirrors this content. After publish, fill in `canonical_url` in the frontmatter; corrections ship as follow-up posts or PEP 440 `.post1` errata per `docs/internal/release-cadence.md` §Rule 3, not as in-place edits.
 
 ## How to read this directory

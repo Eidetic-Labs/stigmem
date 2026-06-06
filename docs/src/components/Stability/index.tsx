@@ -1,5 +1,5 @@
 /**
- * <Stability /> — version-aware feature exposure component per ADR-012.
+ * <Stability /> — version-aware feature exposure component per ADR-008 (version exposure).
  *
  * Renders an inline alert at the top of feature/concept/SDK/operator pages
  * surfacing the page's stability tier, since-version, and (when applicable)
@@ -18,7 +18,7 @@
  *
  *   <Stability level="experimental" since="0.9.0a1" specSection="§21" />
  *
- * Per ADR-012 implementation plan; lands in PR 2.5 sub-phase H. The
+ * Per ADR-008 (version exposure) implementation plan; lands in PR 2.5 sub-phase H. The
  * frontmatter validator extension that enforces stability/since across
  * every page is acknowledged as a follow-up; this component renders
  * what the frontmatter provides.

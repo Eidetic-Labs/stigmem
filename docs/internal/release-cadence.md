@@ -2,7 +2,7 @@
 
 How stigmem publishes a new release. Internal-facing maintainer doc; not part of the public docs site.
 
-This document is a **runbook**, not a policy. The policy (versioning rules, stability commitments, contributor approval rule) lives in [ADR-001](../../docs/adr/001-versioning.md), [ADR-019](../../docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md), and `release/version-surfaces.yaml`. This doc describes the operational sequence a maintainer follows to ship — and the discipline that keeps tags, docs, and published artifacts aligned.
+This document is a **runbook**, not a policy. The policy (versioning rules, stability commitments, contributor approval rule) lives in [ADR-001](../../docs/adr/001-versioning.md), [ADR-001](../../docs/adr/001-versioning.md), and `release/version-surfaces.yaml`. This doc describes the operational sequence a maintainer follows to ship — and the discipline that keeps tags, docs, and published artifacts aligned.
 
 ---
 
@@ -156,7 +156,7 @@ If any item fails, fix or document before proceeding.
 
 ## Version-string sweep
 
-Every published version string in the repo must agree with the new release. The version-consistency CI gate (per ADR-019) catches most of this; this section documents the human-driven updates.
+Every published version string in the repo must agree with the new release. The version-consistency CI gate (per ADR-001) catches most of this; this section documents the human-driven updates.
 
 **File-backed surfaces** (caught by CI):
 
@@ -195,7 +195,7 @@ git fetch origin
 git log --oneline main..origin/main  # should be empty
 git pull --ff-only origin main
 
-# Tag with the PEP 440 shorthand (per ADR-019). Use a signed tag for release
+# Tag with the PEP 440 shorthand (per ADR-001). Use a signed tag for release
 # provenance; detached artifact signatures are created manually after publish.
 git tag -s v0.9.0a2 -m "v0.9.0a2"  # adjust version
 git push origin v0.9.0a2
@@ -314,7 +314,7 @@ If a release is found broken post-publish:
 6. **Close out the tracking issue** when the fix release is verified.
 7. **Notify** if the broken version was widely-installed: post to the GitHub Discussions / Issues tracker; consider a brief blog/dev.to post if usage was non-trivial.
 
-See ADR-019 for why version numbers are immutable across all our surfaces (PEP 440 / npm both forbid republish under the same number).
+See ADR-001 for why version numbers are immutable across all our surfaces (PEP 440 / npm both forbid republish under the same number).
 
 ---
 

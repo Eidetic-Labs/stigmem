@@ -17,7 +17,7 @@ contract by itself.
 
 | Area | In scope | Out of scope | Canonical references |
 | --- | --- | --- | --- |
-| Alpha extraction | Opt-in experimental plugin extraction during `v0.9.0aN` | Supported/stable graduation | ADR-011, ADR-017 |
+| Alpha extraction | Opt-in experimental plugin extraction during `v0.9.0aN` | Supported/stable graduation | ADR-011, ADR-011 |
 | ADR-008 graduation | Five-gate supported-surface promotion review | Bypassing gates during alpha | ADR-008 |
 | Review checklist | Founder/contributor graduation review artifacts | Live issue tracking | feature records, compatibility matrix |
 
@@ -56,11 +56,11 @@ Per [ADR-008](../../adr/008-experimental-gates.md): **all five gates pass.** Eac
 
 | # | Gate | Artifact |
 | --- | --- | --- |
-| 1 | Threat-model delta | `experimental/<feature>/security.md` per ADR-018, merged into `spec/security/threat-model.md` |
+| 1 | Threat-model delta | `experimental/<feature>/security.md` per ADR-020 §11 (security taxonomy), merged into `spec/security/threat-model.md` |
 | 2 | ADR drafted and merged | `docs/adr/NNN-<feature>.md` |
 | 3 | Conformance vectors | `data/conformance/<feature>/` including adversarial cases |
 | 4 | 30-day external operator soak | LOG.md entry in this repo with at least one closed issue tagged `<feature>-soak-finding` |
-| 5 | Documentation parity | Pages across all four tabs (Learn / Build / Operate / Secure) per [ADR-005](../../adr/005-docs-ia.md) |
+| 5 | Documentation parity | Pages across all four tabs (Learn / Build / Operate / Secure) per [ADR-020](../../adr/020-feature-owned-product-structure.md) §12 (docs IA) |
 
 Order matters per ADR-008: 1 before 2, 3 before 4, 5 last. Skipping requires explicit two-contributor sign-off recorded in the feature's ADR.
 
@@ -100,7 +100,7 @@ A graduation PR should include:
 5. The `concepts/features.md` row update
 6. The `compatibility-matrix.yaml` update
 
-CI rejects a graduation PR that's missing any of those artifacts (per ADR-013 deprecation-policy validator pattern + ADR-008 gate-tracking).
+CI rejects a graduation PR that's missing any of those artifacts (per ADR-008 §Deprecation policy deprecation-policy validator pattern + ADR-008 gate-tracking).
 
 ## Artifact Surfaces
 

@@ -8,7 +8,7 @@
 
 ## Supported Versions
 
-Stigmem follows the alpha-beta-rc pre-release convention per [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md). The first build of stigmem is `v0.9.0a1`; stable v1.0 has not shipped.
+Stigmem follows the alpha-beta-rc pre-release convention per [ADR-001](docs/adr/001-versioning.md). The first build of stigmem is `v0.9.0a1`; stable v1.0 has not shipped.
 
 | Version | Supported |
 | ------- | --------- |
@@ -323,7 +323,7 @@ above.
 
 ## Security Posture — v0.9.0a2 (2026-05-18)
 
-> **Posture-reset note.** Stigmem's `v1.0` announcement was withdrawn on 2026-05-08; the canonical version line was reset to `v0.9.0a1` per [ADR-001](docs/adr/001-versioning.md) and [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md). The dependency-alert triage in this section was originally compiled for `the pre-reset v1.0-rc snapshot` on 2026-05-03 and is **carried forward to v0.9.0a2** because the underlying dependency upgrades remain in effect — the same or newer fixed package versions that resolved the alerts at the pre-reset v1.0-rc snapshot are installed at v0.9.0a2. The supported-version posture changed (see "Supported Versions" above); the dependency-fix evidence did not.
+> **Posture-reset note.** Stigmem's `v1.0` announcement was withdrawn on 2026-05-08; the canonical version line was reset to `v0.9.0a1` per [ADR-001](docs/adr/001-versioning.md) and [ADR-001](docs/adr/001-versioning.md). The dependency-alert triage in this section was originally compiled for `the pre-reset v1.0-rc snapshot` on 2026-05-03 and is **carried forward to v0.9.0a2** because the underlying dependency upgrades remain in effect — the same or newer fixed package versions that resolved the alerts at the pre-reset v1.0-rc snapshot are installed at v0.9.0a2. The supported-version posture changed (see "Supported Versions" above); the dependency-fix evidence did not.
 >
 > **Open security gaps named explicitly:** several controls our threat model identifies as required for stable production — mTLS-default federation, persistent audit log, per-principal rate limits, capability-level validation for cross-org instructions, bounded HLC skew enforcement, the storage-immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md)) — remain future hardened-core work and are **not yet in effect at v0.9.0a2**. Adopters running federation across organizational boundaries should wait until those controls ship in a later hardened-core line per [LIMITATIONS.md](LIMITATIONS.md). No beta, release-candidate, or GA milestone is active today.
 
@@ -503,7 +503,7 @@ Some CodeQL alerts are **not** precision-gap false positives — the analyzer is
 
 | Alert | Rule | Location | Severity | Rationale | Retirement milestone |
 | ----- | ---- | -------- | -------- | --------- | -------------------- |
-| [#34](https://github.com/eidetic-labs/stigmem/security/code-scanning/34) | `py/weak-sensitive-data-hashing` | `auth.py:67` — `_legacy_sha256(raw)` and the legacy branch in `_verify_key_hash` | High | [PR #172](https://github.com/eidetic-labs/stigmem/pull/172) implemented the [ADR-007](docs/adr/007-argon2id.md) Argon2id migration with a dual-mode verification window. New keys use Argon2id; legacy v0.9.0a1 SHA-256 rows verify against `_legacy_sha256` on first use, then opportunistically re-hash to Argon2id (`api_key_rehashed` audit event). Deleting the function today would invalidate every v0.9.0a1-issued API key. | **v1.0.0 GA** — bulk re-hash migration deletes `_legacy_sha256`; CodeQL re-scan auto-closes alert. |
+| [#34](https://github.com/eidetic-labs/stigmem/security/code-scanning/34) | `py/weak-sensitive-data-hashing` | `auth.py:67` — `_legacy_sha256(raw)` and the legacy branch in `_verify_key_hash` | High | [PR #172](https://github.com/eidetic-labs/stigmem/pull/172) implemented the [ADR-007](docs/adr/archive/007-argon2id.md) Argon2id migration with a dual-mode verification window. New keys use Argon2id; legacy v0.9.0a1 SHA-256 rows verify against `_legacy_sha256` on first use, then opportunistically re-hash to Argon2id (`api_key_rehashed` audit event). Deleting the function today would invalidate every v0.9.0a1-issued API key. | **v1.0.0 GA** — bulk re-hash migration deletes `_legacy_sha256`; CodeQL re-scan auto-closes alert. |
 
 **Disposition:** Alert #34 dismissed in GitHub UI with reason `won't fix`; dismissal comment points at [`spec/security/audit-triage.md`](spec/security/audit-triage.md) § "CodeQL — acknowledged risks" for the full rationale.
 

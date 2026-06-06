@@ -8,4 +8,4 @@ The Go SDK source is active and experimental. It remains outside the current
 alpha artifact set until package, API parity, and live-node smoke validation
 are complete.
 
-This feature remains outside the default surface per [ADR-002](../../docs/adr/002-v1-scope.md) and [ADR-009](../../docs/adr/009-repo-structure.md); shared promotion gates live in [../STATUS-GATES.md](../STATUS-GATES.md).
+This feature remains outside the default surface per [ADR-002](../../docs/adr/002-v1-scope.md) and [ADR-020](../../docs/adr/020-feature-owned-product-structure.md) §13 (repo structure); shared promotion gates live in [../STATUS-GATES.md](../STATUS-GATES.md).

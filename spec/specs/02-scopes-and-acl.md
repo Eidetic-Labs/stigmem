@@ -17,7 +17,7 @@ in the `v0.9.0a1` protocol line.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for scope enforcement and basic
+This file contains the ADR-020 §9 (modular specs) prose extraction for scope enforcement and basic
 Memory Garden ACL behavior. It intentionally does **not** include API-key
 credential shape, peer-token signing, federation replication rules, quarantine
 garden moderation, advanced Memory Garden ACL behavior, or HTTP route details.

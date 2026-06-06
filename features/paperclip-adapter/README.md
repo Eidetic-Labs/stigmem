@@ -12,7 +12,7 @@ implementation_path: experimental/paperclip-adapter
 package: none
 adr_refs:
   - ADR-002
-  - ADR-009
+  - ADR-020 §13 (repo structure)
   - ADR-020
 security_refs:
   - none

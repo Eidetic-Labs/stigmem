@@ -20,7 +20,7 @@ release evidence before any standalone plugin artifact reaches a registry.
 
 | Area | In scope | Out of scope | Canonical references |
 | --- | --- | --- | --- |
-| Publication policy | Define which plugins may publish, under what labels, and with what evidence. | Declaring plugins supported or stable. | ADR-008, ADR-011, ADR-017, ADR-020 |
+| Publication policy | Define which plugins may publish, under what labels, and with what evidence. | Declaring plugins supported or stable. | ADR-008, ADR-011, ADR-011, ADR-020 |
 | Package metadata | Standardize package names, versions, manifests, entry points, READMEs, and compatibility declarations. | Moving implementation directories for cosmetic reasons. | `features/<feature>/`, `experimental/<feature>/` |
 | Default-disabled behavior | Prove each plugin returns no-op/pass-through decisions when disabled or unconfigured. | Enabling plugins by default. | plugin handlers, plugin tests |
 | Enabled-mode conformance | Prove enabled plugin behavior matches the feature record and security notes. | Completing future ADR-008 30-day soak or documentation-parity gates. | feature evidence/security records |

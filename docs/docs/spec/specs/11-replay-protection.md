@@ -27,7 +27,7 @@ federation and capability-token operations.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for replay
+This file contains the ADR-020 §9 (modular specs) prose extraction for replay
 protection. It intentionally keeps token shape in
 `Spec-06-Capability-Tokens` and HLC clock skew policy in
 `Spec-12-HLC-Bounded-Skew`.

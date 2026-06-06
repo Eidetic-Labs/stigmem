@@ -12,7 +12,7 @@ implementation_path: experimental/decay
 adr_refs:
   - ADR-002
   - ADR-008
-  - ADR-010
+  - ADR-020 §9 (modular specs)
   - ADR-020
 security_refs:
   - R-02

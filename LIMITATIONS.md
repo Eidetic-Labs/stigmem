@@ -118,7 +118,7 @@ The capability-based redesign is present on `main`; release posture, certificati
 
 ### 8. Long-lived API keys with weak hashing and no rotation
 
-**Status:** New API keys use Argon2id hashing at rest (`node/src/stigmem_node/auth.py:_hash_key`) with the ADR-007 parameters. Legacy v0.9.0a1 SHA-256 rows remain valid during the v0.9.x migration window and are opportunistically rehashed to Argon2id on first successful use. **Separately:** automated rotation and an "expiring soon" admin surface are not yet available.
+**Status:** New API keys use Argon2id hashing at rest (`node/src/stigmem_node/auth.py:_hash_key`) with the [ADR-007](docs/adr/archive/007-argon2id.md) parameters. Legacy v0.9.0a1 SHA-256 rows remain valid during the v0.9.x migration window and are opportunistically rehashed to Argon2id on first successful use. **Separately:** automated rotation and an "expiring soon" admin surface are not yet available.
 
 **What this means:** an attacker who obtains the api_keys table (e.g., via R-23 admin-level storage compromise, or via a separate exfiltration vector) faces Argon2id for new keys. Any legacy SHA-256 rows that have not been used or explicitly rotated still retain the older fast-hash posture until migration completes.
 
@@ -326,7 +326,7 @@ After hardened-core controls ship and a 30-day operator soak completes, this doc
 
 The default install of v0.9.0a1 ships with feature-specific code in `node/src/stigmem_node/` — `tombstones.py`, `instruction_migrate.py`, `card_materializer.py`, `source_trust.py`, `decay.py`, and others — for features that are deferred from v1.0 critical-path scope per [ADR-002](docs/adr/002-v1-scope.md).
 
-This is by design as the alpha-line iteration semantics ([ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md)) support: each PR in the v0.9.0a series extracts one cross-cutting feature into a plugin per [ADR-011](docs/adr/011-cross-cutting-extraction.md)'s C1 plugin architecture.
+This is by design as the alpha-line iteration semantics ([ADR-001](docs/adr/001-versioning.md)) support: each PR in the v0.9.0a series extracts one cross-cutting feature into a plugin per [ADR-011](docs/adr/011-cross-cutting-extraction.md)'s C1 plugin architecture.
 
 **What this means for you as an adopter today.** The v0.9.0a1 artifact still carries some deferred-feature code while the alpha extraction line catches up. On current `main`, lazy instruction discovery, time-travel queries, and RTBF tombstones are no longer available as default-install behavior: they require explicit experimental plugin registration, and `as_of` requests fail closed without `stigmem-plugin-time-travel`. A single-org adopter running `make demo` experiences single-tenant behavior with no tombstones, time-travel, lazy-instruction-discovery, advanced memory-garden ACL, or source-attestation activated. The v1.0 critical-path scope claim describes user-visible *behavior*, not code architecture.
 
@@ -339,14 +339,14 @@ This is by design as the alpha-line iteration semantics ([ADR-019](docs/adr/019-
 | Cross-cutting feature | Current home | Spec reference | Plugin destination | Target release |
 |---|---|---|---|---|
 | Lazy instruction discovery | `experimental/lazy-instruction-discovery/` source package; default routes require plugin registration/configuration | `Spec-X1-Lazy-Instruction-Discovery` | extracted opt-in plugin source; artifact evidence deferred | v0.9.0a2 |
-| Content-addressed fact IDs | `node/src/stigmem_node/cid.py` | `Spec-21-Content-Addressed-IDs`; **stays in core** ([ADR-017](docs/adr/017-amendment-to-adr-011-cids-as-core.md)) | n/a | v0.9.0a3 |
+| Content-addressed fact IDs | `node/src/stigmem_node/cid.py` | `Spec-21-Content-Addressed-IDs`; **stays in core** ([ADR-011](docs/adr/011-cross-cutting-extraction.md)) | n/a | v0.9.0a3 |
 | Time-travel queries | `experimental/time-travel/` source package; default `as_of` requests fail closed without plugin registration | `Spec-X3-Time-Travel-Queries` | extracted opt-in plugin source; artifact evidence deferred | v0.9.0a4 |
 | RTBF tombstones | `experimental/tombstones/` source package; default routes and filters require plugin registration/configuration | `Spec-X2-RTBF-Tombstones` | extracted opt-in plugin source; artifact evidence deferred | v0.9.0a6 |
 | Memory-garden advanced ACL | `node/src/stigmem_node/garden_acl.py` | `Spec-X5-Memory-Garden-Advanced-ACL` | `experimental/memory-garden-acl/` plugin | v0.9.0a6 |
 | Source attestation | `node/src/stigmem_node/source_trust.py` | `Spec-X6-Source-Attestation` | `experimental/source-attestation/` plugin | v0.9.0a8 |
 | Multi-tenant isolation | `tenant_id` in 23 core files | Deferred plugin work; no supported protocol spec yet | `experimental/multi-tenant/` plugin | v0.9.0a8 |
 
-The CID exception is deliberate. CIDs are load-bearing for the storage immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md) L3) and the prompt-injection trust boundary ([ADR-003](docs/adr/003-prompt-injection.md) L1–L2). Keeping CIDs as a plugin would mean default install lacks integrity verification that the spec's claims depend on; ADR-017 corrects that.
+The CID exception is deliberate. CIDs are load-bearing for the storage immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md) L3) and the prompt-injection trust boundary ([ADR-003](docs/adr/003-prompt-injection.md) L1–L2). Keeping CIDs as a plugin would mean default install lacks integrity verification that the spec's claims depend on; ADR-011 corrects that.
 
 ---
 

@@ -12,7 +12,7 @@ implementation_path: experimental/time-travel
 package: stigmem-plugin-time-travel
 adr_refs:
   - ADR-008
-  - ADR-010
+  - ADR-020 §9 (modular specs)
   - ADR-011
   - ADR-020
 security_refs:

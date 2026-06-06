@@ -1,8 +1,8 @@
 # Documentation Ownership
 
 This file defines where recurring release, security, and evidence facts live.
-It implements the ADR-005 rule that each topic has one canonical owner and the
-ADR-018 rule that security documentation should use a hub-and-link model instead
+It implements the ADR-020 §12 (docs IA) rule that each topic has one canonical owner and the
+ADR-020 §11 (security taxonomy) rule that security documentation should use a hub-and-link model instead
 of duplicating the same analysis across multiple files.
 
 ## Canonical Homes

@@ -28,7 +28,7 @@ plugin package with registration and operator-controlled gates.
 | Gate | Description | Status | Evidence |
 | --- | --- | --- | --- |
 | Threat-model delta | Record R-21 contribution and reintroduction blockers. | Partial | `features/memory-garden-acl/security.md` |
-| ADR alignment | Preserve deferred advanced ACL and plugin-boundary decisions. | Partial | ADR-002, ADR-008, ADR-010, ADR-011, ADR-020 |
+| ADR alignment | Preserve deferred advanced ACL and plugin-boundary decisions. | Partial | ADR-002, ADR-008, ADR-020 §9 (modular specs), ADR-011, ADR-020 |
 | Conformance vectors | Validate registration gates, explicit opt-in flags, deterministic hook ordering, core boundary behavior, and cross-surface disposition. | Partial | `features/memory-garden-acl/evidence.md` |
 | External operator soak | Validate production-like garden isolation workloads. | Open | None currently recorded. |
 | Documentation parity | Replace legacy experimental docs with feature-owned record plus projections. | In progress | This feature record. |

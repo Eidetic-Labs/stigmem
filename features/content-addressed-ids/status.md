@@ -9,7 +9,7 @@
 | First release | `0.9.0a1` spec lineage |
 | Default surface | `default` |
 
-CIDs are active core behavior. ADR-017 keeps them in the default node because
+CIDs are active core behavior. ADR-011 keeps them in the default node because
 they are load-bearing for storage immutability, federation integrity, recall
 hydration, and prompt-injection trust boundaries.
 

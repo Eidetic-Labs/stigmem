@@ -17,7 +17,7 @@ accepted during federation ingest.
 
 ## Extraction Status
 
-This file contains the ADR-010 prose extraction for R-19 bounded-skew behavior.
+This file contains the ADR-020 §9 (modular specs) prose extraction for R-19 bounded-skew behavior.
 The basic HLC field and local advance rules live in `Spec-01-Fact-Model`;
 federation ingest context lives in `Spec-05-Federation-Trust`.
 

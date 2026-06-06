@@ -1,21 +1,21 @@
 # Stigmem Protocol Specification — v0.9.0a1
 
-**Status:** Historical alpha.1 canonicalization snapshot. Current modular protocol composition lives in [`PROTOCOL.md`](PROTOCOL.md) and `spec/specs/` per [ADR-010](../docs/adr/010-modular-specs.md).
+**Status:** Historical alpha.1 canonicalization snapshot. Current modular protocol composition lives in [`PROTOCOL.md`](PROTOCOL.md) and `spec/specs/` per [ADR-020](../docs/adr/020-feature-owned-product-structure.md) §9 (modular specs).
 **Applies to:** Stigmem v0.9.0a1 and reference node implementation.
 **Last updated:** 2026-05-09.
 
-> **About this document.** v0.9.0a1 is the first build of stigmem per [ADR-001](../docs/adr/001-versioning.md) + [ADR-019](../docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md). The protocol-spec content evolved over multiple development checkpoints (snapshots preserved at [`spec/archive/evolution/`](archive/evolution/)). This document is the canonical destination — content is migrated forward from the most-complete pre-reset checkpoint (`stigmem-spec-v2.0.md`), reviewed section-by-section against `node/` implementation, and improved for clarity. Earlier evolutionary snapshots become reference material once a section's content has migrated forward.
+> **About this document.** v0.9.0a1 is the first build of stigmem per [ADR-001](../docs/adr/001-versioning.md) (versioning + per-ecosystem version-string convention). The protocol-spec content evolved over multiple development checkpoints (snapshots preserved at [`spec/archive/evolution/`](archive/evolution/)). This document is the canonical destination — content is migrated forward from the most-complete pre-reset checkpoint (`stigmem-spec-v2.0.md`), reviewed section-by-section against `node/` implementation, and improved for clarity. Earlier evolutionary snapshots become reference material once a section's content has migrated forward.
 >
-> **Section status convention** ([ADR-012](../docs/adr/012-version-aware-feature-exposure.md)):
+> **Section status convention** ([ADR-008](../docs/adr/008-experimental-gates.md) §Version exposure):
 > - `Stable in v0.9.0a1` — committed contract; no breaking changes within v0.9.0a series within the section's wire-format scope.
 > - `Experimental in v0.9.0a1` — implementation exists but the section's contract is not committed; reintroduction per [ADR-008](../docs/adr/008-experimental-gates.md) for any section that moves to `experimental/<feature>/spec.md`.
 > - `Deferred from v0.9.0a1` — section's content moves to `experimental/<feature>/spec.md` per [ADR-002](../docs/adr/002-v1-scope.md) v1 critical-path scope decision.
 >
-> **Modular spec migration ([ADR-010](../docs/adr/010-modular-specs.md)) has landed structurally on `main`.** This file remains as the v0.9.0a1 canonicalization snapshot and legacy section map. Current component specs live in `spec/specs/`; experimental specs live in `experimental/<feature>/spec.md`.
+> **Modular spec migration ([ADR-020](../docs/adr/020-feature-owned-product-structure.md) §9 (modular specs)) has landed structurally on `main`.** This file remains as the v0.9.0a1 canonicalization snapshot and legacy section map. Current component specs live in `spec/specs/`; experimental specs live in `experimental/<feature>/spec.md`.
 
 ## How to read this document
 
-Per [ADR-010](../docs/adr/010-modular-specs.md), the canonical spec naming convention is `Spec-NN-Topic-Name` for supported protocol component specs and `Spec-XN-Topic-Name` for experimental specs. This monolithic file is retained as the alpha.1 snapshot and section-disposition table; the generated current index is [`PROTOCOL.md`](PROTOCOL.md).
+Per [ADR-020](../docs/adr/020-feature-owned-product-structure.md) §9 (modular specs), the canonical spec naming convention is `Spec-NN-Topic-Name` for supported protocol component specs and `Spec-XN-Topic-Name` for experimental specs. This monolithic file is retained as the alpha.1 snapshot and section-disposition table; the generated current index is [`PROTOCOL.md`](PROTOCOL.md).
 
 The spec is divided into supported protocol components (kept in this canonical file until extraction) and deferred sections (migrated to per-feature `experimental/<feature>/spec.md`).
 
@@ -45,7 +45,7 @@ The spec is divided into supported protocol components (kept in this canonical f
 | `Spec-09-Audit-Log` + `Spec-10-Hardening` + `Spec-11-Replay-Protection` | Security hardening | §22 | Stable | `Spec-09`, `Spec-10`, and `Spec-11` material extracted |
 | `Spec-X2-RTBF-Tombstones` | RTBF tombstones | §23 | **Deferred** | `experimental/tombstones/spec.md` |
 | `Spec-X3-Time-Travel` | Time-travel queries | §24 | **Deferred** | `experimental/time-travel/spec.md` |
-| `Spec-21-Content-Addressed-IDs` | Content-addressed fact IDs (CIDs) | §25 | **Stable in core** ([ADR-017](../docs/adr/017-amendment-to-adr-011-cids-as-core.md)). This is a core modular-spec assignment, not ADR-008 graduation. | `spec/specs/21-content-addressed-ids.md` |
+| `Spec-21-Content-Addressed-IDs` | Content-addressed fact IDs (CIDs) | §25 | **Stable in core** ([ADR-011](../docs/adr/011-cross-cutting-extraction.md)). This is a core modular-spec assignment, not ADR-008 graduation. | `spec/specs/21-content-addressed-ids.md` |
 | `Spec-12-HLC-Bounded-Skew` | HLC bounded skew (R-19) | (new in v0.9.0a2) | Implemented on main for v0.9.0a2 | `spec/specs/12-hlc-bounded-skew.md` |
 | `Spec-13-Capability-Based-Instructions` | Capability-based instructions per ADR-003 | (new after v0.9.0a1) | Future hardened-core work; no active beta milestone | `spec/specs/13-capability-based-instructions.md` |
 | `Spec-14-Batch-Assert` | Batch assert API per ADR-006 | (new after v0.9.0a1) | Future hardened-core work; no active beta milestone | `spec/specs/14-batch-assert.md` |

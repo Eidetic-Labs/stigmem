@@ -27,7 +27,7 @@ between basic recall and deferred advanced graph/embedding features.
 
 ## Extraction status
 
-This file contains the ADR-010 prose extraction for the basic
+This file contains the ADR-020 §9 (modular specs) prose extraction for the basic
 recall pipeline. Advanced graph traversal, subscriptions, memory
 cards, and provenance walks remain experimental or separately
 assigned.

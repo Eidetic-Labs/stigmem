@@ -168,7 +168,7 @@ legitimate. See ADR-001 §1.0 GA stability gate.
 ### Gate 5 · Documentation parity
 
 The feature has documentation across all four tabs (per
-[ADR-005](./005-docs-ia)).
+[ADR-020](./020-feature-owned-product-structure) §12, docs IA).
 
 <div className="stigmem-fields">
 
@@ -523,7 +523,7 @@ ADR-008 amendment if needed.
   harness green + structural CI guards + immutability/provenance/audit
   invariants preserved); external-operator validation relocated to the 1.0 GA
   stability gate in ADR-001. Folded in ADR-012 (version-aware feature exposure)
-  and ADR-013 (deprecation policy). Rationale: the external-soak precondition
+  and folded in ADR-013 (deprecation policy). Rationale: the external-soak precondition
   deadlocked pre-1.0 graduation — nothing could graduate until an external
   tester existed, and testers won't engage features held in `experimental/`.
   The `0.x` version line is the pre-stability signal.

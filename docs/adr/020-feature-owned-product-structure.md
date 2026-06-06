@@ -84,14 +84,15 @@ This creates three recurring problems:
 
 </div>
 
-The existing ADRs already point toward feature ownership:
+The prior ADRs already pointed toward feature ownership (each now folded
+into this ADR or ADR-008):
 
 - ADR-008 treats the feature as the unit of reintroduction readiness.
-- ADR-010 colocates experimental specs with the features they describe.
-- ADR-012 says stability and since-version should be visible on feature pages.
-- ADR-018 says feature security should live with the feature.
+- ADR-010 (folded into §9) colocates experimental specs with the features they describe.
+- ADR-012 (folded into ADR-008 §Version exposure) says stability and since-version should be visible on feature pages.
+- ADR-018 (folded into §11) says feature security should live with the feature.
 
-They do not establish a single feature-owned record across core and
+They did not establish a single feature-owned record across core and
 experimental features. This ADR fills that gap.
 
 ## Decision
@@ -220,7 +221,7 @@ Allowed values:
 | `feature_type` | `core`, `plugin`, `adapter`, `sdk`, `deployment`, `protocol`, `tooling`, `docs` |
 | `default_surface` | `default`, `opt-in`, `experimental`, `internal`, `external` |
 
-`stability` follows ADR-012. `status` describes implementation and planning
+`stability` follows ADR-008 §Version exposure. `status` describes implementation and planning
 state. A feature can be `status: shipped` and `stability: experimental`.
 
 ### 4 · Core and plugin implementation modes are both valid
@@ -433,7 +434,7 @@ One canonical page per topic; retired URLs get `client-redirects`.
 
 ### 13 · `experimental/` dissolves into metadata (folds ADR-009)
 
-ADR-009's repository structure stands for the top-level shape (the
+The folded ADR-009's repository structure stands for the top-level shape (the
 public adopter surface, build/config, critical-path code, and the
 distinction between adapters — clients of stigmem's API — and plugins —
 packages registering against the core hook system per ADR-011). What
@@ -551,7 +552,7 @@ canonical home for feature truth. CIDs remain core (not under
 
 ## Repository contracts
 
-This ADR does not replace ADR-009's full repository structure. It amends the
+This ADR does not replace the folded ADR-009's full repository structure. It amends the
 parts that define feature ownership:
 
 ```text
@@ -595,7 +596,7 @@ This ADR is implemented when:
 ## Amendments
 
 - **2026-06-06 — de-contrition consolidation.** Status moved Proposed → Accepted
-  (the feature-record and projection tooling already ships). Folded in ADR-005
-  (docs IA), ADR-009 (repository structure), ADR-010 (modular per-topic specs),
-  ADR-014 (compatibility matrix), and ADR-018 (security-documentation
-  colocation), retaining each one's mechanics.
+  (the feature-record and projection tooling already ships). Folded in:
+  ADR-005 (docs IA); folded ADR-009 (repository structure); folded ADR-010
+  (modular per-topic specs); folded ADR-014 (compatibility matrix); and
+  folded ADR-018 (security-documentation colocation), retaining each one's mechanics.

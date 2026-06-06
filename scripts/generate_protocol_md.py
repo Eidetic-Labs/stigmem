@@ -217,20 +217,20 @@ def render_protocol(
     all_specs = [*core_specs, *experimental_specs]
     latest_update = max(spec.last_updated for spec in all_specs)
     intro = (
-        "This file records the ADR-010 modular specification composition for the "
+        "This file records the ADR-020 modular specification composition for the "
         + "Stigmem protocol. It is generated from YAML frontmatter in component "
         + "[`spec/specs/`](specs/) files and colocated experimental specs under "
         + "`experimental/<feature>/spec.md`."
     )
     extraction_status = (
         "The files in `spec/specs/` are being populated incrementally as "
-        + "ADR-010 extraction PRs migrate prose from the canonical and archived "
+        + "ADR-020 extraction PRs migrate prose from the canonical and archived "
         + "source material into modular component specs. Files that still include an "
         + "`Extraction Status` stub are pending prose extraction."
     )
     experimental_status = (
         "Experimental and deferred material remains colocated under "
-        + "`experimental/<feature>/spec.md`; those files now carry ADR-010 "
+        + "`experimental/<feature>/spec.md`; those files now carry ADR-020 "
         + "frontmatter and appear in this generated protocol index."
     )
     lines = [

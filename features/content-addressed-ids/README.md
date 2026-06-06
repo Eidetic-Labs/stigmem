@@ -12,7 +12,7 @@ implementation_path: node/src/stigmem_node/cid.py
 package: stigmem-node
 adr_refs:
   - ADR-016
-  - ADR-017
+  - ADR-011
   - ADR-020
 security_refs:
   - R-18
@@ -28,7 +28,7 @@ integrity feature for facts. A CID is recomputed from a fact's canonical body
 and stored with the fact so reads, recall hydration, federation, and operator
 verification can detect tampering or canonicalization drift.
 
-CIDs are core behavior per ADR-017. They are not an experimental plugin and no
+CIDs are core behavior per ADR-011. They are not an experimental plugin and no
 `stigmem-plugin-cids` package is planned.
 
 ## Current State

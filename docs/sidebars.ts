@@ -2,14 +2,14 @@ import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';
 import apisidebar from './docs/reference/api/generated/sidebar';
 
 /**
- * Sidebars for v0.9.0a1 — four-tab IA per ADR-005.
+ * Sidebars for v0.9.0a1 — four-tab IA per ADR-020 (docs IA).
  *
  * Tab structure (Learn / Build / Operate / Secure) replaces the pre-reset
  * five-tab structure (Learn / Build / Operate / Reference / Community).
  * Reference dissolves: API → Build, Specification → Secure, Architecture
  * splits into Build (data-flow) + Operate (deployment topology), Glossary
  * → footer utility, Experimental Features → auto-generated index per
- * ADR-012. Community dissolves: security-disclosure → Secure,
+ * ADR-008 (version exposure). Community dissolves: security-disclosure → Secure,
  * project-resources → footer.
  *
  * Per founder direction (plan §13, 2026-05-09): "Concepts" + "How It Works"
@@ -19,7 +19,7 @@ import apisidebar from './docs/reference/api/generated/sidebar';
  * time-travel, memory-garden ACL, source attestation, multi-tenant, recall-
  * graph advanced features, MCP-host connectors, non-OpenClaw adapters,
  * Helm/Fly/etc deploy targets, Go SDK) live at experimental/<feature>/
- * per ADR-009 + ADR-011 — they appear in the Reference → Experimental &
+ * per ADR-020 + ADR-011 — they appear in the Reference → Experimental &
  * Deferred index, not in the operating tabs.
  *
  */
@@ -302,7 +302,7 @@ const sidebars: SidebarsConfig = {
           link: {
             type: 'generated-index',
             title: 'Component Specs',
-            description: 'ADR-010 modular component specs in protocol order.',
+            description: 'ADR-020 modular component specs in protocol order.',
           },
           collapsed: false,
           items: [

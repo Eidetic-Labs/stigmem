@@ -124,7 +124,7 @@ build-backend = "setuptools.build_meta"
 packages = []
 
 [tool.uv.workspace]
-# Per ADR-002 v1 critical-path scope + ADR-009 §2(b): only critical-path
+# Per ADR-002 v1 critical-path scope + ADR-020 repository contracts: only critical-path
 # packages in the default workspace. Only explicitly listed experimental
 # packages are included here, so default `uv sync` does not pull deferred
 # experimental dependencies. Operators who want another experimental feature

@@ -104,7 +104,7 @@ Be honest about the costs. ADRs that only list benefits are marketing docs.
 <li><strong>ADRs are living; decisions are never silently overwritten.</strong> Editorial edits are made in place (git is the history). A material decision change is recorded as a dated <code>## Amendments</code> entry in the ADR, or a superseding ADR for a large reversal.</li>
 <li><strong>One decision per ADR.</strong> Two related decisions get two ADRs that reference each other.</li>
 <li><strong>Specific over abstract.</strong> ADRs that describe a <em>concrete</em> decision survive contact with implementation. ADRs that describe a <em>direction</em> don't.</li>
-<li><strong>Numbered sequentially, never reused.</strong> If <code>ADR-005</code> is rejected, the number is still retired. Future ADRs are <code>ADR-006</code> onwards.</li>
+<li><strong>Numbered sequentially, never reused.</strong> If an ADR number is rejected or consolidated away, that number is still retired — new ADRs always take the next free number, never a recycled one.</li>
 <li><strong>Status and decision changes are recorded, not silent.</strong> When an ADR is superseded, the new ADR captures that with a <code>Supersedes:</code> reference; when a living ADR's decision changes in place, it gets a dated <code>## Amendments</code> entry.</li>
 <li><strong>Approval: two contributors or the founder alone.</strong> Founder solo-approval exists because the project has a small team. When the founder signs off alone, they take responsibility for the validation discipline that two-person review otherwise provides. See ADR-001 § <em>Contributor approval rule</em> for the full statement.</li>
 </ol>

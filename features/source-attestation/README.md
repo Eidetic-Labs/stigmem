@@ -12,9 +12,9 @@ implementation_path: experimental/source-attestation
 package: stigmem-plugin-source-attestation
 adr_refs:
   - ADR-008
-  - ADR-010
+  - ADR-020 §9 (modular specs)
   - ADR-011
-  - ADR-018
+  - ADR-020 §11 (security taxonomy)
   - ADR-020
 security_refs:
   - R-22

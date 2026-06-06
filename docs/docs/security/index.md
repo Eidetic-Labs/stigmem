@@ -14,7 +14,7 @@ sidebar_position: 1
 
 **What this page is**
 
-Per [ADR-005](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/005-docs-ia.md):
+Per [ADR-020](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/020-feature-owned-product-structure.md) §12 (docs IA):
 "Lead Secure with the risk register." This page is the entry point to
 stigmem's security posture. The threat model and scenarios are the
 most important artifacts, surfaced first.
@@ -75,7 +75,7 @@ prompt-injection trust boundary by silently changing
 <code>interpret_as</code> from <code>content</code> to
 <code>instruction</code> at the storage layer. Mitigation is the
 ADR-016 stack (L1–L5: append-only journal, SQLite triggers, CIDs per
-[ADR-017](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/017-amendment-to-adr-011-cids-as-core.md),
+[ADR-011](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/011-cross-cutting-extraction.md),
 local hash chain, Sigstore Rekor anchor). Targeted: future hardened-core work.
 
 </div>
@@ -100,7 +100,7 @@ the default install of v0.9.0a2 ships with feature-specific code in
 scope per [ADR-002](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/002-v1-scope.md).
 The routes are mounted but the features are dormant unless explicitly
 configured (capability tokens, migrations, manifests). Per
-[ADR-019](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md)
+[ADR-001](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/001-versioning.md)
 iteration semantics, each v0.9.0aN extracts one cross-cutting feature
 into a plugin per [ADR-011](https://github.com/eidetic-labs/stigmem/blob/main/docs/adr/011-cross-cutting-extraction.md).
 
@@ -190,7 +190,7 @@ v0.9.0a2 hardening release patches the following advisory batch.
 <div>
 <dt><a href="./authentication">Authentication</a></dt>
 <dt><span className="stigmem-fields__type">access</span></dt>
-<dd>API key auth (Argon2id for new keys; v0.9.0a1 SHA-256 rows rehash on successful use per ADR-007), local-agent <code>entity_uri</code> naming, expires_at enforcement, session model.</dd>
+<dd>API key auth (Argon2id for new keys; v0.9.0a1 SHA-256 rows rehash on successful use per <a href="../../../docs/adr/archive/007-argon2id.md">ADR-007</a>), local-agent <code>entity_uri</code> naming, expires_at enforcement, session model.</dd>
 </div>
 
 <div>
@@ -244,7 +244,7 @@ v0.9.0a2 hardening release patches the following advisory batch.
 <div>
 <dt><a href="./where-security-analysis-lives">Where security analysis lives</a></dt>
 <dt><span className="stigmem-fields__type">navigation</span></dt>
-<dd>ADR-018 split between the protocol-level threat model and feature-local <code>experimental/&lt;feature&gt;/security.md</code> files.</dd>
+<dd>ADR-020 §11 (security taxonomy) split between the protocol-level threat model and feature-local <code>experimental/&lt;feature&gt;/security.md</code> files.</dd>
 </div>
 
 </div>
@@ -267,7 +267,7 @@ canonical security evidence at
 
 <div className="stigmem-grid">
 
-<div><h4><a href="./compatibility-commitment">Compatibility commitment</a></h4><p>Written commitment per ADR-013.</p></div>
+<div><h4><a href="./compatibility-commitment">Compatibility commitment</a></h4><p>Written commitment per ADR-008 §Deprecation policy.</p></div>
 <div><h4><a href="../community/security-disclosure">Security disclosure policy</a></h4><p>How to report a vulnerability.</p></div>
 <div><h4><a href="https://github.com/eidetic-labs/stigmem/blob/main/SECURITY.md">SECURITY.md</a></h4><p>Supported versions, dependency posture.</p></div>
 
@@ -276,7 +276,7 @@ canonical security evidence at
 ## Specification
 
 The protocol specification is the contract security depends on. It
-lives under Secure per ADR-005.
+lives under Secure per ADR-020 §12 (docs IA).
 
 <div className="stigmem-grid">
 

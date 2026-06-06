@@ -3,7 +3,7 @@
 All notable changes to Stigmem are documented here.
 This file covers the reference node (`stigmem-node`), Python SDK (`stigmem-py`), TypeScript SDK (`stigmem-ts`), and MCP adapter. Spec changes are in [`spec/CHANGELOG.md`](spec/CHANGELOG.md).
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-release version strings follow [PEP 440](https://peps.python.org/pep-0440/) (Python artifacts) and [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) (npm/Helm artifacts) per [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-release version strings follow [PEP 440](https://peps.python.org/pep-0440/) (Python artifacts) and [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) (npm/Helm artifacts) per [ADR-001](docs/adr/001-versioning.md).
 
 ---
 
@@ -129,7 +129,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 organizational boundaries. Multi-tenant scoping remains experimental, opt-in,
 and operator-gated.
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a8`, `stigmem-py 0.9.0a8`, `stigmem-node 0.9.0a8`, and `stigmem-openclaw 0.9.0a8` (PEP 440).
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.8` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a8` and `:0.9.0-alpha.8`.
@@ -166,7 +166,7 @@ and operator-gated.
 organizational boundaries. Source attestation remains experimental, opt-in, and
 operator-gated.
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a7`, `stigmem-py 0.9.0a7`, `stigmem-node 0.9.0a7`, and `stigmem-openclaw 0.9.0a7` (PEP 440).
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.7` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a7` and `:0.9.0-alpha.7`.
@@ -204,7 +204,7 @@ operator-gated.
 organizational boundaries. Memory Garden advanced ACL remains experimental,
 opt-in, and operator-gated.
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a6`, `stigmem-py 0.9.0a6`, `stigmem-node 0.9.0a6`, and `stigmem-openclaw 0.9.0a6` (PEP 440).
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.6` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a6` and `:0.9.0-alpha.6`.
@@ -252,7 +252,7 @@ opt-in, and operator-gated.
 organizational boundaries. RTBF tombstones remain experimental, opt-in, and
 operator-gated.
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a5`, `stigmem-py 0.9.0a5`, `stigmem-node 0.9.0a5`, and `stigmem-openclaw 0.9.0a5` (PEP 440).
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.5` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a5` and `:0.9.0-alpha.5`.
@@ -287,7 +287,7 @@ operator-gated.
 organizational boundaries. Time-travel historical reads remain experimental,
 opt-in, and operator-gated.
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a4`, `stigmem-py 0.9.0a4`, `stigmem-node 0.9.0a4`, and `stigmem-openclaw 0.9.0a4` (PEP 440).
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.4` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a4` and `:0.9.0-alpha.4`.
@@ -337,7 +337,7 @@ opt-in, and operator-gated.
 **Status:** preview alpha — pre-stable, not for production federation across
 organizational boundaries.
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a3`, `stigmem-py 0.9.0a3`, `stigmem-node 0.9.0a3`, and `stigmem-openclaw 0.9.0a3` (PEP 440).
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.3` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a3` and `:0.9.0-alpha.3`.
@@ -419,7 +419,7 @@ root changelog projection used during release prep.
 
 **Status:** preview alpha — pre-stable, not for production federation across organizational boundaries. See [LIMITATIONS.md](LIMITATIONS.md).
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a2`, `stigmem-py 0.9.0a2`, `stigmem-node 0.9.0a2`, and `stigmem-openclaw 0.9.0a2` (PEP 440). The `stigmem` meta-package now depends on the alpha.2 package line by default.
 - npm / Node: `@eidetic-labs/stigmem-ts@0.9.0-alpha.2` (semver).
 - GHCR: `ghcr.io/eidetic-labs/stigmem-node:0.9.0a2` and `:0.9.0-alpha.2`, plus `:latest` on the release tag.
@@ -430,7 +430,7 @@ root changelog projection used during release prep.
 - **Configurable CORS middleware for browser UI clients.** CORS remains disabled by default. Operators can enable it with `STIGMEM_CORS_DEV_LOCALHOST=1` for local development with any localhost port, `STIGMEM_CORS_ALLOWED_ORIGINS=<csv>` for production with known origins, or `STIGMEM_CORS_ALLOWED_ORIGIN_REGEX=<regex>` for advanced patterns. See the node README for full configuration reference.
 - **Plugin registry foundation.** Main now includes the stable 22-hook surface, typed voting/filter-chain/score-delta/fire-and-forget semantics, deterministic `HookRegistry` dispatch, manual/core handler registration, minimum `PluginManifest` and capability-restricted `PluginContext`, hook-site wiring across assertion/recall/federation/auth/migration/audit paths, registry audit/metrics plumbing, `TestPluginRegistry`, focused plugin tests, and a hook-firing benchmark gate.
 - **Docs-site AI authorship disclosure.** The README and CONTRIBUTING AI-assisted authorship disclosure is now mirrored in the docs site under Community / Disclosure & policy so adopters and reviewers can find the review-calibration guidance outside the repository root.
-- **ADR-010 modular spec foundation.** Core spec frontmatter stubs now live under `spec/specs/`, with generated `spec/PROTOCOL.md` composition metadata and a contract gate that fails on protocol-index drift.
+- **ADR-020 §9 (modular specs) modular spec foundation.** Core spec frontmatter stubs now live under `spec/specs/`, with generated `spec/PROTOCOL.md` composition metadata and a contract gate that fails on protocol-index drift.
 - **ADR-010 experimental spec indexing.** Experimental spec files now carry `Spec-XN` frontmatter and appear in generated `spec/PROTOCOL.md`; archived monolithic snapshots point readers to the modular index.
 - **Grade duplication audit tooling.** The workspace now installs `jscpd` as a root dev dependency and exposes `pnpm run grade:duplication`, so the grade duplication signal reports a numeric percentage instead of `unknown`.
 
@@ -458,7 +458,7 @@ root changelog projection used during release prep.
 
 ## Pre-1.0 history note (2026-05-08)
 
-The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled internal development checkpoints, not tagged releases anyone deployed in production. The canonical version line of stigmem is being reset to `v0.9.0a1` as the *first build* per [ADR-001](docs/adr/001-versioning.md) and [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md). The historical entries below are preserved as the development record; they do not represent prior public releases.
+The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled internal development checkpoints, not tagged releases anyone deployed in production. The canonical version line of stigmem is being reset to `v0.9.0a1` as the *first build* per [ADR-001](docs/adr/001-versioning.md) and [ADR-001](docs/adr/001-versioning.md). The historical entries below are preserved as the development record; they do not represent prior public releases.
 
 ---
 
@@ -466,7 +466,7 @@ The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled inter
 
 **Status:** preview alpha — pre-stable, not for production federation across organizational boundaries. See [LIMITATIONS.md](LIMITATIONS.md).
 
-**Per-ecosystem version strings (per ADR-019):**
+**Per-ecosystem version strings (per ADR-001):**
 - PyPI / Python: `stigmem 0.9.0a1` (PEP 440) — **meta-package**: empty wheel that depends on `stigmem-py>=0.9.0a1,<1.0.0` by default. Extras: `stigmem[node]` adds the server, `stigmem[openclaw]` adds the adapter, `stigmem[all]` adds everything. Real code ships under `stigmem-py`, `stigmem-node`, `stigmem-openclaw`. The bare `stigmem` name is the convenience entry-point for adopters who want the SDK with one command (matches the convention of `redis`, `psycopg`, `elasticsearch`, `pymongo` — bare-name = client SDK).
 - npm / Node:    `@eidetic-labs/stigmem-ts@0.9.0-alpha.1` (semver) — **first npm release.** Scoped under `@eidetic-labs` so all org Owners can manage the package without npm's free-tier limitation on team-bound package permissions. Root `package.json` is `private: true` (workspace root). Adopters install via `npm install @eidetic-labs/stigmem-ts`.
 - Helm `appVersion`: `0.9.0-alpha.1` (semver)
@@ -479,10 +479,10 @@ The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled inter
   - `MAINTAINERS.md` at repo root — current maintainers and the [ADR-001 §Contributor approval rule](docs/adr/001-versioning.md).
   - `release/version-surfaces.yaml` — canonical inventory of release surfaces and their per-ecosystem spellings; consumed by `scripts/check_version_consistency.py`.
   - `scripts/check_version_consistency.py`, `scripts/validate_version_surfaces.py`, and `.github/workflows/version-consistency.yml` — CI gate preventing the version-state inconsistency that triggered the v1.0 retraction.
-  - 19 ADRs committed under `docs/adr/` (per [ADR-005](docs/adr/005-docs-ia.md), [ADR-009](docs/adr/009-repo-structure.md)).
+  - 19 ADRs committed under `docs/adr/` (per [ADR-020](docs/adr/020-feature-owned-product-structure.md) §12 (docs IA), [ADR-020](docs/adr/020-feature-owned-product-structure.md) §13 (repo structure)).
   - **README §Security posture** — at-a-glance security entry point with links to LIMITATIONS, threat-model, SECURITY.md, security architecture, and operator hardening.
   - **README §AI-authorship disclosure** — names which paths have been human-reviewed in depth and which haven't.
-- **Spec section §25 — Content-addressed fact IDs (CIDs)** retained as a core feature (per [ADR-017](docs/adr/017-amendment-to-adr-011-cids-as-core.md), amending [ADR-011](docs/adr/011-cross-cutting-extraction.md)). CIDs are load-bearing for the storage-immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md)) and the prompt-injection trust boundary ([ADR-003](docs/adr/003-prompt-injection.md) L2).
+- **Spec section §25 — Content-addressed fact IDs (CIDs)** retained as a core feature (per [ADR-011](docs/adr/011-cross-cutting-extraction.md), amending [ADR-011](docs/adr/011-cross-cutting-extraction.md)). CIDs are load-bearing for the storage-immutability stack ([ADR-016](docs/adr/016-storage-immutability-enforcement.md)) and the prompt-injection trust boundary ([ADR-003](docs/adr/003-prompt-injection.md) L2).
 
 ### Changed
 
@@ -514,7 +514,7 @@ The version markers below (`v0.2` through `v2.0`, plus `1.0.0-rc`) labeled inter
 The following changes have landed on `main` after the v0.9.0a1 first build and are queued for the next alpha release:
 
 - **Plugin registry foundation.** Core now has the 22-hook registry foundation required by ADR-011. Remaining plugin infrastructure work includes package discovery, dependency lifecycle, health polling, operator CLI, production signing/trust, plugin author/operator documentation, and full plugin migration lifecycle/checksum tracking.
-- **Deferred-feature extraction path.** The next alpha releases continue the C1 plugin architecture: lazy instruction discovery first, then time-travel, tombstones, memory-garden advanced ACL, source attestation, and multi-tenant isolation. CIDs remain core per ADR-017.
+- **Deferred-feature extraction path.** The next alpha releases continue the C1 plugin architecture: lazy instruction discovery first, then time-travel, tombstones, memory-garden advanced ACL, source attestation, and multi-tenant isolation. CIDs remain core per ADR-011.
 - **Large-file refactors.** The major `cli.py`, federation-route, and facts-route split work has landed on `main`; it is no longer a blocker for the next alpha.
 - **Quality ratchets.** Lint-baseline tightening, coverage lift, and complexity cleanup remain active quality-improvement tracks for the alpha series.
 - **Published-artifact follow-ups.** The live retraction-post URL, TypeScript SDK README, npm dist-tag convention, ClawHub skill naming/versioning notes, GHCR `latest` tag policy, Python SDK version literal, and `stigmem-node` wheel migration packaging fix are all tracked for pickup in the next alpha artifacts where applicable. The v0.9.0a1 registry artifacts themselves remain immutable.
@@ -523,7 +523,7 @@ The following changes have landed on `main` after the v0.9.0a1 first build and a
 
 ## Historical development checkpoints (preserved as record, not prior releases)
 
-The entries below labeled `v0.2` through `v2.0` and `1.0.0-rc` documented internal development checkpoints. They are preserved here as the development record. Per [ADR-001](docs/adr/001-versioning.md) and [ADR-019](docs/adr/019-amendment-to-adr-001-prerelease-version-strings.md), the canonical version line of stigmem begins at `v0.9.0a1` above.
+The entries below labeled `v0.2` through `v2.0` and `1.0.0-rc` documented internal development checkpoints. They are preserved here as the development record. Per [ADR-001](docs/adr/001-versioning.md) and [ADR-001](docs/adr/001-versioning.md), the canonical version line of stigmem begins at `v0.9.0a1` above.
 
 ---
 

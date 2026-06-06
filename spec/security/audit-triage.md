@@ -7,7 +7,7 @@ This file complements:
 
 - [`SECURITY.md`](../../SECURITY.md) § Security Posture — operator-facing summary and per-PR triage groups.
 - [`threat-model.md`](threat-model.md) — risk register (R-XX entries). Only **real** risks land there; this file records **non-risks**.
-- [ADR-018](../../docs/adr/018-security-documentation-colocation.md) — establishes the colocation principle that justifies an in-repo registry over GitHub-UI-only dismissal comments.
+- [ADR-020](../../docs/adr/020-feature-owned-product-structure.md) §11 (security taxonomy) — establishes the colocation principle that justifies an in-repo registry over GitHub-UI-only dismissal comments.
 
 ## How to use this file
 
@@ -92,11 +92,11 @@ Lesson: even after the constant-SQL refactor, the SQL string must never appear i
 
 **Rule:** `py/weak-sensitive-data-hashing`.
 **Severity:** High.
-**Location at triage:** `node/src/stigmem_node/auth.py:67` — function `_legacy_sha256(raw: str) -> str` and its sibling `_verify_key_hash(...)` which calls it. Introduced in [PR #172](https://github.com/eidetic-labs/stigmem/pull/172) (Argon2id API key hashing migration per ADR-007).
+**Location at triage:** `node/src/stigmem_node/auth.py:67` — function `_legacy_sha256(raw: str) -> str` and its sibling `_verify_key_hash(...)` which calls it. Introduced in [PR #172](https://github.com/eidetic-labs/stigmem/pull/172) (Argon2id API key hashing migration per [ADR-007](../../docs/adr/archive/007-argon2id.md)).
 
 **Why this is NOT a false positive.** Unlike the 2026-05-11 SQL-injection cluster above, the analyzer is **technically correct**: SHA-256 is computationally cheap and inappropriate as a password-hashing primitive in isolation. The function genuinely hashes credential material with SHA-256.
 
-**Why we keep it anyway.** [ADR-007](../../docs/adr/007-argon2id.md) commits to a dual-mode verification window:
+**Why we keep it anyway.** [ADR-007](../../docs/adr/archive/007-argon2id.md) commits to a dual-mode verification window:
 
 - All **new** API keys are hashed with Argon2id (via `_hash_key`, which returns the `$argon2id$…` PHC string).
 - **Legacy** v0.9.0a1 rows — issued before PR #172 landed — remain SHA-256-hashed in the database. They verify against `_legacy_sha256` on first use, then are opportunistically re-hashed to Argon2id and the database row is updated.
@@ -120,7 +120,7 @@ No new `R-XX` entry is required: the residual is already accounted for in the ex
 
 **Retirement milestone.** v1.0.0 GA — bulk re-hash migration deletes `_legacy_sha256` from `auth.py`; CodeQL re-scan after that release auto-closes any residual reference to the function.
 
-**Tracking.** [ADR-007](../../docs/adr/007-argon2id.md) defines the dual-mode migration window; the v1.0.0 GA release checklist must verify that the legacy SHA-256 path has been retired before the stable release is cut.
+**Tracking.** [ADR-007](../../docs/adr/archive/007-argon2id.md) defines the dual-mode migration window; the v1.0.0 GA release checklist must verify that the legacy SHA-256 path has been retired before the stable release is cut.
 
 ---
 

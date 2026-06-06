@@ -9,7 +9,7 @@ enabled.
 
 This feature has no Spec-X assignment. If it is reintroduced into the
 supported surface as protocol behavior, it must receive a numbered Spec-X per
-ADR-010 and pass ADR-008 gates.
+ADR-020 §9 (modular specs) and pass ADR-008 gates.
 
 ## Default Behavior
 

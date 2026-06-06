@@ -36,11 +36,11 @@ text is retained in `docs/adr/archive/` for history.
 
 </div>
 
-**Status:** Accepted · **Date:** 2026-05-07 · **Authors:** Eidetic Labs · **Supersedes:** ADR-011 (revised 2026-05-06, direct-to-C2) · **Related:** [ADR-002](./002-v1-scope), [ADR-008](./008-experimental-gates), [ADR-009](./009-repo-structure), [ADR-010](./010-modular-specs), ADR-012, ADR-013; `stigmem/analyses/feature-extraction-analysis.md`
+**Status:** Accepted · **Date:** 2026-05-07 · **Authors:** Eidetic Labs · **Supersedes:** ADR-011 (revised 2026-05-06, direct-to-C2) · **Related:** [ADR-002](./002-v1-scope), [ADR-008](./008-experimental-gates) (version exposure + deprecation, folds ADR-012/ADR-013), [ADR-020](./020-feature-owned-product-structure) (repo structure + modular specs, folds ADR-009/ADR-010); `stigmem/analyses/feature-extraction-analysis.md`
 
 ## Context
 
-ADR-009 establishes `experimental/<feature>/` as the home for deferred
+ADR-020 §13 (repo structure) establishes `experimental/<feature>/` as the home for deferred
 features. ADR-002 names which features are deferred. The implicit
 assumption — that moving a feature to `experimental/` is a `git mv` —
 holds for ~75% of features but fails for the cross-cutting ones
@@ -330,7 +330,7 @@ specific feature.
 This is the *initial* surface; new hooks may be added via ADR-011
 amendment with sign-off. Removing or changing the signature of an
 existing hook is a breaking change requiring a major version bump per
-ADR-013 deprecation policy.
+ADR-008 §Deprecation policy.
 
 </div>
 
@@ -733,7 +733,7 @@ Default install: no multi-tenant plugin → `tenant_resolve` returns
 
 <div><h4>Stigmem-version range</h4><p>Plugins declare <code>requires_stigmem</code> SemVer range. Core checks at registration.</p></div>
 <div><h4>Major bump = re-release</h4><p>Stigmem MAJOR version bumps may require plugin re-release; plugins should test against <code>&gt;=X.0.0,&lt;X+1.0.0</code>.</p></div>
-<div><h4>Hook signatures are stable API</h4><p>Per ADR-013 deprecation policy. Changing a hook signature requires major version bump.</p></div>
+<div><h4>Hook signatures are stable API</h4><p>Per ADR-008 §Deprecation policy. Changing a hook signature requires major version bump.</p></div>
 <div><h4>New hooks are additive</h4><p>MINOR bumps. Plugins can be developed and shipped independently of core releases within their declared range.</p></div>
 
 </div>
@@ -804,7 +804,7 @@ Default install: no multi-tenant plugin → `tenant_resolve` returns
 <div><h4>External contributors write plugins</h4><p>Once the hook surface is stable, third-party plugins are first-class. No core PR needed to add a feature.</p></div>
 <div><h4>Failure mode is uniform</h4><p>All plugins fail-closed via the same mechanism. Operators have one place to look when something breaks.</p></div>
 <div><h4>Auditability built in</h4><p>Plugin registration is an audit event; capability declarations are explicit; signing identifies trusted publishers.</p></div>
-<div><h4>Versioning is consistent</h4><p>Plugins follow SemVer with stigmem-version compatibility ranges, integrating with ADR-012's <code>Stigmem-Version</code> header model and ADR-013's deprecation policy.</p></div>
+<div><h4>Versioning is consistent</h4><p>Plugins follow SemVer with stigmem-version compatibility ranges, integrating with ADR-008's <code>Stigmem-Version</code> header model (§Version exposure) and ADR-008's deprecation policy (§Deprecation policy).</p></div>
 
 </div>
 
@@ -833,7 +833,7 @@ Default install: no multi-tenant plugin → `tenant_resolve` returns
 <div>
 <dt><code>R-PLUG-1</code> · hook surface design wrong</dt>
 <dt><span className="stigmem-fields__type">tracked</span></dt>
-<dd>If a hook is missing or has wrong semantics, plugins can't express what they need. Mitigation: hook surface is amendable; new hooks are additive (MINOR); existing hooks can be deprecated per ADR-013. The first six plugin implementations are the test — if all map cleanly, design is sound; if not, surface needs revision before multi-tenant lands.</dd>
+<dd>If a hook is missing or has wrong semantics, plugins can't express what they need. Mitigation: hook surface is amendable; new hooks are additive (MINOR); existing hooks can be deprecated per ADR-008 §Deprecation policy. The first six plugin implementations are the test — if all map cleanly, design is sound; if not, surface needs revision before multi-tenant lands.</dd>
 </div>
 
 <div>
@@ -971,7 +971,7 @@ Per-feature ordering:
 ### Post-Phase-A — stewardship
 
 The hook surface is reviewed at every major release for hook
-deprecations (per ADR-013), new hooks (additive; ADR-011 amendment),
+deprecations (per ADR-008 §Deprecation policy), new hooks (additive; ADR-011 amendment),
 and capability evolution. Phase B (capability redesign, federation
 hardening, OpenClaw rewrite, operator soak) operates against the
 post-extraction codebase. The plugin architecture provides the
@@ -994,7 +994,7 @@ Changes require ADR-011 amendment with sign-off (two contributors or
 the founder alone, per ADR-001 §Contributor approval rule). Common
 amendment cases: adding a new hook (additive; MINOR core version
 bump); adding a new capability to the allowlist; changing a hook
-signature (breaking; MAJOR core version bump per ADR-013); adding
+signature (breaking; MAJOR core version bump per ADR-008 §Deprecation policy); adding
 plugin sandboxing (subprocess isolation, WASM-based, etc.) — would
 supersede the registration-only trust model; promoting a plugin's
 default-on status (would also amend ADR-008 reintroduction gates if
