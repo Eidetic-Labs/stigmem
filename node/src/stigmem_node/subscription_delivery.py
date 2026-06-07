@@ -33,6 +33,7 @@ from .db import db
 from .garden_acl import get_member_role
 from .lifecycle.tombstone_cache import is_tombstoned as _is_tombstoned
 from .memory_garden_acl_gate import recall_filter_enabled
+from .net_util import assert_safe_url
 from .recall.recall_pipeline import apply_recall_pipeline
 
 logger = logging.getLogger("stigmem.subscriptions")
@@ -282,6 +283,19 @@ def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
         _mark_delivered(event["id"], event["subscription_id"])
         return True
 
+    # SSRF guard (P-CONF-2): never POST to a private/loopback/link-local/IMDS
+    # address. Unsafe addresses can never become deliverable, so stop retrying.
+    try:
+        assert_safe_url(event["delivery_address"], allow_schemes=frozenset({"https", "http"}))
+    except ValueError as exc:
+        logger.warning(
+            "Webhook delivery blocked for subscription %s: unsafe delivery_address (%s)",
+            event["subscription_id"],
+            exc,
+        )
+        _mark_delivered(event["id"], event["subscription_id"])
+        return True
+
     body = {
         "event_id": event["id"],
         "idempotency_key": event["id"],
@@ -291,7 +305,7 @@ def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
     }
 
     try:
-        with httpx.Client(timeout=10.0) as client:
+        with httpx.Client(timeout=10.0, follow_redirects=False) as client:
             resp = client.post(
                 event["delivery_address"],
                 json=body,
