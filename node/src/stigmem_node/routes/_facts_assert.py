@@ -329,6 +329,14 @@ def assert_fact_impl(
     hlc = node_hlc.tick()
     value_v = _encode_v(req.value.type, req.value.v)
 
+    # F-AVAIL-1: cap a single fact value to bound storage/DoS. 0 disables.
+    _value_cap = _live_settings().max_fact_value_bytes
+    if _value_cap > 0 and value_v is not None and len(value_v.encode("utf-8")) > _value_cap:
+        raise HTTPException(
+            status_code=413,
+            detail=f"fact value exceeds {_value_cap} bytes",
+        )
+
     # §25.7.3: compute CID before write; persisted in the same transaction
     fact_cid = compute_cid(
         entity=entity,
