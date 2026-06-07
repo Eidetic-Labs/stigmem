@@ -161,6 +161,23 @@ def _warn_if_backend_immutability_unenforced() -> None:
     )
 
 
+def _warn_if_legacy_sha256_acceptance_unbounded() -> None:
+    """Warn when legacy SHA-256 API-key hashes are accepted with no cutoff (F-ID-4).
+
+    Unsalted SHA-256 is weaker than the Argon2id default. The acceptance window
+    is a v0.9.x migration affordance; leaving it open indefinitely
+    (STIGMEM_LEGACY_SHA256_ACCEPT_UNTIL unset) is a standing weakness.
+    """
+    if settings.legacy_sha256_accept_until is not None:
+        return
+    logger.warning(
+        "SECURITY WARNING: legacy SHA-256 API-key hashes are accepted with no "
+        "cutoff (STIGMEM_LEGACY_SHA256_ACCEPT_UNTIL is unset). Unsalted SHA-256 "
+        "is weaker than the Argon2id default; set a cutoff date to bound the "
+        "migration window and force rotation of any keys not yet rehashed."
+    )
+
+
 def _node_url_is_loopback(node_url: str) -> bool:
     """Return True iff node_url's host is a loopback address."""
     try:
@@ -183,6 +200,7 @@ def create_app() -> FastAPI:
         _enforce_rate_limit_kill_switch_ack()
         _warn_if_cors_dev_localhost_enabled()
         _warn_if_backend_immutability_unenforced()
+        _warn_if_legacy_sha256_acceptance_unbounded()
 
         discovered_plugins = register_discovered_plugins(freeze=False)
         _include_plugin_routers(app, discovered_plugins)
