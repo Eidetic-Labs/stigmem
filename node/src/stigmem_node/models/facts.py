@@ -50,10 +50,10 @@ class AttestationToken(BaseModel):
 
 
 class AssertRequest(BaseModel):
-    entity: str = Field(..., min_length=1)
-    relation: str = Field(..., min_length=1)
+    entity: str = Field(..., min_length=1, max_length=2048)
+    relation: str = Field(..., min_length=1, max_length=2048)
     value: FactValue
-    source: str = Field(..., min_length=1)
+    source: str = Field(..., min_length=1, max_length=2048)
     confidence: float = Field(1.0, ge=0.0, le=1.0)
     scope: str = Field("local")
     valid_until: str | None = Field(None, description="ISO 8601 UTC expiry; null = non-expiring")

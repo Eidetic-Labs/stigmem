@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from .auth import Identity, resolve_identity
+from .body_limit import BodySizeLimitMiddleware
 from .db import apply_migrations
 from .rate_limit import RateLimitMiddleware
 from .routes.admin_audit import router as admin_audit_router
@@ -137,6 +138,29 @@ def _warn_if_cors_dev_localhost_enabled() -> None:
         )
 
 
+def _warn_if_backend_immutability_unenforced() -> None:
+    """Warn when the storage backend lacks DB-level facts-immutability triggers.
+
+    P-DESTROY-1 (honesty): the append-only no-UPDATE/no-DELETE triggers
+    (ADR-016 L2) are implemented for SQLite only. On libsql/Postgres the facts
+    table is mutable by anyone with direct database write access, so tamper
+    resistance on those backends rests on the L3+ CID / hash-chain layers, not
+    L2 triggers. State that loudly rather than imply uniform immutability.
+    """
+    backend = getattr(settings, "storage_backend", "sqlite")
+    if backend == "sqlite":
+        return
+    logger.warning(
+        "SECURITY WARNING: storage_backend=%r does NOT enforce database-level "
+        "facts immutability. The append-only no-UPDATE/no-DELETE triggers "
+        "(ADR-016 L2) exist for SQLite only; on %s the facts table is mutable "
+        "by anyone with direct DB write access. Tamper-evidence on this backend "
+        "relies on the L3+ CID / hash-chain layers, not L2 triggers.",
+        backend,
+        backend,
+    )
+
+
 def _warn_if_legacy_sha256_acceptance_unbounded() -> None:
     """Warn when legacy SHA-256 API-key hashes are accepted with no cutoff (F-ID-4).
 
@@ -175,6 +199,7 @@ def create_app() -> FastAPI:
         _enforce_auth_required_in_production()
         _enforce_rate_limit_kill_switch_ack()
         _warn_if_cors_dev_localhost_enabled()
+        _warn_if_backend_immutability_unenforced()
         _warn_if_legacy_sha256_acceptance_unbounded()
 
         discovered_plugins = register_discovered_plugins(freeze=False)
@@ -241,6 +266,7 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
     _cors_regex = settings.cors_allowed_origin_regex
     if settings.cors_dev_localhost:
         _cors_regex = _DEV_LOCALHOST_CORS_REGEX
