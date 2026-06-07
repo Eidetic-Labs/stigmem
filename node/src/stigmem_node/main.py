@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from .auth import Identity, resolve_identity
+from .body_limit import BodySizeLimitMiddleware
 from .db import apply_migrations
 from .rate_limit import RateLimitMiddleware
 from .routes.admin_audit import router as admin_audit_router
@@ -223,6 +224,7 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
     _cors_regex = settings.cors_allowed_origin_regex
     if settings.cors_dev_localhost:
         _cors_regex = _DEV_LOCALHOST_CORS_REGEX

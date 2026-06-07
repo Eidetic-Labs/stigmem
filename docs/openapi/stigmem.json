@@ -293,6 +293,7 @@
             "type": "array"
           },
           "entity": {
+            "maxLength": 2048,
             "minLength": 1,
             "title": "Entity",
             "type": "string"
@@ -310,6 +311,7 @@
             "title": "Garden Id"
           },
           "relation": {
+            "maxLength": 2048,
             "minLength": 1,
             "title": "Relation",
             "type": "string"
@@ -320,6 +322,7 @@
             "type": "string"
           },
           "source": {
+            "maxLength": 2048,
             "minLength": 1,
             "title": "Source",
             "type": "string"

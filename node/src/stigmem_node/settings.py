@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     rate_limit_read_per_hour: int = 5000
     rate_limit_disabled_ack: bool = False
 
+    # F-AVAIL-1: ingest size caps (DoS protection). 0 disables the cap.
+    max_request_body_bytes: int = 1_048_576  # 1 MiB hard cap on any request body
+    max_fact_value_bytes: int = 262_144  # 256 KiB cap on a single fact value
+
     # Storage backend (Phase 8 / 11).
     # "sqlite"   (default) — local SQLite file at db_path.
     # "libsql"             — libSQL / Turso; uses db_path as the local replica
