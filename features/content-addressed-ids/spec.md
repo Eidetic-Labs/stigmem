@@ -58,13 +58,13 @@ malformed CIDs.
 
 ## Canonical Fact Body
 
-The canonical fact body for v0.9.0aN CID computation contains exactly these
-fields:
+The canonical fact body for CID v2 computation contains exactly these fields:
 
 ```json
 {
   "confidence": 1.0,
   "entity": "stigmem://example/entity",
+  "interpret_as": "content",
   "relation": "memory:prefers",
   "scope": "local",
   "source": "agent:example",
@@ -73,11 +73,17 @@ fields:
 }
 ```
 
+`interpret_as` is CID-sensitive (CID v2): flipping a fact's interpretation
+between `content` and `instruction` MUST produce a different CID, so the flip is
+detected on read. CID v1 (which omitted `interpret_as`) is no longer accepted —
+this is a breaking, version-gated change; pre-v2 facts are upgraded by the CID
+backfill.
+
 The canonical body MUST be serialized as compact UTF-8 JSON with deterministic
 lexicographic key ordering and no insignificant whitespace. The reference node
 uses JSON sorted keys with compact separators and `ensure_ascii=false`.
 
-All seven canonical fields are CID-sensitive. Changing any of them MUST produce
+All eight canonical fields are CID-sensitive. Changing any of them MUST produce
 a different CID.
 
 ## Excluded Fields

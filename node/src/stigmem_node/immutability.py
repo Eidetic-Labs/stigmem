@@ -6,6 +6,7 @@ import sys
 from typing import TYPE_CHECKING
 
 __all__ = [
+    "rebind_facts_to_cid_v2",
     "set_embedding_status",
     "set_fact_cid_backfill_status",
     "set_fact_garden_membership",
@@ -17,6 +18,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from .lifecycle.immutability import (
+        rebind_facts_to_cid_v2,
         set_embedding_status,
         set_fact_cid_backfill_status,
         set_fact_garden_membership,

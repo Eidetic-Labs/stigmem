@@ -207,18 +207,18 @@ of the v1.0 critical path because R-23 mitigation depends on them.
 
 </div>
 
-The CID computation covers exactly seven fields (spec §25.2.1; see
-`node/src/stigmem_node/cid.py`): `confidence`, `entity`, `relation`,
-`scope`, `source`, `value_type`, `value_v`. Mutation of any of these by
-an attacker breaks the CID.
+The CID computation (CID v2) covers exactly eight fields (spec §25.2.1; see
+`node/src/stigmem_node/cid.py`): `confidence`, `entity`, `interpret_as`,
+`relation`, `scope`, `source`, `value_type`, `value_v`. Mutation of any of
+these by an attacker breaks the CID.
 
-**Known gap (R-23 / ADR-003): `interpret_as` is NOT currently covered by
-the CID** (nor is `timestamp`). The critical attack this ADR cites —
-flipping `interpret_as` from `content` to `instruction` — is therefore
-*not* detected by a CID mismatch today. Because `interpret_as` is
-load-bearing for ADR-003's prompt-injection defense, adding it to the
-canonical CID body is required hardening (a wire-format change tracked
-in the tamper-evidence hardening plan).
+**R-23 / ADR-003 closed (CID v2, 2026-06-06): `interpret_as` is covered by the
+CID.** The critical attack this ADR cites — flipping `interpret_as` from
+`content` to `instruction` — changes the CID and is detected as a mismatch on
+the read path and on federation ingest. (`timestamp` remains excluded so the
+same assertion shares one CID across times.) CID v2 is a breaking,
+version-gated change; pre-v2 facts are upgraded by the backfill (see the
+amendment below).
 
 ### Layer 4 (L4) · Local hash chain
 
@@ -515,6 +515,17 @@ adding hardware enforcement requirements at the protocol level.
   the default configuration. Closing that gap (out-of-band signing,
   default/enforced external anchor, SDK verify-by-default, and `interpret_as`
   CID coverage) is tracked in the tamper-evidence hardening plan.
+
+- **2026-06-06 — CID v2: `interpret_as` now covered (R-23 closed).** The CID
+  canonical body was extended from seven to eight fields to include
+  `interpret_as` (`cid.py`, spec §25.2.1). Flipping a fact's interpretation
+  between `content` and `instruction` now changes its CID and is caught on the
+  read path and on federation ingest — closing the gap noted in the amendment
+  above. This is a breaking, version-gated wire-format change (pre-v2 facts are
+  rejected on read until upgraded); the `backfill-cids` admin command repoints
+  each fact's CID alias to its v2 CID. `timestamp`/`valid_until` remain excluded
+  by design. The remaining tamper-evidence items (out-of-band signing, enforced
+  external anchor, SDK verify-by-default) stay tracked for Wave 3.
 
 ---
 

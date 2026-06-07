@@ -338,13 +338,14 @@ def test_cid_canonical_key_order():
     body = {
         "confidence": 1.0,
         "entity": "stigmem://a/b/1",
+        "interpret_as": "content",
         "relation": "test:value",
         "scope": "local",
         "source": "agent:ci",
         "value_type": "string",
         "value_v": "hello",
     }
-    # Independent: sort_keys + compact separators + utf-8, no ASCII escaping
+    # Independent canonical hash (CID v2 — 8 fields incl interpret_as)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
