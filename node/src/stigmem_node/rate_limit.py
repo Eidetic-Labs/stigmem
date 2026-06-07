@@ -93,6 +93,12 @@ def _dimension(path: str, method: str) -> str | None:
         return "fact_read"
     if path.startswith("/v1/facts") and m in {"POST", "PUT", "PATCH", "DELETE"}:
         return "fact_write"
+    # F-AVAIL-3: default coverage — every other authenticated API call still
+    # counts against a quota dimension so no endpoint is left unbounded.
+    if m == "GET":
+        return "fact_read"
+    if m in {"POST", "PUT", "PATCH", "DELETE"}:
+        return "fact_write"
     return None
 
 
