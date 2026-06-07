@@ -284,6 +284,9 @@ class Settings(BaseSettings):
     # Guards against crashed workers stranding events.  Must be larger than the
     # worst-case webhook timeout (10 s) by a comfortable margin.
     subscription_claim_timeout_s: int = 300
+    # F-AVAIL-3: cap on active subscriptions per (subscriber_identity, tenant).
+    # 0 disables the cap. Default is generous; raise for high-fan-out operators.
+    max_subscriptions_per_principal: int = 1000
 
     # -------------------------------------------------------------------------
     # mTLS Federation Transport — Phase 12 (spec §22.1)

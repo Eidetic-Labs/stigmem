@@ -139,6 +139,21 @@ def create_subscription(
         if dupe is not None:
             return _row_to_record(dupe)
 
+    # F-AVAIL-3: cap active subscriptions per principal to bound fan-out/DoS.
+    _sub_cap = _settings_pkg.settings.max_subscriptions_per_principal
+    if _sub_cap > 0:
+        with db() as conn:
+            held = conn.execute(
+                "SELECT COUNT(*) AS n FROM subscriptions "
+                "WHERE subscriber_identity=? AND tenant_id=?",
+                (identity.entity_uri, identity.tenant_id),
+            ).fetchone()["n"]
+        if held >= _sub_cap:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"subscription limit reached ({_sub_cap})",
+            )
+
     sub_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
     target_kind = _target_kind(req.target)
