@@ -8,7 +8,6 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 import stigmem_node.body_limit as bl
-from stigmem_node.body_limit import BodySizeLimitMiddleware
 from stigmem_node.models.facts import AssertRequest, FactValue
 
 # --- Body-size limit middleware (isolated) ---------------------------------
@@ -20,7 +19,7 @@ async def _ok(_request):
 
 def _mini_app() -> Starlette:
     app = Starlette(routes=[Route("/x", _ok, methods=["POST"])])
-    app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(bl.BodySizeLimitMiddleware)
     return app
 
 
