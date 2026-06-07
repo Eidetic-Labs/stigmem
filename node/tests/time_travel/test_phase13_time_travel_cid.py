@@ -345,7 +345,7 @@ def test_cid_canonical_key_order():
         "value_type": "string",
         "value_v": "hello",
     }
-    # Independent: sort_keys + compact separators + utf-8, no ASCII escaping (CID v2 — 8 fields incl interpret_as)
+    # Independent canonical hash (CID v2 — 8 fields incl interpret_as)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
