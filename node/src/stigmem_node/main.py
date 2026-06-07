@@ -138,6 +138,29 @@ def _warn_if_cors_dev_localhost_enabled() -> None:
         )
 
 
+def _warn_if_backend_immutability_unenforced() -> None:
+    """Warn when the storage backend lacks DB-level facts-immutability triggers.
+
+    P-DESTROY-1 (honesty): the append-only no-UPDATE/no-DELETE triggers
+    (ADR-016 L2) are implemented for SQLite only. On libsql/Postgres the facts
+    table is mutable by anyone with direct database write access, so tamper
+    resistance on those backends rests on the L3+ CID / hash-chain layers, not
+    L2 triggers. State that loudly rather than imply uniform immutability.
+    """
+    backend = getattr(settings, "storage_backend", "sqlite")
+    if backend == "sqlite":
+        return
+    logger.warning(
+        "SECURITY WARNING: storage_backend=%r does NOT enforce database-level "
+        "facts immutability. The append-only no-UPDATE/no-DELETE triggers "
+        "(ADR-016 L2) exist for SQLite only; on %s the facts table is mutable "
+        "by anyone with direct DB write access. Tamper-evidence on this backend "
+        "relies on the L3+ CID / hash-chain layers, not L2 triggers.",
+        backend,
+        backend,
+    )
+
+
 def _node_url_is_loopback(node_url: str) -> bool:
     """Return True iff node_url's host is a loopback address."""
     try:
@@ -159,6 +182,7 @@ def create_app() -> FastAPI:
         _enforce_auth_required_in_production()
         _enforce_rate_limit_kill_switch_ack()
         _warn_if_cors_dev_localhost_enabled()
+        _warn_if_backend_immutability_unenforced()
 
         discovered_plugins = register_discovered_plugins(freeze=False)
         _include_plugin_routers(app, discovered_plugins)
