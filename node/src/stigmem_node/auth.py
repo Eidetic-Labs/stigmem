@@ -44,6 +44,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .db import db
+from .multi_tenant_gate import warn_if_tenant_not_isolatable
 from .plugins import Deny, TenantContext, get_registry
 from .settings import settings as settings
 from .tenant import DEFAULT_TENANT_ID, TenantIdError, validate_tenant_id
@@ -386,6 +387,9 @@ def register_api_key(
     if find_api_key_id_by_raw_key(raw_key) is not None:
         raise ValueError("raw API key already exists")
     normalized_tenant_id = validate_tenant_id(tenant_id)
+    # F-ID-1: a non-default tenant collapses to the default tenant without the
+    # multi-tenant plugin — warn loudly rather than silently mislead the operator.
+    warn_if_tenant_not_isolatable(normalized_tenant_id)
     key_id = str(uuid.uuid4())
     created_at = datetime.now(UTC).replace(microsecond=0)
     normalized_expires_at = _normalize_api_key_expiry(
