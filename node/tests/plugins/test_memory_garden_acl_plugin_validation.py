@@ -26,42 +26,41 @@ plugin_manifest = _PLUGIN.plugin_manifest
 T = TypeVar("T")
 
 
-def test_advanced_acl_gates_require_plugin_registration(
+def test_oidc_permission_ceiling_requires_plugin_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The OIDC permission ceiling remains an experimental, plugin-gated feature.
+    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLED", "true")
+    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
+    assert oidc_permission_ceiling_enabled() is False  # plugin not registered
+
+
+def test_oidc_permission_ceiling_requires_global_enable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
+    with stigmem_plugins([plugin_manifest()]):
+        assert oidc_permission_ceiling_enabled() is False  # ENABLED flag not set
+
+
+def test_oidc_permission_ceiling_enables_with_plugin_and_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLED", "true")
     monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_APPLY_RECALL_FILTER", "true")
+    with stigmem_plugins([plugin_manifest()]):
+        assert oidc_permission_ceiling_enabled() is True
 
-    assert oidc_permission_ceiling_enabled() is False
+
+def test_recall_filter_is_core_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    # F-CONF-1: recall filtering graduated to core — on by default, independent of
+    # the plugin/env; opt out only via the settings flag.
+    import stigmem_node.settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "memory_garden_acl_recall_filter", True)
+    assert recall_filter_enabled() is True
+    monkeypatch.setattr(settings_module.settings, "memory_garden_acl_recall_filter", False)
     assert recall_filter_enabled() is False
-
-
-def test_advanced_acl_gates_require_global_enable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_APPLY_RECALL_FILTER", "true")
-
-    with stigmem_plugins([plugin_manifest()]):
-        assert oidc_permission_ceiling_enabled() is False
-        assert recall_filter_enabled() is False
-
-
-def test_advanced_acl_gates_enable_independently(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLED", "true")
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
-
-    with stigmem_plugins([plugin_manifest()]):
-        assert oidc_permission_ceiling_enabled() is True
-        assert recall_filter_enabled() is False
-
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_APPLY_RECALL_FILTER", "true")
-    with stigmem_plugins([plugin_manifest()]):
-        assert oidc_permission_ceiling_enabled() is True
-        assert recall_filter_enabled() is True
 
 
 def test_memory_garden_acl_hook_ordering_is_deterministic() -> None:

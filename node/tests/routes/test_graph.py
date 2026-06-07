@@ -395,7 +395,7 @@ class TestGraphGardenACL:
         backend: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Advanced plugin filtering hides garden edges from non-members."""
+        """Garden edges are hidden from non-members by default (core recall filter)."""
         if backend == "libsql":
             pytest.skip("direct SQLite injection not available on libsql")
 
@@ -445,7 +445,9 @@ class TestGraphGardenACL:
             )
             assert default_r.status_code == 200
             default_entities = [n["entity"] for n in default_r.json()["neighbors"]]
-            assert _CAROL in default_entities
+            # Recall filtering is core/default-on: the garden edge is hidden even
+            # without the plugin or env flags.
+            assert _CAROL not in default_entities
 
             _enable_acl_recall_filter(monkeypatch)
             with stigmem_plugins([_memory_garden_acl_manifest()]):

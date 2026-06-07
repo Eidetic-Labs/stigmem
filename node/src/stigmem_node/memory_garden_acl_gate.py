@@ -1,9 +1,10 @@
-"""Opt-in gates for the experimental Memory Garden advanced ACL plugin."""
+"""Garden ACL recall filtering (graduated to core) + remaining experimental gates."""
 
 from __future__ import annotations
 
 import os
 from logging import Logger
+from typing import Any
 
 from .db import db
 from .plugins import get_registry
@@ -31,9 +32,21 @@ def oidc_permission_ceiling_enabled() -> bool:
     return _gate_enabled("ENABLE_OIDC_PERMISSION_CEILING")
 
 
+def _live_settings() -> Any:
+    import sys
+
+    return sys.modules["stigmem_node.settings"].settings
+
+
 def recall_filter_enabled() -> bool:
-    """Gate cross-surface garden ACL filtering for recall, graph, and subscriptions."""
-    return _gate_enabled("APPLY_RECALL_FILTER")
+    """Cross-surface garden ACL recall filtering — graduated to core (default-on).
+
+    Closes the cross-garden read leak (F-CONF-1): tenant-wide recall, query, graph
+    traversal, and subscription delivery are restricted to gardens the caller is a
+    member of. Single-tenant installs are unaffected (their facts have
+    ``garden_id`` NULL). Opt out via ``STIGMEM_MEMORY_GARDEN_ACL_RECALL_FILTER=false``.
+    """
+    return bool(_live_settings().memory_garden_acl_recall_filter)
 
 
 def memory_garden_acl_filtering_state() -> str:
@@ -43,9 +56,9 @@ def memory_garden_acl_filtering_state() -> str:
     writes are guarded, but tenant-wide query, recall, graph, OIDC ceiling, and
     subscription-delivery filtering are not all enabled.
     """
-    if not plugin_registered() or not _env_bool("ENABLED"):
+    if not recall_filter_enabled():
         return "disabled"
-    if recall_filter_enabled() and oidc_permission_ceiling_enabled():
+    if oidc_permission_ceiling_enabled():
         return "enabled-full"
     return "enabled-partial"
 
@@ -58,13 +71,13 @@ def gardens_with_members_exist() -> bool:
 
 
 def warn_if_memory_garden_acl_filtering_disabled(logger: Logger) -> None:
-    """Warn once at startup when gardens exist but advanced ACL filtering is off."""
-    if plugin_registered() or not gardens_with_members_exist():
+    """Warn at startup when gardens exist but recall ACL filtering is disabled."""
+    if recall_filter_enabled() or not gardens_with_members_exist():
         return
     logger.warning(
-        "SECURITY WARNING: Garden ACL filtering is disabled "
-        "(stigmem-plugin-memory-garden-acl not registered). Restricted gardens "
-        "do not filter tenant-wide queries, recall ranking, push subscriptions, "
-        "or graph traversal. Install and enable the plugin, or accept the "
-        "documented opt-in Memory Garden ACL posture."
+        "SECURITY WARNING: Garden ACL recall filtering is DISABLED "
+        "(STIGMEM_MEMORY_GARDEN_ACL_RECALL_FILTER=false) while gardens with "
+        "members exist. Restricted gardens will leak into tenant-wide queries, "
+        "recall ranking, push subscriptions, and graph traversal. Re-enable it "
+        "unless you intend tenant-wide garden visibility."
     )

@@ -633,8 +633,13 @@ def test_replay_window_pagination(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_default_delivery_does_not_apply_advanced_garden_acl(client: TestClient) -> None:
-    """Default installs do not suppress subscription delivery by garden membership."""
+def test_delivery_not_suppressed_when_recall_filter_disabled(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With recall filtering opted out, garden membership does not suppress delivery."""
+    import stigmem_node.settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "memory_garden_acl_recall_filter", False)
     sub = _create_subscription(client, target="stigmem://test/agent/alice", on_change="webhook")
 
     garden_uuid = str(uuid.uuid4())
