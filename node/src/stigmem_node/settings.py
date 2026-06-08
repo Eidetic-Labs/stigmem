@@ -110,6 +110,13 @@ class Settings(BaseSettings):
     # stigmem-plugin-source-attestation package. Default installs keep this off.
     source_attestation_mode: str = "off"
 
+    # P-INJ-1: source ↔ identity binding, graduated to core. The `attested` flag
+    # is always evaluated (a fact's source is attested when it matches the writing
+    # principal). When this is true, an unattested source is REJECTED at write;
+    # default false flags it (attested=False) but allows the write. Enforce belongs
+    # in the hardened profile — it breaks writing facts sourced from elsewhere.
+    source_attestation_enforce: bool = False
+
     # F-CONF-1: garden ACL recall filtering, graduated to core and ON by default.
     # Restricts tenant-wide recall/query/graph/subscription results to gardens the
     # caller is a member of. Facts with garden_id=NULL (single-tenant installs) are
