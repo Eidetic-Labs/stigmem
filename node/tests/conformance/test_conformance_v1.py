@@ -461,11 +461,12 @@ class TestGardenFactACLConformance:
 
 
 class TestSourceAttestationConformance:
-    """§18 — default install keeps source-attestation behavior inert."""
+    """§18 — source ↔ identity attestation is core (graduated): the default
+    install flags mismatched sources (attested=False); enforce mode rejects them."""
 
-    def test_warn_mismatch_accepted_attested_false(self, tmp_path) -> None:
-        """Legacy warn mode alone does not activate source-attestation behavior."""
-        client, orig, patched, key = _make_authed_node(tmp_path, "wm1", "warn")
+    def test_default_mismatch_flagged_attested_false(self, tmp_path) -> None:
+        """A source not matching the writing principal is flagged (still accepted)."""
+        client, orig, patched, key = _make_authed_node(tmp_path, "wm1")
         try:
             r = client.post(
                 "/v1/facts",
@@ -480,13 +481,13 @@ class TestSourceAttestationConformance:
                 headers={"Authorization": f"Bearer {key}"},
             )
             assert r.status_code == 201, r.text
-            assert r.json().get("attested") is None
+            assert r.json().get("attested") is False
         finally:
             _restore_authed(orig, patched)
 
-    def test_warn_match_attested_true(self, tmp_path) -> None:
-        """Legacy warn mode alone does not mark matching sources as attested."""
-        client, orig, patched, key = _make_authed_node(tmp_path, "wm2", "warn")
+    def test_default_match_attested_true(self, tmp_path) -> None:
+        """A source matching the writing principal is attested."""
+        client, orig, patched, key = _make_authed_node(tmp_path, "wm2")
         try:
             r = client.post(
                 "/v1/facts",
@@ -501,13 +502,16 @@ class TestSourceAttestationConformance:
                 headers={"Authorization": f"Bearer {key}"},
             )
             assert r.status_code == 201, r.text
-            assert r.json().get("attested") is None
+            assert r.json().get("attested") is True
         finally:
             _restore_authed(orig, patched)
 
     def test_enforce_mismatch_returns_403(self, tmp_path) -> None:
-        """Legacy enforce mode alone does not activate plugin-owned validation."""
-        client, orig, patched, key = _make_authed_node(tmp_path, "ef", "enforce")
+        """With source_attestation_enforce, a mismatched source is rejected."""
+        import stigmem_node.settings as sm
+
+        client, orig, patched, key = _make_authed_node(tmp_path, "ef")
+        sm.settings.source_attestation_enforce = True
         try:
             r = client.post(
                 "/v1/facts",
@@ -521,13 +525,12 @@ class TestSourceAttestationConformance:
                 },
                 headers={"Authorization": f"Bearer {key}"},
             )
-            assert r.status_code == 201, r.text
-            assert r.json().get("attested") is None
+            assert r.status_code == 403, r.text
         finally:
             _restore_authed(orig, patched)
 
-    def test_off_mode_attested_null(self, tmp_path) -> None:
-        """§18.2 off mode — no attestation check; attested=null."""
+    def test_legacy_mode_field_is_inert(self, tmp_path) -> None:
+        """The legacy source_attestation_mode field no longer gates evaluation."""
         client, orig, patched, key = _make_authed_node(tmp_path, "off", "off")
         try:
             r = client.post(
@@ -543,8 +546,8 @@ class TestSourceAttestationConformance:
                 headers={"Authorization": f"Bearer {key}"},
             )
             assert r.status_code == 201, r.text
-            assert r.json().get("attested") is None, (
-                f"off mode → attested=null expected, got {r.json()}"
+            assert r.json().get("attested") is False, (
+                f"core evaluates regardless of legacy mode, got {r.json()}"
             )
         finally:
             _restore_authed(orig, patched)

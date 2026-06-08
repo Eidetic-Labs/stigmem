@@ -309,9 +309,22 @@ def assert_fact_impl(
     attested_key_id = _verify_or_require_attestation(req, identity)
     entity, source = _normalise_and_alias_uris(req)
 
-    # Source-attestation policy is plugin-owned. Core preserves the field but
-    # does not evaluate source/identity binding in default installs.
-    attested = None
+    # P-INJ-1: a fact's source is attested when it matches the writing principal.
+    # Mismatches are flagged (attested=False); enforce mode rejects them.
+    from ..source_attestation import (
+        evaluate_source_attested,
+        source_attestation_enforce_enabled,
+    )
+
+    attested = evaluate_source_attested(source, identity)
+    if attested is False and source_attestation_enforce_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "source_attestation_failed: declared source does not match the "
+                "authenticated principal"
+            ),
+        )
     garden = _resolve_garden_for_assert(req, identity)
 
     garden_uuid = garden["id"] if garden is not None else None
