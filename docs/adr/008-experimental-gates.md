@@ -528,6 +528,17 @@ ADR-008 amendment if needed.
   tester existed, and testers won't engage features held in `experimental/`.
   The `0.x` version line is the pre-stability signal.
 
+- **2026-06-07 — memory-garden-acl graduated to core (F-CONF-1).** The advanced
+  garden ACL behavior moved from the experimental plugin into core: recall
+  filtering is core/default-on (`settings.memory_garden_acl_recall_filter`,
+  closing the cross-garden read leak) and the OIDC permission ceiling is a core
+  opt-in setting (`settings.oidc_permission_ceiling`, default off — it caps
+  permissions by garden membership, a hardened-profile posture). The
+  `stigmem-plugin-memory-garden-acl` package is deprecated to a no-op and added
+  to the discovery `GRADUATED_PLUGINS` denylist, so installed copies are ignored.
+  This reverses the experimental-plugin status for these features per the
+  "graduation = hardening" principle. (PRs #713, #714, and the package-retirement PR.)
+
 ---
 
 *Accepted by: @offbyonce (founder), 2026-05-07. Per ADR-001 §Contributor

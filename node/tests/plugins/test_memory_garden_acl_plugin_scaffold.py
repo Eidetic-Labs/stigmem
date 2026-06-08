@@ -233,11 +233,9 @@ def test_entry_point_factory_is_discoverable(monkeypatch: pytest.MonkeyPatch) ->
 
     discovered = discover_plugin_manifests()
 
-    assert len(discovered) == 1
-    assert discovered[0].manifest.name == PLUGIN_NAME
-    assert discovered[0].entry_point_name == "memory-garden-acl"
-    assert discovered[0].entry_point_value == "stigmem_plugin_memory_garden_acl:plugin_manifest"
-    assert discovered[0].distribution == PLUGIN_NAME
+    # Graduated to core: the entry point is discovered but skipped via the
+    # GRADUATED_PLUGINS denylist, so it registers nothing.
+    assert discovered == ()
 
 
 def _recording_manifest(calls: list[str]) -> PluginManifest:

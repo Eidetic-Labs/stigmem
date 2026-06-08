@@ -134,6 +134,9 @@ def test_security_sensitive_plugin_feature_record_captures_publication_hold(
     status = (plugin.feature_dir / "status.md").read_text(encoding="utf-8")
     evidence = (plugin.feature_dir / "evidence.md").read_text(encoding="utf-8")
 
+    if "| Status | `deprecated`" in status:
+        pytest.skip(f"{plugin.slug} graduated to core; no publication hold required")
+
     assert "| Publication state | `hold`" in status
     assert "dry-run evidence and maintainer clearance" in status
     assert "node/tests/plugins/test_security_plugin_publication_contract.py" in evidence
