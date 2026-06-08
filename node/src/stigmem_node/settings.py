@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     # unaffected. Set false only to intentionally accept tenant-wide garden visibility.
     memory_garden_acl_recall_filter: bool = True
 
+    # Garden-membership-derived OIDC permission ceiling, graduated to core.
+    # Off by default: enabling it caps OIDC-issued permissions to what the user's
+    # garden memberships grant, which downgrades non-member sessions — a hardened
+    # least-privilege posture, not a safe universal default. Belongs in the
+    # hardened profile.
+    oidc_permission_ceiling: bool = False
+
     # Rate limiting for hosted offering (per API key, sliding 1-hour window).
     # 0 = disabled.
     rate_limit_write_per_hour: int = 1000
