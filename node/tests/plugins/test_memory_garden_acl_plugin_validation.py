@@ -13,7 +13,6 @@ from stigmem_node.memory_garden_acl_gate import (
     recall_filter_enabled,
 )
 from stigmem_node.plugins import Allow, HookRegistry, PluginContext, PluginManifest
-from stigmem_node.plugins.testing import stigmem_plugins
 
 _FEATURE_DIR = Path(__file__).resolve().parents[3] / "experimental" / "memory-garden-acl"
 _SRC_DIR = _FEATURE_DIR / "src"
@@ -26,30 +25,16 @@ plugin_manifest = _PLUGIN.plugin_manifest
 T = TypeVar("T")
 
 
-def test_oidc_permission_ceiling_requires_plugin_registration(
+def test_oidc_permission_ceiling_is_core_and_off_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The OIDC permission ceiling remains an experimental, plugin-gated feature.
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLED", "true")
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
-    assert oidc_permission_ceiling_enabled() is False  # plugin not registered
+    # Graduated to core: settings-gated, off by default (no plugin/env required).
+    import stigmem_node.settings as settings_module
 
-
-def test_oidc_permission_ceiling_requires_global_enable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
-    with stigmem_plugins([plugin_manifest()]):
-        assert oidc_permission_ceiling_enabled() is False  # ENABLED flag not set
-
-
-def test_oidc_permission_ceiling_enables_with_plugin_and_flags(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLED", "true")
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
-    with stigmem_plugins([plugin_manifest()]):
-        assert oidc_permission_ceiling_enabled() is True
+    monkeypatch.setattr(settings_module.settings, "oidc_permission_ceiling", False)
+    assert oidc_permission_ceiling_enabled() is False
+    monkeypatch.setattr(settings_module.settings, "oidc_permission_ceiling", True)
+    assert oidc_permission_ceiling_enabled() is True
 
 
 def test_recall_filter_is_core_default_on(monkeypatch: pytest.MonkeyPatch) -> None:

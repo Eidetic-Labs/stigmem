@@ -53,8 +53,14 @@ def _memory_garden_acl_manifest() -> PluginManifest:
 
 
 def _enable_oidc_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLED", "true")
-    monkeypatch.setenv("STIGMEM_MEMORY_GARDEN_ACL_ENABLE_OIDC_PERMISSION_CEILING", "true")
+    # Graduated to core: the OIDC permission ceiling is now a settings flag.
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["stigmem_node.settings"].settings,
+        "oidc_permission_ceiling",
+        True,
+    )
 
 
 # ---------------------------------------------------------------------------
