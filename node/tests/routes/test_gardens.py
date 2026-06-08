@@ -452,10 +452,10 @@ class TestGardenFactACL:
             db_mod.settings = original
             wk_mod.settings = original
 
-    def test_default_global_query_does_not_apply_advanced_garden_filter(
+    def test_default_global_query_hides_garden_facts_from_non_member(
         self, tmp_path: object
     ) -> None:
-        """Default installs keep cross-surface garden filtering inactive."""
+        """Default installs filter garden facts from non-members (F-CONF-1)."""
         client, admin_key, reader_key, outsider_key, original = _make_authed_client(tmp_path)
         try:
             garden_uri = self._create_garden_and_add_reader(
@@ -466,13 +466,14 @@ class TestGardenFactACL:
                 json={**FACT_PAYLOAD, "garden_id": garden_uri},
                 headers={"Authorization": f"Bearer {admin_key}"},
             )
-            # Outsider's global query should see 0 facts
+            # Outsider's global query sees 0 facts — garden ACL recall filtering
+            # is core/default-on.
             r = client.get(
                 "/v1/facts",
                 headers={"Authorization": f"Bearer {outsider_key}"},
             )
             assert r.status_code == 200
-            assert r.json()["total"] == 1
+            assert r.json()["total"] == 0
         finally:
             settings_module.settings = original
             auth_mod.settings = original

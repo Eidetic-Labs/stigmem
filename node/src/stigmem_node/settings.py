@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     # stigmem-plugin-source-attestation package. Default installs keep this off.
     source_attestation_mode: str = "off"
 
+    # F-CONF-1: garden ACL recall filtering, graduated to core and ON by default.
+    # Restricts tenant-wide recall/query/graph/subscription results to gardens the
+    # caller is a member of. Facts with garden_id=NULL (single-tenant installs) are
+    # unaffected. Set false only to intentionally accept tenant-wide garden visibility.
+    memory_garden_acl_recall_filter: bool = True
+
     # Rate limiting for hosted offering (per API key, sliding 1-hour window).
     # 0 = disabled.
     rate_limit_write_per_hour: int = 1000

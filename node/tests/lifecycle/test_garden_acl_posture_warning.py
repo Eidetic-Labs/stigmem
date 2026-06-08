@@ -18,30 +18,31 @@ from stigmem_node.plugins.testing import stigmem_plugins
 Settings = settings_module.Settings
 
 
-def test_startup_warns_when_gardens_have_members_and_acl_plugin_is_absent(
+def test_startup_warns_when_gardens_have_members_and_recall_filter_disabled(
     tmp_db: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     _insert_garden_member(tmp_db)
     caplog.set_level("WARNING", logger="stigmem")
 
-    with stigmem_plugins([]), _client(tmp_db):
+    with stigmem_plugins([]), _client(tmp_db, memory_garden_acl_recall_filter=False):
         pass
 
-    assert "Garden ACL filtering is disabled" in caplog.text
-    assert "stigmem-plugin-memory-garden-acl not registered" in caplog.text
+    assert "Garden ACL recall filtering is DISABLED" in caplog.text
 
 
-def test_startup_does_not_warn_when_no_garden_members_exist(
+def test_startup_does_not_warn_when_recall_filter_on_by_default(
     tmp_db: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    # Default is core-on, so even with gardens+members present there is no warning.
+    _insert_garden_member(tmp_db)
     caplog.set_level("WARNING", logger="stigmem")
 
     with stigmem_plugins([]), _client(tmp_db):
         pass
 
-    assert "Garden ACL filtering is disabled" not in caplog.text
+    assert "recall filtering is DISABLED" not in caplog.text
 
 
 def test_doctor_reports_memory_garden_acl_filtering_state(tmp_db: str) -> None:
@@ -49,7 +50,8 @@ def test_doctor_reports_memory_garden_acl_filtering_state(tmp_db: str) -> None:
         response = client.get("/v1/doctor")
 
     assert response.status_code == 200
-    assert response.json()["memory_garden_acl_filtering"] == "disabled"
+    # Default install: recall filtering on (core), OIDC ceiling off (plugin-gated).
+    assert response.json()["memory_garden_acl_filtering"] == "enabled-partial"
 
 
 def _insert_garden_member(db_path: str) -> None:
@@ -79,12 +81,15 @@ def _insert_garden_member(db_path: str) -> None:
 
 
 @contextmanager
-def _client(db_path: str) -> Generator[TestClient, None, None]:
+def _client(
+    db_path: str, *, memory_garden_acl_recall_filter: bool = True
+) -> Generator[TestClient, None, None]:
     test_settings = Settings(
         db_path=db_path,
         auth_required=False,
         node_url="http://127.0.0.1:8765",
         subscription_delivery_sweep_s=86400,
+        memory_garden_acl_recall_filter=memory_garden_acl_recall_filter,
     )
     with (
         _patched_settings(test_settings),
