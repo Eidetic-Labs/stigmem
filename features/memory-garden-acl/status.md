@@ -4,15 +4,20 @@
 
 | Field | Value |
 | --- | --- |
-| Status | `active` |
+| Status | `deprecated` |
 | Stability | `experimental` |
 | First release | `0.9.0a1` spec lineage |
-| Default surface | `opt-in` |
-| Publication state | `hold` - package metadata aligned; registry publication blocked on dry-run evidence and maintainer clearance. |
+| Default surface | `core` |
+| Publication state | `deprecated` - functionality graduated into core; package retired. |
 
-Basic garden CRUD, membership, and direct `garden_id` fact read/write guards
-remain core. Advanced cross-cutting ACL behavior is extracted into an opt-in
-plugin package with registration and operator-controlled gates.
+**DEPRECATED — graduated into core (F-CONF-1).** Advanced cross-cutting ACL
+behavior is no longer a plugin. Recall filtering is core and on by default
+(`settings.memory_garden_acl_recall_filter`, closing the cross-garden read leak)
+and the OIDC permission ceiling is a core setting
+(`settings.oidc_permission_ceiling`, default off). The node ignores this package
+at discovery (graduated-plugin denylist), so installing it is a no-op —
+uninstall it. Basic garden CRUD, membership, and direct `garden_id` fact
+read/write guards were always core.
 
 ## Release History
 

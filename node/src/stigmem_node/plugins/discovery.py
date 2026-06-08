@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
@@ -10,10 +11,18 @@ from typing import Any
 from .errors import PluginDependencyError, PluginDiscoveryError
 from .manifest import PluginManifest
 
+logger = logging.getLogger("stigmem.plugins")
+
 ENTRY_POINT_GROUP = "stigmem.plugins"
 _State = str
 _VISITING: _State = "visiting"
 _VISITED: _State = "visited"
+
+# Plugins whose functionality has graduated into core. An installed copy is
+# discovered but ignored — its hooks are never registered — so an old package
+# cannot shadow, double-run, or fail-open against the now-core implementation.
+# Graduated plugins add their distribution name here.
+GRADUATED_PLUGINS: frozenset[str] = frozenset({"stigmem-plugin-memory-garden-acl"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +58,13 @@ def discover_plugin_manifests(
                 f"{type(factory).__name__}; expected a callable returning PluginManifest"
             )
         manifest = _call_manifest_factory(entry_point, factory)
+        if manifest.name in GRADUATED_PLUGINS:
+            logger.warning(
+                "Ignoring installed plugin %r: its functionality has graduated "
+                "into core. Uninstall the package — it is now a no-op.",
+                manifest.name,
+            )
+            continue
         previous_entry_point = seen_names.get(manifest.name)
         if previous_entry_point is not None:
             raise PluginDiscoveryError(
