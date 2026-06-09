@@ -115,11 +115,12 @@ def _check_agent_access(identity: Identity, agent_id: str) -> None:
     )
 
 
-def _get_current_manifest(conn: Any, agent_id: str) -> dict[str, Any] | None:
+def _get_current_manifest(conn: Any, agent_id: str, tenant_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT * FROM instruction_manifests WHERE agent_id = ? AND superseded_at IS NULL"
+        "SELECT * FROM instruction_manifests"
+        " WHERE agent_id = ? AND tenant_id = ? AND superseded_at IS NULL"
         " ORDER BY created_at DESC LIMIT 1",
-        (agent_id,),
+        (agent_id, tenant_id),
     ).fetchone()
     if row is None:
         return None
@@ -315,12 +316,12 @@ def get_boot_stub(
     with db() as conn:
         stub_row = conn.execute(
             "SELECT body, token_count, manifest_version FROM boot_stubs"
-            " WHERE agent_id = ? AND adapter_profile = ?",
-            (agent_id, profile),
+            " WHERE agent_id = ? AND adapter_profile = ? AND tenant_id = ?",
+            (agent_id, profile, identity.tenant_id),
         ).fetchone()
 
         if stub_row is None:
-            manifest_row = _get_current_manifest(conn, agent_id)
+            manifest_row = _get_current_manifest(conn, agent_id, identity.tenant_id)
             if manifest_row is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -349,9 +350,18 @@ def get_boot_stub(
             conn.execute(
                 """INSERT OR REPLACE INTO boot_stubs
                    (agent_id, adapter_profile, stub_version, body, token_count,
-                    generated_at, manifest_version)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (agent_id, profile, 1, stub_body, token_count, now_ms, manifest_row["version"]),
+                    generated_at, manifest_version, tenant_id)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    agent_id,
+                    profile,
+                    1,
+                    stub_body,
+                    token_count,
+                    now_ms,
+                    manifest_row["version"],
+                    identity.tenant_id,
+                ),
             )
             stub_body_out = stub_body
             token_count_out = token_count
@@ -403,7 +413,7 @@ def get_instruction_manifest(
     _check_agent_access(identity, agent_id)
 
     with db() as conn:
-        row = _get_current_manifest(conn, agent_id)
+        row = _get_current_manifest(conn, agent_id, identity.tenant_id)
 
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="manifest_not_found")
@@ -450,10 +460,11 @@ def publish_instruction_manifest(
     fact_uri = f"instruction:default/agent/{agent_id}/manifest/{req.version}"
 
     with db() as conn:
-        # Check version uniqueness
+        # Check version uniqueness within the caller's tenant
         existing = conn.execute(
-            "SELECT id FROM instruction_manifests WHERE agent_id = ? AND version = ?",
-            (agent_id, req.version),
+            "SELECT id FROM instruction_manifests"
+            " WHERE agent_id = ? AND version = ? AND tenant_id = ?",
+            (agent_id, req.version, identity.tenant_id),
         ).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="manifest_version_conflict")
@@ -470,7 +481,8 @@ def publish_instruction_manifest(
                 # (full N=5 paraphrase eval is Phase 11)
                 if entry.fact_uri:
                     row = conn.execute(
-                        "SELECT id FROM facts WHERE entity = ? LIMIT 1", (entry.fact_uri,)
+                        "SELECT id FROM facts WHERE entity = ? AND tenant_id = ? LIMIT 1",
+                        (entry.fact_uri, identity.tenant_id),
                     ).fetchone()
                     # If fact doesn't exist yet (pre-seeding), warn but don't block
                     coverage_pct = 1.0 if row else 0.5
@@ -497,22 +509,34 @@ def publish_instruction_manifest(
         now_ms = _now_ms()
         manifest_id = str(uuid.uuid4())
 
-        # Supersede previous current version
+        # Supersede previous current version (within this tenant)
         conn.execute(
             "UPDATE instruction_manifests SET superseded_at = ?"
-            " WHERE agent_id = ? AND superseded_at IS NULL",
-            (now_ms, agent_id),
+            " WHERE agent_id = ? AND tenant_id = ? AND superseded_at IS NULL",
+            (now_ms, agent_id, identity.tenant_id),
         )
 
         conn.execute(
             """INSERT INTO instruction_manifests
-                 (id, agent_id, version, fact_uri, token_count, body, created_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (manifest_id, agent_id, req.version, fact_uri, token_count, entries_json, now_ms),
+                 (id, agent_id, version, fact_uri, token_count, body, created_at, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                manifest_id,
+                agent_id,
+                req.version,
+                fact_uri,
+                token_count,
+                entries_json,
+                now_ms,
+                identity.tenant_id,
+            ),
         )
 
-        # Invalidate boot stub cache for all profiles
-        conn.execute("DELETE FROM boot_stubs WHERE agent_id = ?", (agent_id,))
+        # Invalidate boot stub cache for all profiles (within this tenant)
+        conn.execute(
+            "DELETE FROM boot_stubs WHERE agent_id = ? AND tenant_id = ?",
+            (agent_id, identity.tenant_id),
+        )
 
         # Store the manifest itself as a fact in the instruction: scope.
         # Stamp the caller's tenant, bind interpret_as, and persist a CID so the
@@ -700,8 +724,8 @@ def _write_recall_audit(
             conn.execute(
                 """INSERT INTO instruction_audit
                    (id, agent_id, heartbeat_id, session_start, intent, loaded_chunks,
-                    used_chunks, missed_chunks, audit_token, audit_closed, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    used_chunks, missed_chunks, audit_token, audit_closed, created_at, tenant_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     audit_id,
                     agent_id,
@@ -714,6 +738,7 @@ def _write_recall_audit(
                     audit_token,
                     None,
                     now_ms,
+                    identity.tenant_id,
                 ),
             )
     except Exception as exc:
@@ -729,7 +754,7 @@ def recall_instruction(
     _check_agent_access(identity, agent_id)
 
     with db() as conn:
-        manifest_row = _get_current_manifest(conn, agent_id)
+        manifest_row = _get_current_manifest(conn, agent_id, identity.tenant_id)
     if manifest_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="manifest_not_found")
 
@@ -820,8 +845,8 @@ def submit_discovery_audit(
     with db() as conn:
         row = conn.execute(
             "SELECT id, agent_id, created_at, audit_closed FROM instruction_audit"
-            " WHERE audit_token = ?",
-            (req.audit_token,),
+            " WHERE audit_token = ? AND tenant_id = ?",
+            (req.audit_token, identity.tenant_id),
         ).fetchone()
 
         if row is None:
@@ -844,12 +869,13 @@ def submit_discovery_audit(
         conn.execute(
             "UPDATE instruction_audit"
             " SET used_chunks = ?, missed_chunks = ?, audit_closed = ?"
-            " WHERE audit_token = ?",
+            " WHERE audit_token = ? AND tenant_id = ?",
             (
                 json.dumps(req.used_chunks),
                 json.dumps(req.missed_chunks),
                 now_ms,
                 req.audit_token,
+                identity.tenant_id,
             ),
         )
 
@@ -870,19 +896,19 @@ def get_manifest_coverage(
     _check_agent_access(identity, agent_id)
 
     with db() as conn:
-        manifest_row = _get_current_manifest(conn, agent_id)
+        manifest_row = _get_current_manifest(conn, agent_id, identity.tenant_id)
         if manifest_row is None:
             raise HTTPException(status_code=404, detail="manifest_not_found")
 
         entries_raw: list[dict[str, Any]] = json.loads(manifest_row["body"])
         entries = [ManifestEntry(**e) for e in entries_raw]
 
-        # Compute per-unit metrics from audit log
+        # Compute per-unit metrics from this tenant's audit log
         cutoff_ms = _now_ms() - 7 * 86_400 * 1000  # 7-day window
         audit_rows = conn.execute(
             "SELECT loaded_chunks, used_chunks FROM instruction_audit"
-            " WHERE agent_id = ? AND created_at >= ?",
-            (agent_id, cutoff_ms),
+            " WHERE agent_id = ? AND tenant_id = ? AND created_at >= ?",
+            (agent_id, identity.tenant_id, cutoff_ms),
         ).fetchall()
 
     is_admin = _is_admin(identity)

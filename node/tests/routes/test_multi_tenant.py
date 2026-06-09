@@ -314,6 +314,89 @@ def test_get_intent_is_tenant_scoped(two_tenants: tuple) -> None:
     assert rb.status_code == 200
 
 
+def test_instruction_manifest_is_tenant_isolated(
+    tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manifest published for an agent slug in one tenant must not be visible
+    to — or collide with — another tenant. Closes the control-plane override
+    (adversarial H2-SIBLING-1): the instruction tables were keyed by agent_id
+    alone, so tenant A could supersede tenant B's manifest for 'support'.
+
+    Self-contained: needs BOTH the multi-tenant and lazy-instruction plugins.
+    """
+    feature_src = (
+        Path(__file__).resolve().parents[3] / "experimental" / "lazy-instruction-discovery" / "src"
+    )
+    if str(feature_src) not in sys.path:
+        sys.path.insert(0, str(feature_src))
+    instr = importlib.import_module("stigmem_plugin_lazy_instruction_discovery")
+
+    db_file = str(tmp_path) + "/mt_instr.db"  # type: ignore[operator]
+    apply_migrations(db_path=db_file)
+    original = settings_module.settings
+    test_settings = Settings(db_path=db_file, auth_required=True, node_url="http://testnode")
+    settings_module.settings = test_settings
+    auth_mod.settings = test_settings
+    db_mod.settings = test_settings
+    agent = "support"  # non-UUID slug: previously shared across tenants
+
+    def _body(unit: str) -> dict:
+        return {
+            "version": "v1",
+            "entries": [
+                {"name": unit, "description": unit, "path": "/dev/null", "load_triggers": {}}
+            ],
+            "skip_coverage_gate": True,
+        }
+
+    try:
+        admin_a = create_api_key("agent:admin-a", ["read", "write", "admin"], tenant_id="tenant-a")
+        admin_b = create_api_key("agent:admin-b", ["read", "write", "admin"], tenant_id="tenant-b")
+        monkeypatch.setenv("STIGMEM_MULTI_TENANT_ENABLED", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ENABLED", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ALLOW_MANIFEST_PUBLISH", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ALLOW_INSTRUCTION_RECALL", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ALLOW_FILE_PATH_ENTRIES", "true")
+        instr_manifest = instr.plugin_manifest()
+        with stigmem_plugins([plugin_manifest(), instr_manifest]):
+            app = create_app()
+            app.include_router(instr_manifest.routes[0])
+            with TestClient(app, raise_server_exceptions=True) as client:
+                ra = client.put(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    json=_body("unit-a"),
+                    headers={"Authorization": f"Bearer {admin_a}"},
+                )
+                assert ra.status_code == 200, ra.text
+                # Same agent slug + version in tenant B must NOT be a cross-tenant 409.
+                rb = client.put(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    json=_body("unit-b-secret"),
+                    headers={"Authorization": f"Bearer {admin_b}"},
+                )
+                assert rb.status_code == 200, rb.text
+
+                ga = client.get(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    headers={"Authorization": f"Bearer {admin_a}"},
+                )
+                assert ga.status_code == 200
+                assert [e["name"] for e in ga.json()["entries"]] == ["unit-a"]  # only its own
+                assert "unit-b-secret" not in ga.text
+
+                gb = client.get(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    headers={"Authorization": f"Bearer {admin_b}"},
+                )
+                assert gb.status_code == 200
+                assert [e["name"] for e in gb.json()["entries"]] == ["unit-b-secret"]
+    finally:
+        settings_module.settings = original
+        auth_mod.settings = original
+        db_mod.settings = original
+
+
 def test_tenant_b_query_returns_empty(two_tenants: tuple) -> None:
     """GET /v1/facts query for Tenant B returns no Tenant A facts."""
     client, key_a, key_b = two_tenants
