@@ -255,14 +255,19 @@ def _score_intent_against_entry(intent: str, entry: ManifestEntry) -> float:
     return min(score, 1.0)
 
 
-def _fetch_instruction_content(entry: ManifestEntry) -> tuple[str, str]:
-    """Return (content, source) for a manifest entry. Raises on failure."""
+def _fetch_instruction_content(entry: ManifestEntry, tenant_id: str) -> tuple[str, str]:
+    """Return (content, source) for a manifest entry. Raises on failure.
+
+    Scoped by tenant (audit H2): an instruction fact must resolve only within
+    the caller's tenant, else another tenant's fact at the same entity URI
+    leaks into — and steers — this agent's instruction channel.
+    """
     if entry.fact_uri:
         with db() as conn:
             row = conn.execute(
                 "SELECT value_v, valid_until FROM facts"
-                " WHERE entity = ? ORDER BY timestamp DESC LIMIT 1",
-                (entry.fact_uri,),
+                " WHERE entity = ? AND tenant_id = ? ORDER BY timestamp DESC LIMIT 1",
+                (entry.fact_uri, tenant_id),
             ).fetchone()
             if row:
                 return str(row["value_v"]), "stigmem"
@@ -277,11 +282,12 @@ def _fetch_instruction_content(entry: ManifestEntry) -> tuple[str, str]:
     raise LookupError(f"instruction content not found for entry '{entry.name}'")
 
 
-def _get_fact_valid_until(fact_uri: str) -> str | None:
+def _get_fact_valid_until(fact_uri: str, tenant_id: str) -> str | None:
     with db() as conn:
         row = conn.execute(
-            "SELECT valid_until FROM facts WHERE entity = ? ORDER BY timestamp DESC LIMIT 1",
-            (fact_uri,),
+            "SELECT valid_until FROM facts WHERE entity = ? AND tenant_id = ?"
+            " ORDER BY timestamp DESC LIMIT 1",
+            (fact_uri, tenant_id),
         ).fetchone()
     if row:
         valid_until: str | None = row["valid_until"]
@@ -553,6 +559,7 @@ def _resolve_hint_chunks(
     entries: list[ManifestEntry],
     hints: list[str],
     token_budget: int,
+    tenant_id: str,
 ) -> tuple[list[dict[str, Any]], set[str], list[str], int]:
     """Step 1: resolve manifest_hint entries.
 
@@ -568,13 +575,15 @@ def _resolve_hint_chunks(
             missed_hints.append(hint_name)
             continue
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError:
             missed_hints.append(hint_name)
             continue
         tokens = _approx_tokens(content)
         if tokens_used + tokens <= token_budget:
-            chunks.append(_make_chunk(entry, content, tokens, source, score=1.0))
+            chunks.append(
+                _make_chunk(entry, content, tokens, source, score=1.0, tenant_id=tenant_id)
+            )
             used_names.add(entry.name)
             tokens_used += tokens
     return chunks, used_names, missed_hints, tokens_used
@@ -587,6 +596,7 @@ def _resolve_ranked_chunks(
     remaining_slots: int,
     token_budget: int,
     tokens_used: int,
+    tenant_id: str,
 ) -> tuple[list[dict[str, Any]], int]:
     """Step 2: ranked retrieval for remaining slots. Returns (new_chunks, updated_tokens_used)."""
     if remaining_slots <= 0:
@@ -601,13 +611,15 @@ def _resolve_ranked_chunks(
     new_chunks: list[dict[str, Any]] = []
     for score, entry in scored[:remaining_slots]:
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError as exc:
             logger.debug("skipping recall candidate %s: %s", entry.name, exc)
             continue
         tokens = _approx_tokens(content)
         if tokens_used + tokens <= token_budget:
-            new_chunks.append(_make_chunk(entry, content, tokens, source, score=score))
+            new_chunks.append(
+                _make_chunk(entry, content, tokens, source, score=score, tenant_id=tenant_id)
+            )
             used_names.add(entry.name)
             tokens_used += tokens
     return new_chunks, tokens_used
@@ -619,6 +631,7 @@ def _append_guaranteed_chunks(
     chunks: list[dict[str, Any]],
     tokens_used: int,
     token_budget: int,
+    tenant_id: str,
 ) -> tuple[int, bool]:
     """Step 3: insert/append guaranteed entries. Returns (tokens_used, truncated_flag)."""
     truncated = False
@@ -626,12 +639,14 @@ def _append_guaranteed_chunks(
 
     for entry in [e for e in guaranteed if e.force_position == "prepend"]:
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError as exc:
             logger.warning("guaranteed prepend instruction %s unavailable: %s", entry.name, exc)
             continue
         tokens = _approx_tokens(content)
-        chunks.insert(0, _make_chunk(entry, content, tokens, source, score=1.0))
+        chunks.insert(
+            0, _make_chunk(entry, content, tokens, source, score=1.0, tenant_id=tenant_id)
+        )
         used_names.add(entry.name)
         tokens_used += tokens
         if tokens_used > token_budget:
@@ -639,12 +654,12 @@ def _append_guaranteed_chunks(
 
     for entry in [e for e in guaranteed if e.force_position != "prepend"]:
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError as exc:
             logger.warning("guaranteed append instruction %s unavailable: %s", entry.name, exc)
             continue
         tokens = _approx_tokens(content)
-        chunks.append(_make_chunk(entry, content, tokens, source, score=1.0))
+        chunks.append(_make_chunk(entry, content, tokens, source, score=1.0, tenant_id=tenant_id))
         used_names.add(entry.name)
         tokens_used += tokens
         if tokens_used > token_budget:
@@ -707,6 +722,7 @@ def recall_instruction(
         entries,
         req.manifest_hint,
         req.token_budget,
+        identity.tenant_id,
     )
 
     ranked_chunks, tokens_used = _resolve_ranked_chunks(
@@ -716,6 +732,7 @@ def recall_instruction(
         req.max_chunks - len(chunks),
         req.token_budget,
         tokens_used,
+        identity.tenant_id,
     )
     chunks.extend(ranked_chunks)
 
@@ -725,6 +742,7 @@ def recall_instruction(
         chunks,
         tokens_used,
         req.token_budget,
+        identity.tenant_id,
     )
 
     audit_token = _AUDIT_TOKEN_PREFIX + secrets.token_urlsafe(16)
@@ -749,9 +767,9 @@ def recall_instruction(
 
 
 def _make_chunk(
-    entry: ManifestEntry, content: str, tokens: int, source: str, score: float
+    entry: ManifestEntry, content: str, tokens: int, source: str, score: float, tenant_id: str
 ) -> dict[str, Any]:
-    valid_until = _get_fact_valid_until(entry.fact_uri) if entry.fact_uri else None
+    valid_until = _get_fact_valid_until(entry.fact_uri, tenant_id) if entry.fact_uri else None
     # Extract version from fact_uri, e.g. "instruction:.../v2" → "v2"
     version = "v1"
     if entry.fact_uri:

@@ -30,10 +30,7 @@ import stigmem_node.settings as settings_mod
 from stigmem_node.plugins.testing import stigmem_plugins
 
 _FEATURE_SRC = (
-    Path(__file__).resolve().parents[3]
-    / "experimental"
-    / "lazy-instruction-discovery"
-    / "src"
+    Path(__file__).resolve().parents[3] / "experimental" / "lazy-instruction-discovery" / "src"
 )
 if str(_FEATURE_SRC) not in sys.path:
     sys.path.insert(0, str(_FEATURE_SRC))
@@ -585,6 +582,41 @@ class TestAuditPrincipalBinding:
             headers={"Authorization": f"Bearer {key}"},
         )
         assert r.status_code == 204
+
+
+class TestInstructionContentTenantScoping:
+    """_fetch_instruction_content resolves only within the caller's tenant (audit H2)."""
+
+    @staticmethod
+    def _seed_fact(tmp_db: str, fid: str, uri: str, value: str, ts: str, tenant: str) -> None:
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            "INSERT INTO facts"
+            " (id, entity, relation, value_type, value_v, source, timestamp,"
+            "  confidence, scope, tenant_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (fid, uri, "instruction:content", "text", value, "admin", ts, 1.0, "local", tenant),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_fetch_content_scoped_by_tenant(self, admin_client: TestClient, tmp_db: str) -> None:
+        from stigmem_node.models.instruction import ManifestEntry
+        from stigmem_node.routes.instruction import _fetch_instruction_content
+
+        uri = "instruction:test/agent/x/unit/v1"
+        # Default-tenant fact is OLDER; the other tenant's fact is NEWER. Without
+        # tenant scoping the newest-timestamp row wins and leaks across tenants.
+        self._seed_fact(tmp_db, "f-def", uri, "DEFAULT-CONTENT", "2026-01-01T00:00:00Z", "default")
+        self._seed_fact(
+            tmp_db, "f-oth", uri, "OTHER-CONTENT", "2026-12-31T00:00:00Z", "other-tenant"
+        )
+
+        entry = ManifestEntry(name="unit", description="d", fact_uri=uri)
+        content_default, _ = _fetch_instruction_content(entry, "default")
+        assert content_default == "DEFAULT-CONTENT"  # not the newer other-tenant fact
+        content_other, _ = _fetch_instruction_content(entry, "other-tenant")
+        assert content_other == "OTHER-CONTENT"
 
 
 # ---------------------------------------------------------------------------
