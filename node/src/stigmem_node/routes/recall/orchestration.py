@@ -42,7 +42,7 @@ from .common import (
 )
 from .graph import _MAX_SEED_ENTITIES, _graph_expand
 from .lexical import _lexical_search
-from .ranking import _greedy_pack, _score_candidates
+from .ranking import _filter_visible_gardens, _greedy_pack, _score_candidates
 from .vector import _semantic_search
 
 _MAX_CANDIDATES = 500
@@ -454,6 +454,12 @@ def _recall_impl(
             if not _is_tombstoned(v.entity, identity.tenant_id)
         }
         tombstone_filtered = len(all_facts_raw) < pre_tombstone_count
+
+        # Garden ACL on the shared candidate set (audit M3): drop facts whose
+        # garden the caller cannot see BEFORE the card fast-path and the ranker
+        # consume them, so the per-record garden check (§17 ranker) is a
+        # redundant backstop rather than the sole gate.
+        all_facts_raw = _filter_visible_gardens(all_facts_raw, identity)
 
         # --- Card fast-path (§20) ---
         card_facts, card_entity_ids = _try_card_fast_path(

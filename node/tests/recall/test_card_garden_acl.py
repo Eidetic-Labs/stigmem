@@ -8,6 +8,7 @@ not receive a card built from that garden's facts.
 from types import SimpleNamespace
 
 import stigmem_node.routes.recall.orchestration as orch
+import stigmem_node.routes.recall.ranking as ranking
 
 
 class _Cursor:
@@ -70,3 +71,22 @@ def test_card_built_when_caller_sees_all_gardens(monkeypatch) -> None:
     sf, owned = result
     assert sf.from_card is True
     assert owned == ["f1"]
+
+
+def test_filter_visible_gardens_drops_hidden(monkeypatch) -> None:
+    monkeypatch.setattr(ranking, "recall_filter_enabled", lambda: True)
+    monkeypatch.setattr(ranking, "caller_can_see_garden", lambda gid, ident: gid == "VISIBLE")
+    facts = {
+        "a": SimpleNamespace(garden_id=None),  # no garden → kept
+        "b": SimpleNamespace(garden_id="VISIBLE"),  # member → kept
+        "c": SimpleNamespace(garden_id="HIDDEN"),  # non-member → dropped
+    }
+    out = ranking._filter_visible_gardens(facts, _identity())
+    assert set(out) == {"a", "b"}
+
+
+def test_filter_visible_gardens_noop_when_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(ranking, "recall_filter_enabled", lambda: False)
+    facts = {"c": SimpleNamespace(garden_id="HIDDEN")}
+    out = ranking._filter_visible_gardens(facts, _identity())
+    assert set(out) == {"c"}  # unchanged when the recall garden filter is off

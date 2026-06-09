@@ -12,7 +12,7 @@ from ...plugins import get_registry
 from ...recall.recall_pipeline import apply_recall_pipeline
 from ..cid_integrity import enforce_read_path_cid
 from .common import _estimate_tokens
-from .ranking import _greedy_pack
+from .ranking import _filter_visible_gardens, _greedy_pack
 
 
 def _recall_as_of_impl(
@@ -86,6 +86,12 @@ def _recall_as_of_impl(
     # Apply recall pipeline (trust, sanitizer)
     pipeline_out = apply_recall_pipeline(list(all_facts_raw.values()), identity)
     all_facts = {r.id: r for r in pipeline_out}
+
+    # Garden ACL (audit M3): the time-travel path has its own scoring loop and
+    # never went through the ranker's per-record garden check, so without this
+    # it returned restricted-garden facts to non-members. Filter the candidate
+    # set here, identically to the live path.
+    all_facts = _filter_visible_gardens(all_facts, identity)
 
     # Score using lexical signal against query (recency computed relative to as_of)
     def _recency_as_of(ts_str: str, as_of_ts: str) -> float:

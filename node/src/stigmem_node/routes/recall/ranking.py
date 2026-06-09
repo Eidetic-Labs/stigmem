@@ -11,6 +11,25 @@ from ...plugins import get_registry
 from .common import _estimate_tokens, _recency_score
 
 
+def _filter_visible_gardens(
+    facts: dict[str, FactRecord], identity: Identity
+) -> dict[str, FactRecord]:
+    """Drop facts whose garden the caller cannot see (audit M3, defense-in-depth).
+
+    Applied to the candidate set of EVERY recall path (live and time-travel/as_of)
+    so the per-record garden check is a redundant backstop rather than the sole
+    gate. Uses the projected ``record.garden_id`` (consistent with the ranker).
+    No-op when the recall garden filter is disabled.
+    """
+    if not recall_filter_enabled():
+        return facts
+    return {
+        k: v
+        for k, v in facts.items()
+        if v.garden_id is None or caller_can_see_garden(v.garden_id, identity)
+    }
+
+
 def _score_candidates(
     all_facts: dict[str, FactRecord],
     lex_scores: dict[str, float],

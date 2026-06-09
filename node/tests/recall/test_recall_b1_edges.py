@@ -133,6 +133,38 @@ class TestAsOfDispatch:
         entities = {sf["fact"]["entity"] for sf in r.json()["facts"]}
         assert _BOB not in entities
 
+    def test_as_of_recall_filters_unseen_garden(
+        self, time_travel_client: TestClient, tmp_db: str
+    ) -> None:
+        """Time-travel recall must not surface restricted-garden facts to a
+        non-member — the as_of path has its own scoring loop and previously
+        applied NO garden ACL (audit M3, as_of gap)."""
+        import sqlite3
+
+        client = time_travel_client
+        past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+        conn = sqlite3.connect(tmp_db)
+        for fid, entity, value, garden in [
+            ("ttg-pub", "entity:public", "topsecret public data", None),
+            ("ttg-sec", "entity:secret", "topsecret garden data", "restricted-garden"),
+        ]:
+            conn.execute(
+                "INSERT INTO facts (id, entity, relation, value_type, value_v, source,"
+                " timestamp, confidence, scope, tenant_id, garden_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (fid, entity, "memory:knows", "string", value, entity, past, 1.0,
+                 "local", "default", garden),
+            )
+        conn.commit()
+        conn.close()
+
+        # Caller (anon) is NOT a member of "restricted-garden".
+        as_of = datetime.now(UTC).isoformat()
+        r = client.post("/v1/recall", json=_recall("topsecret", as_of=as_of))
+        assert r.status_code == 200
+        assert "public data" in r.text  # visible (no-garden) fact returned
+        assert "garden data" not in r.text  # restricted-garden fact filtered out
+
     def test_as_of_invalid_timestamp_returns_400(self, time_travel_client: TestClient) -> None:
         client = time_travel_client
         r = client.post(
