@@ -90,12 +90,23 @@ def _is_admin(identity: Identity) -> bool:
     return identity.is_admin()
 
 
+def _agent_uri_segments(entity_uri: str) -> set[str]:
+    """Split an entity_uri into whole path/scheme segments.
+
+    Used so an agent_id must match a *complete* segment of the caller's
+    entity_uri, never a substring (audit H3 / F-4): "cto" must not match
+    "cto-shadow".
+    """
+    return {seg for seg in re.split(r"[/:]+", entity_uri) if seg}
+
+
 def _check_agent_access(identity: Identity, agent_id: str) -> None:
     """Raise 403 unless caller is the named agent or an admin."""
     if _is_admin(identity):
         return
-    # Agent key entity_uri must contain the agent_id (UUID or role slug)
-    if agent_id in identity.entity_uri:
+    # Agent key entity_uri must contain the agent_id as a WHOLE segment
+    # (UUID or role slug), not merely a substring (audit H3 / F-4).
+    if agent_id and agent_id in _agent_uri_segments(identity.entity_uri):
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
