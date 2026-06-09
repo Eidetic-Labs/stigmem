@@ -102,6 +102,28 @@ def caller_can_see_garden(garden_id: str, identity: Identity) -> bool:
     return role is not None
 
 
+def require_fact_garden_read(conn: Any, fact_id: str, tenant_id: str, identity: Identity) -> None:
+    """Raise 404 if a fact-by-id is in a (projected) garden the caller cannot see.
+
+    Shared gate for fact-by-id read surfaces (single get, provenance, cid verify)
+    so a restricted-garden fact's existence/content/lineage stays hidden from
+    same-tenant non-members (spec §17.3). Uses the PROJECTED garden
+    ``COALESCE(fact_garden_membership.garden_id, facts.garden_id)`` — a fact
+    promoted into a garden has raw ``garden_id`` NULL. Hides as 404 (not 403) so
+    existence is not revealed. No-op for garden-less facts or unknown ids.
+    """
+    row = conn.execute(
+        "SELECT COALESCE(fgm.garden_id, f.garden_id) AS gid FROM facts f"
+        " LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
+        " WHERE f.id = ? AND f.tenant_id = ?",
+        (fact_id, tenant_id),
+    ).fetchone()
+    if row is None or row["gid"] is None:
+        return
+    if not caller_can_see_garden(row["gid"], identity):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fact not found")
+
+
 def is_node_admin(identity: Identity) -> bool:
     """Node admin: any identity with write permission (spec §5.15)."""
     return identity.can_write()

@@ -12,8 +12,9 @@ from ... import settings as _settings_pkg
 from ...auth import Identity, resolve_identity
 from ...db import db
 from ...entity_normalizer import NormalizationError, normalize_entity_uri
+from ...fact_visibility import ReadScope, caller_read_scope
 from ...garden_acl import get_garden_by_garden_uri, require_garden_read
-from ...memory_garden_acl_gate import recall_filter_enabled
+from ...memory_garden_acl_gate import garden_acl_enforced
 from ...metrics import FACT_READ
 from ...models.constants import VALID_SCOPES
 from ...models.facts import FactRecord, QueryResponse, row_to_record
@@ -83,7 +84,9 @@ def _legal_hold_blocks_query(conn: Any, entity: str) -> bool:
 
 
 _AS_OF_SELECT_SQL = (
-    "SELECT f.* FROM facts f"
+    "SELECT f.*, COALESCE(fgm.garden_id, f.garden_id) AS projected_garden_id"
+    " FROM facts f"
+    " LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
     " WHERE f.tenant_id = ?"
     " AND f.timestamp <= ?"
     " AND (f.valid_until IS NULL OR f.valid_until > ?)"
@@ -93,7 +96,8 @@ _AS_OF_SELECT_SQL = (
     " )"
     " AND (? IS NULL"
     "      OR f.entity = ?"
-    "      OR f.entity IN (SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ?))"
+    "      OR f.entity IN ("
+    "          SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ? AND tenant_id = ?))"
     " AND (? IS NULL OR f.relation = ?)"
     " AND (? IS NULL OR f.scope = ?)"
     " AND (? IS NULL OR f.id > ?)"
@@ -133,11 +137,13 @@ _FACT_QUERY_SQL = (
     " AND (? IS NULL OR f.attested = ?)"
     " AND (? IS NULL"
     "      OR f.entity = ?"
-    "      OR f.entity IN (SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ?))"
+    "      OR f.entity IN ("
+    "          SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ? AND tenant_id = ?))"
     " AND (? IS NULL OR f.relation = ?)"
     " AND (? IS NULL"
     "      OR f.source = ?"
-    "      OR f.source IN (SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ?))"
+    "      OR f.source IN ("
+    "          SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ? AND tenant_id = ?))"
     " AND (? IS NULL OR f.scope = ?)"
     " AND (? IS NULL OR f.timestamp > ?)"
     " AND (? IS NULL OR f.id > ?)"
@@ -184,6 +190,7 @@ def _build_as_of_params(
         entity_p,
         entity_p,
         entity_p,
+        tenant_id,  # entity-alias subquery tenant scope
         relation_p,
         relation_p,
         scope_p,
@@ -203,6 +210,7 @@ def _query_facts_as_of_impl(
     as_of: str,
     is_admin_caller: bool,
     tenant_id: str,
+    read_scope: ReadScope,
     limit: int,
     cursor: str | None,
 ) -> QueryResponse:
@@ -227,9 +235,15 @@ def _query_facts_as_of_impl(
         limit=limit,
     )
 
-    rows = conn.execute(_AS_OF_SELECT_SQL, params).fetchall()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    raw = conn.execute(_AS_OF_SELECT_SQL, params).fetchall()
+    has_more = len(raw) > limit
+    page = raw[:limit]
+    # Garden ACL (fail-closed): drop facts whose projected garden the caller
+    # cannot see, BEFORE building records/contradiction counts. The id-cursor
+    # below continues from the page boundary (page[-1]), so dropping rows here
+    # never skips or duplicates a visible fact across pages (audit F-AS-OF-FACTS;
+    # the recall as_of path was fixed in M3, this is the /v1/facts?as_of= sibling).
+    rows = [r for r in page if read_scope.garden_allows(r["projected_garden_id"])]
 
     seen: dict[tuple[str, str, str], int] = {}
     for r in rows:
@@ -255,7 +269,9 @@ def _query_facts_as_of_impl(
             records = [r for r in records if r.entity not in excluded]
             tombstone_filtered = True
 
-    next_cursor = rows[-1]["id"] if has_more and rows else None
+    # Cursor advances from the page boundary (not the last visible row) so
+    # garden-filtered rows don't stall pagination.
+    next_cursor = page[-1]["id"] if has_more and page else None
     # §23.3.3 r.3: suppress total when tombstone filtering was applied to prevent oracle leakage
     total = None if tombstone_filtered else len(records)
     return QueryResponse(
@@ -382,6 +398,7 @@ def query_facts(
                 as_of=as_of,
                 is_admin_caller=identity.is_admin(),
                 tenant_id=identity.tenant_id,
+                read_scope=caller_read_scope(identity),
                 limit=limit,
                 cursor=cursor,
             )
@@ -503,7 +520,7 @@ def _resolve_garden_visibility(
     """Return query visibility mode, exact garden id, and visible garden id set."""
     if garden is not None:
         return _GARDEN_VISIBILITY_EXACT, garden["id"], []
-    if not recall_filter_enabled():
+    if not garden_acl_enforced():
         return _GARDEN_VISIBILITY_NONE, None, []
 
     visible_garden_ids = [
@@ -576,11 +593,13 @@ def _build_query_params(  # noqa: PLR0913 — narrow internal helper, keeps quer
         normalised_entity,
         normalised_entity,
         normalised_entity,
+        identity.tenant_id,  # entity-alias subquery tenant scope
         relation or None,
         relation or None,
         normalised_source,
         normalised_source,
         normalised_source,
+        identity.tenant_id,  # source-alias subquery tenant scope
         scope or None,
         scope or None,
         after or None,

@@ -99,6 +99,30 @@ class TestCardLifecycle:
         r = client.get("/v1/cards/stigmem://testnode/unknown/entity", params={"scope": "local"})
         assert r.status_code == 404
 
+    def test_card_404_for_restricted_garden_non_member(
+        self, client: TestClient, tmp_db: str
+    ) -> None:
+        """The direct card route must not serve a card aggregated from a garden
+        the caller cannot see (audit cards-route sibling of H1). Uses the
+        projected garden via fact_garden_membership."""
+        # Write a fact (garden_id NULL), then promote it into "restricted" via
+        # the membership side-table — the caller (anon) is not a member.
+        r = client.post("/v1/facts", json=_fact(_BOB, "memory:secret", "topsecret-card-value"))
+        assert r.status_code == 201
+        fact_id = r.json()["id"]
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            "INSERT INTO fact_garden_membership (fact_id, garden_id, updated_at)"
+            " VALUES (?, 'restricted', '2026-01-01T00:00:00Z')",
+            (fact_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = client.get(f"/v1/cards/{_BOB}", params={"scope": "local"})
+        assert resp.status_code == 404
+        assert "topsecret-card-value" not in resp.text
+
     def test_card_contains_correct_fields(self, client: TestClient) -> None:
         client.post("/v1/facts", json=_fact(_ALICE, "memory:city", "NYC"))
         r = client.get(f"/v1/cards/{_ALICE}", params={"scope": "local"})

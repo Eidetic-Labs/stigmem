@@ -219,6 +219,256 @@ def test_tenant_a_fact_invisible_to_tenant_b(two_tenants: tuple) -> None:
     )
 
 
+def test_lint_is_tenant_scoped(two_tenants: tuple) -> None:
+    """POST /v1/lint counts and reports only the caller's tenant (audit H4)."""
+    client, key_a, key_b = two_tenants
+
+    for key, src, ent, val in [
+        (key_a, "agent:alice", "stigmem://test/alice-fact", "alice-only"),
+        (key_b, "agent:bob", "stigmem://test/bob-secret", "bob-only"),
+    ]:
+        resp = client.post(
+            "/v1/facts",
+            json={
+                "entity": ent,
+                "relation": "secret:value",
+                "value": {"type": "string", "v": val},
+                "source": src,
+                "scope": "company",
+            },
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp.status_code == 201, resp.text
+
+    # Tenant A lints scope "company" — must see only its own fact, not tenant B's.
+    r = client.post(
+        "/v1/lint",
+        json={"scope": "company"},
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["fact_count"] == 1  # alice's fact only, not bob's
+    assert "bob-secret" not in r.text
+    assert "bob-only" not in r.text
+
+
+def test_synthesize_is_tenant_scoped(two_tenants: tuple) -> None:
+    """GET /v1/scopes/{scope}/synthesize returns only the caller's tenant content.
+
+    The route previously returned every tenant's full fact content for a scope —
+    a Critical cross-tenant disclosure (sibling of H4, found by the adversarial
+    review of the Wave-1 fixes).
+    """
+    client, key_a, key_b = two_tenants
+
+    for key, src, ent, val in [
+        (key_a, "agent:alice", "stigmem://test/alice-syn", "alice-only-syn"),
+        (key_b, "agent:bob", "stigmem://test/bob-secret-syn", "bob-only-syn"),
+    ]:
+        resp = client.post(
+            "/v1/facts",
+            json={
+                "entity": ent,
+                "relation": "memory:knows",
+                "value": {"type": "string", "v": val},
+                "source": src,
+                "scope": "company",
+            },
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp.status_code == 201, resp.text
+
+    r = client.get(
+        "/v1/scopes/company/synthesize",
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["fact_count"] == 1  # alice's fact only
+    assert "bob-secret-syn" not in r.text  # tenant B's content not disclosed
+    assert "bob-only-syn" not in r.text
+
+
+def test_get_intent_is_tenant_scoped(two_tenants: tuple) -> None:
+    """GET /v1/intents/{id} must not reconstruct another tenant's intent
+    (cross-tenant sibling, found by the adversarial review)."""
+    client, key_a, key_b = two_tenants
+
+    create = client.post(
+        "/v1/intents",
+        json={
+            "id": "intent:bob-secret",
+            "from": "stigmem://test/agent/bob",
+            "to": ["stigmem://test/agent/carol"],
+            "goal": "bob-secret-intent-goal",
+        },
+        headers={"Authorization": f"Bearer {key_b}"},
+    )
+    assert create.status_code in (200, 201), create.text
+
+    # Tenant A cannot read tenant B's intent.
+    r = client.get("/v1/intents/intent:bob-secret", headers={"Authorization": f"Bearer {key_a}"})
+    assert r.status_code == 404
+    assert "bob-secret-intent-goal" not in r.text
+    # Tenant B can read its own.
+    rb = client.get("/v1/intents/intent:bob-secret", headers={"Authorization": f"Bearer {key_b}"})
+    assert rb.status_code == 200
+
+
+def test_instruction_manifest_is_tenant_isolated(
+    tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manifest published for an agent slug in one tenant must not be visible
+    to — or collide with — another tenant. Closes the control-plane override
+    (adversarial H2-SIBLING-1): the instruction tables were keyed by agent_id
+    alone, so tenant A could supersede tenant B's manifest for 'support'.
+
+    Self-contained: needs BOTH the multi-tenant and lazy-instruction plugins.
+    """
+    feature_src = (
+        Path(__file__).resolve().parents[3] / "experimental" / "lazy-instruction-discovery" / "src"
+    )
+    if str(feature_src) not in sys.path:
+        sys.path.insert(0, str(feature_src))
+    instr = importlib.import_module("stigmem_plugin_lazy_instruction_discovery")
+
+    db_file = str(tmp_path) + "/mt_instr.db"  # type: ignore[operator]
+    apply_migrations(db_path=db_file)
+    original = settings_module.settings
+    test_settings = Settings(db_path=db_file, auth_required=True, node_url="http://testnode")
+    settings_module.settings = test_settings
+    auth_mod.settings = test_settings
+    db_mod.settings = test_settings
+    agent = "support"  # non-UUID slug: previously shared across tenants
+
+    def _body(unit: str) -> dict:
+        return {
+            "version": "v1",
+            "entries": [
+                {"name": unit, "description": unit, "path": "/dev/null", "load_triggers": {}}
+            ],
+            "skip_coverage_gate": True,
+        }
+
+    try:
+        admin_a = create_api_key("agent:admin-a", ["read", "write", "admin"], tenant_id="tenant-a")
+        admin_b = create_api_key("agent:admin-b", ["read", "write", "admin"], tenant_id="tenant-b")
+        monkeypatch.setenv("STIGMEM_MULTI_TENANT_ENABLED", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ENABLED", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ALLOW_MANIFEST_PUBLISH", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ALLOW_INSTRUCTION_RECALL", "true")
+        monkeypatch.setenv("STIGMEM_LAZY_INSTRUCTION_DISCOVERY_ALLOW_FILE_PATH_ENTRIES", "true")
+        instr_manifest = instr.plugin_manifest()
+        with stigmem_plugins([plugin_manifest(), instr_manifest]):
+            app = create_app()
+            app.include_router(instr_manifest.routes[0])
+            with TestClient(app, raise_server_exceptions=True) as client:
+                ra = client.put(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    json=_body("unit-a"),
+                    headers={"Authorization": f"Bearer {admin_a}"},
+                )
+                assert ra.status_code == 200, ra.text
+                # Same agent slug + version in tenant B must NOT be a cross-tenant 409.
+                rb = client.put(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    json=_body("unit-b-secret"),
+                    headers={"Authorization": f"Bearer {admin_b}"},
+                )
+                assert rb.status_code == 200, rb.text
+
+                ga = client.get(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    headers={"Authorization": f"Bearer {admin_a}"},
+                )
+                assert ga.status_code == 200
+                assert [e["name"] for e in ga.json()["entries"]] == ["unit-a"]  # only its own
+                assert "unit-b-secret" not in ga.text
+
+                gb = client.get(
+                    f"/v1/agents/{agent}/instruction-manifest",
+                    headers={"Authorization": f"Bearer {admin_b}"},
+                )
+                assert gb.status_code == 200
+                assert [e["name"] for e in gb.json()["entries"]] == ["unit-b-secret"]
+    finally:
+        settings_module.settings = original
+        auth_mod.settings = original
+        db_mod.settings = original
+
+
+def test_entity_aliases_are_tenant_isolated(two_tenants: tuple) -> None:
+    """A semantic alias registered by one tenant must not be listable, deletable,
+    or resolvable by another (adversarial entity_aliases / resolver Layer-2)."""
+    client, key_a, key_b = two_tenants
+
+    ra = client.post(
+        "/v1/aliases",
+        json={"raw_uri": "stigmem://test/agent/a-old", "canonical_uri": "stigmem://test/agent/a"},
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert ra.status_code == 201, ra.text
+    raw = ra.json()["raw_uri"]  # normalized form
+
+    # Tenant B does not see it; tenant A does.
+    lb = client.get("/v1/aliases", headers={"Authorization": f"Bearer {key_b}"})
+    assert lb.status_code == 200
+    assert all(r["raw_uri"] != raw for r in lb.json())
+    la = client.get("/v1/aliases", headers={"Authorization": f"Bearer {key_a}"})
+    assert any(r["raw_uri"] == raw for r in la.json())
+
+    # Tenant B cannot delete tenant A's alias.
+    from urllib.parse import quote
+
+    db = client.delete(
+        f"/v1/aliases/{quote(raw, safe='')}", headers={"Authorization": f"Bearer {key_b}"}
+    )
+    assert db.status_code == 404
+    # Still present for tenant A.
+    la2 = client.get("/v1/aliases", headers={"Authorization": f"Bearer {key_a}"})
+    assert any(r["raw_uri"] == raw for r in la2.json())
+
+
+def test_entity_resolve_is_tenant_scoped(two_tenants: tuple) -> None:
+    """GET /v1/entities/resolve must not confirm existence of, or enumerate,
+    another tenant's entities (adversarial F-H4-S3 cross-tenant enumeration)."""
+    client, key_a, key_b = two_tenants
+
+    client.post(
+        "/v1/facts",
+        json={
+            "entity": "user:zzz-secret-resolve",
+            "relation": "memory:knows",
+            "value": {"type": "string", "v": "x"},
+            "source": "agent:alice",
+            "scope": "company",
+        },
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+
+    # Tenant B: exact URI must not be confirmed, and fuzzy must not surface it.
+    rb = client.get(
+        "/v1/entities/resolve",
+        params={"uri": "user:zzz-secret-resolve"},
+        headers={"Authorization": f"Bearer {key_b}"},
+    )
+    assert rb.status_code == 200, rb.text
+    body_b = rb.json()
+    # Existence not confirmed (Layer 1) and no fuzzy enumeration of A's entities
+    # (Layer 3). The query/canonical fields just echo the caller's own input URI.
+    assert body_b["layer1_match"] is False
+    assert body_b["layer3_candidates"] == []
+
+    # Tenant A resolves its own entity.
+    ra = client.get(
+        "/v1/entities/resolve",
+        params={"uri": "user:zzz-secret-resolve"},
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert ra.status_code == 200, ra.text
+    assert ra.json()["layer1_match"] is True
+
+
 def test_tenant_b_query_returns_empty(two_tenants: tuple) -> None:
     """GET /v1/facts query for Tenant B returns no Tenant A facts."""
     client, key_a, key_b = two_tenants

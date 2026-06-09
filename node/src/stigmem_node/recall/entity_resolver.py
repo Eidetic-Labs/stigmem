@@ -119,6 +119,8 @@ def _token_score(a_tokens: list[str], b_tokens: list[str]) -> float:
 def resolve_entity(
     raw: str,
     conn: sqlite3.Connection,
+    *,
+    tenant_id: str = "default",
     top_k: int = 5,
     threshold: float = FUZZY_SCORE_THRESHOLD,
 ) -> ResolveResult:
@@ -147,8 +149,8 @@ def resolve_entity(
 
     # Check if the canonical form itself appears in the fact graph.
     live_check = conn.execute(
-        "SELECT 1 FROM facts WHERE entity = ? AND confidence > 0.0 LIMIT 1",
-        (canonical,),
+        "SELECT 1 FROM facts WHERE entity = ? AND tenant_id = ? AND confidence > 0.0 LIMIT 1",
+        (canonical, tenant_id),
     ).fetchone()
     if live_check:
         result.layer1_match = True
@@ -158,14 +160,14 @@ def resolve_entity(
     # Layer 2 — alias table lookup
     # -------------------------------------------------------------------
     alias_row = conn.execute(
-        "SELECT canonical_uri FROM entity_aliases WHERE raw_uri = ?",
-        (canonical,),
+        "SELECT canonical_uri FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+        (canonical, tenant_id),
     ).fetchone()
     if alias_row is None:
         # Also try the raw input (pre-normalisation alias)
         alias_row = conn.execute(
-            "SELECT canonical_uri FROM entity_aliases WHERE raw_uri = ?",
-            (raw,),
+            "SELECT canonical_uri FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+            (raw, tenant_id),
         ).fetchone()
 
     if alias_row:
@@ -186,12 +188,15 @@ def resolve_entity(
         return result
 
     # Fetch all distinct entity URIs with the same type prefix from the fact graph.
-    prefix_pattern = f"{type_prefix}:%"
+    # Escape LIKE metacharacters in the (caller-derived) type prefix so it cannot
+    # inject wildcards into the scan (consistent with intents; audit F-2).
+    safe_prefix = type_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    prefix_pattern = f"{safe_prefix}:%"
     candidate_rows: list[Any] = conn.execute(
         """SELECT DISTINCT entity FROM facts
-           WHERE entity LIKE ? AND confidence > 0.0
+           WHERE entity LIKE ? ESCAPE '\\' AND tenant_id = ? AND confidence > 0.0
            LIMIT 2000""",
-        (prefix_pattern,),
+        (prefix_pattern, tenant_id),
     ).fetchall()
 
     scored: list[ResolveCandidate] = []

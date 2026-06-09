@@ -41,6 +41,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ..auth import Identity, resolve_identity
 from ..db import db
 from ..entity_normalizer import NormalizationError, normalize_entity_uri
+from ..fact_visibility import PROJECTED_GARDEN_JOIN, caller_read_scope, visible_facts_where
 from ..hlc import node_hlc
 from ..models.facts import FactValue
 from ..models.intents import (
@@ -83,14 +84,15 @@ def _insert(
     scope: str,
     valid_until: str | None,
     now: str,
+    tenant_id: str,
 ) -> str:
     fact_id = str(uuid.uuid4())
     hlc = node_hlc.tick()
     conn.execute(
         """INSERT INTO facts
            (id, entity, relation, value_type, value_v, source, timestamp,
-            valid_until, confidence, scope, hlc, received_from)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            valid_until, confidence, scope, hlc, received_from, tenant_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             fact_id,
             entity,
@@ -104,6 +106,7 @@ def _insert(
             scope,
             hlc,
             None,
+            tenant_id,
         ),
     )
     return fact_id
@@ -114,6 +117,7 @@ def _decompose(
     intent_id: str,
     req: IntentEnvelopeRequest,
     now: str,
+    tenant_id: str,
 ) -> list[str]:
     """Write all atomic facts for an IntentEnvelope; return list of fact IDs."""
     src = req.from_uri
@@ -122,7 +126,7 @@ def _decompose(
     ids: list[str] = []
 
     def ins(entity: str, relation: str, vtype: str, vraw: Any) -> None:
-        ids.append(_insert(conn, entity, relation, vtype, vraw, src, scope, exp, now))
+        ids.append(_insert(conn, entity, relation, vtype, vraw, src, scope, exp, now, tenant_id))
 
     # Core facts on intent_id
     ins(intent_id, "intent:from", "ref", req.from_uri)
@@ -382,10 +386,11 @@ def submit_intent(
     now = datetime.now(UTC).isoformat()
 
     with db() as conn:
-        # Idempotency check: reject if intent_id already exists
+        # Idempotency check: reject if intent_id already exists in this tenant
+        # (tenant-scoped so it is not a cross-tenant existence oracle).
         existing = conn.execute(
-            "SELECT id FROM facts WHERE entity=? AND relation=? LIMIT 1",
-            (intent_id, _ROOT_RELATION),
+            "SELECT id FROM facts WHERE entity=? AND relation=? AND tenant_id=? LIMIT 1",
+            (intent_id, _ROOT_RELATION, identity.tenant_id),
         ).fetchone()
         if existing:
             raise HTTPException(
@@ -398,7 +403,7 @@ def submit_intent(
 
         # Build a normalised copy for decomposition
         normalised_req = req.model_copy(update={"from_uri": from_uri, "to": normalized_to})
-        fact_ids = _decompose(conn, intent_id, normalised_req, now)
+        fact_ids = _decompose(conn, intent_id, normalised_req, now, identity.tenant_id)
 
     return IntentEnvelopeRecord(
         id=intent_id,
@@ -436,17 +441,27 @@ def get_intent(
         )
 
     now = datetime.now(UTC).isoformat()
-    prefix = f"{intent_id}:%"
+    # Escape LIKE metacharacters so a caller-supplied intent_id cannot inject
+    # wildcards into the prefix scan (audit intents sibling of F-10).
+    safe_prefix = intent_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    prefix = f"{safe_prefix}:%"
+
+    # Restrict to facts the caller may read — own tenant + visible garden (audit
+    # intents cross-tenant/garden sibling). visible_facts_where adds the
+    # tenant + projected-garden predicate; PROJECTED_GARDEN_JOIN supplies fgm.
+    read_scope = caller_read_scope(identity)
+    scope_sql, scope_params = visible_facts_where(read_scope)
+    sql = (
+        f"SELECT f.* FROM facts f {PROJECTED_GARDEN_JOIN}"  # noqa: S608  # nosec B608
+        "   WHERE (f.entity = ? OR f.entity LIKE ? ESCAPE '\\')"
+        "     AND f.confidence > 0.0"
+        "     AND (f.valid_until IS NULL OR f.valid_until > ?)"
+        f"   {scope_sql}"
+        "   ORDER BY f.entity, f.relation"
+    )
 
     with db() as conn:
-        rows = conn.execute(
-            """SELECT * FROM facts
-               WHERE (entity = ? OR entity LIKE ?)
-                 AND confidence > 0.0
-                 AND (valid_until IS NULL OR valid_until > ?)
-               ORDER BY entity, relation""",
-            (intent_id, prefix, now),
-        ).fetchall()
+        rows = conn.execute(sql, [intent_id, prefix, now, *scope_params]).fetchall()
 
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="intent not found")

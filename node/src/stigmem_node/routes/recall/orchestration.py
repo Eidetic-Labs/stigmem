@@ -12,7 +12,9 @@ from fastapi.responses import JSONResponse
 from ...auth import Identity, resolve_identity
 from ...card_materializer import CARD_MIN_CONFIDENCE, get_fresh_card
 from ...db import db
+from ...garden_acl import caller_can_see_garden
 from ...lifecycle.tombstone_cache import is_tombstoned as _is_tombstoned
+from ...memory_garden_acl_gate import garden_acl_enforced
 from ...metrics import FACT_READ, RECALL_RANKER_DURATION, observe_duration
 from ...models.constants import VALID_SCOPES
 from ...models.facts import FactRecord, FactValue
@@ -40,7 +42,7 @@ from .common import (
 )
 from .graph import _MAX_SEED_ENTITIES, _graph_expand
 from .lexical import _lexical_search
-from .ranking import _greedy_pack, _score_candidates
+from .ranking import _filter_visible_gardens, _greedy_pack, _score_candidates
 from .vector import _semantic_search
 
 _MAX_CANDIDATES = 500
@@ -245,6 +247,32 @@ def _expand_graph_neighbours(
     )
 
 
+def _caller_sees_all_card_gardens(
+    entity_uri: str, scope: str, identity: Identity, conn: Any, now: str
+) -> bool:
+    """True if the caller may see every garden contributing to this entity's card.
+
+    The card summary aggregates an entity's fact values verbatim and bypasses the
+    ranker's per-fact garden ACL, so the card must not be served when any
+    contributing fact lives in a garden the caller cannot see (audit H1).
+    """
+    # Use the PROJECTED garden (the same COALESCE(fgm, f) the card aggregation and
+    # the rest of recall use): a fact promoted into a restricted garden via
+    # fact_garden_membership has raw facts.garden_id NULL, and checking the raw
+    # column alone would miss it and serve the card (audit F-C bypass of H1).
+    rows = conn.execute(
+        "SELECT DISTINCT COALESCE(fgm.garden_id, f.garden_id) AS gid FROM facts f"
+        " LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
+        " WHERE f.entity = ? AND f.scope = ? AND f.tenant_id = ?"
+        "   AND f.confidence > 0"
+        "   AND (f.valid_until IS NULL OR f.valid_until > ?)"
+        "   AND (f.quarantine_status IS NULL OR f.quarantine_status != 'pending')"
+        "   AND COALESCE(fgm.garden_id, f.garden_id) IS NOT NULL",
+        (entity_uri, scope, identity.tenant_id, now),
+    ).fetchall()
+    return all(caller_can_see_garden(row["gid"], identity) for row in rows)
+
+
 def _build_card_for_entity(
     entity_uri: str,
     entity_fact_ids: list[str],
@@ -259,6 +287,12 @@ def _build_card_for_entity(
     """
     if _is_tombstoned(entity_uri, identity.tenant_id):
         # §23.3.2 r.3: cards whose about_entity is tombstoned are fully excluded.
+        return None
+    # Garden ACL (audit H1): the card path bypasses the ranker's per-fact ACL,
+    # so a non-member must not receive a card aggregated from a garden's facts.
+    if garden_acl_enforced() and not _caller_sees_all_card_gardens(
+        entity_uri, req.scope, identity, conn, now
+    ):
         return None
     card = get_fresh_card(entity_uri, req.scope, identity.tenant_id, conn)
     if (
@@ -425,6 +459,12 @@ def _recall_impl(
             if not _is_tombstoned(v.entity, identity.tenant_id)
         }
         tombstone_filtered = len(all_facts_raw) < pre_tombstone_count
+
+        # Garden ACL on the shared candidate set (audit M3): drop facts whose
+        # garden the caller cannot see BEFORE the card fast-path and the ranker
+        # consume them, so the per-record garden check (§17 ranker) is a
+        # redundant backstop rather than the sole gate.
+        all_facts_raw = _filter_visible_gardens(all_facts_raw, identity)
 
         # --- Card fast-path (§20) ---
         card_facts, card_entity_ids = _try_card_fast_path(

@@ -75,9 +75,9 @@ def _validate_schema_name(schema: str) -> str:
 # Add an entry here when a new table uses INSERT OR REPLACE.
 _TABLE_PK: dict[str, list[str]] = {
     "node_meta": ["key"],
-    "entity_aliases": ["raw_uri"],
+    "entity_aliases": ["raw_uri", "tenant_id"],
     "vec_facts": ["fact_id"],
-    "boot_stubs": ["agent_id", "adapter_profile"],
+    "boot_stubs": ["agent_id", "adapter_profile", "tenant_id"],
     "schema_migrations": ["version"],
 }
 

@@ -35,7 +35,9 @@ def create_alias(
 
     with db() as conn:
         try:
-            result = register_alias(conn, req.raw_uri, req.canonical_uri, kind="user")
+            result = register_alias(
+                conn, req.raw_uri, req.canonical_uri, kind="user", tenant_id=identity.tenant_id
+            )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -62,23 +64,24 @@ def list_aliases(
             detail=f"kind must be one of {sorted(_VALID_KINDS)}",
         )
 
-    conditions: list[str] = []
-    params: list[Any] = []
+    # Always scope to the caller's tenant (aliases are tenant-isolated). The
+    # base `tenant_id = ?` predicate is inlined in the SQL literal (not a
+    # variable) so it is statically verifiable by the tenant-scope CI guard.
+    params: list[Any] = [identity.tenant_id]
+    extra = ""
     if kind:
-        conditions.append("kind = ?")
+        extra += " AND kind = ?"
         params.append(kind)
     if canonical_uri:
-        conditions.append("canonical_uri = ?")
+        extra += " AND canonical_uri = ?"
         params.append(canonical_uri)
 
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
+    # Base predicate is a pure literal (incl. `tenant_id = ?` so the CI tenant-scope
+    # guard sees it); `extra` is built only from literal fragments, values in params.
+    base_sql = "SELECT raw_uri, canonical_uri, kind, created_at FROM entity_aliases WHERE tenant_id = ?"  # noqa: E501
+    sql = base_sql + extra + " ORDER BY created_at DESC"  # noqa: S608  # nosec B608
     with db() as conn:
-        rows = conn.execute(
-            f"SELECT raw_uri, canonical_uri, kind, created_at FROM entity_aliases"  # nosec B608 — where is built from literal fragments; values in params
-            f" {where} ORDER BY created_at DESC",
-            params,
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
 
     return [AliasRecord(**dict(r)) for r in rows]
 
@@ -98,7 +101,8 @@ def delete_alias(
 
     with db() as conn:
         row = conn.execute(
-            "SELECT kind FROM entity_aliases WHERE raw_uri = ?", (decoded,)
+            "SELECT kind FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+            (decoded, identity.tenant_id),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="alias not found")
@@ -110,4 +114,7 @@ def delete_alias(
                     "and cannot be deleted via API"
                 ),
             )
-        conn.execute("DELETE FROM entity_aliases WHERE raw_uri = ?", (decoded,))
+        conn.execute(
+            "DELETE FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+            (decoded, identity.tenant_id),
+        )

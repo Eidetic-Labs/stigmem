@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import PlainTextResponse
 
 from ..auth import Identity, resolve_identity
+from ..cid import compute_cid
 from ..db import db
 from ..models.instruction import (
     AuditSubmitRequest,
@@ -90,12 +91,23 @@ def _is_admin(identity: Identity) -> bool:
     return identity.is_admin()
 
 
+def _agent_uri_segments(entity_uri: str) -> set[str]:
+    """Split an entity_uri into whole path/scheme segments.
+
+    Used so an agent_id must match a *complete* segment of the caller's
+    entity_uri, never a substring (audit H3 / F-4): "cto" must not match
+    "cto-shadow".
+    """
+    return {seg for seg in re.split(r"[/:]+", entity_uri) if seg}
+
+
 def _check_agent_access(identity: Identity, agent_id: str) -> None:
     """Raise 403 unless caller is the named agent or an admin."""
     if _is_admin(identity):
         return
-    # Agent key entity_uri must contain the agent_id (UUID or role slug)
-    if agent_id in identity.entity_uri:
+    # Agent key entity_uri must contain the agent_id as a WHOLE segment
+    # (UUID or role slug), not merely a substring (audit H3 / F-4).
+    if agent_id and agent_id in _agent_uri_segments(identity.entity_uri):
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -103,11 +115,12 @@ def _check_agent_access(identity: Identity, agent_id: str) -> None:
     )
 
 
-def _get_current_manifest(conn: Any, agent_id: str) -> dict[str, Any] | None:
+def _get_current_manifest(conn: Any, agent_id: str, tenant_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT * FROM instruction_manifests WHERE agent_id = ? AND superseded_at IS NULL"
+        "SELECT * FROM instruction_manifests"
+        " WHERE agent_id = ? AND tenant_id = ? AND superseded_at IS NULL"
         " ORDER BY created_at DESC LIMIT 1",
-        (agent_id,),
+        (agent_id, tenant_id),
     ).fetchone()
     if row is None:
         return None
@@ -244,14 +257,19 @@ def _score_intent_against_entry(intent: str, entry: ManifestEntry) -> float:
     return min(score, 1.0)
 
 
-def _fetch_instruction_content(entry: ManifestEntry) -> tuple[str, str]:
-    """Return (content, source) for a manifest entry. Raises on failure."""
+def _fetch_instruction_content(entry: ManifestEntry, tenant_id: str) -> tuple[str, str]:
+    """Return (content, source) for a manifest entry. Raises on failure.
+
+    Scoped by tenant (audit H2): an instruction fact must resolve only within
+    the caller's tenant, else another tenant's fact at the same entity URI
+    leaks into — and steers — this agent's instruction channel.
+    """
     if entry.fact_uri:
         with db() as conn:
             row = conn.execute(
                 "SELECT value_v, valid_until FROM facts"
-                " WHERE entity = ? ORDER BY timestamp DESC LIMIT 1",
-                (entry.fact_uri,),
+                " WHERE entity = ? AND tenant_id = ? ORDER BY timestamp DESC LIMIT 1",
+                (entry.fact_uri, tenant_id),
             ).fetchone()
             if row:
                 return str(row["value_v"]), "stigmem"
@@ -266,11 +284,12 @@ def _fetch_instruction_content(entry: ManifestEntry) -> tuple[str, str]:
     raise LookupError(f"instruction content not found for entry '{entry.name}'")
 
 
-def _get_fact_valid_until(fact_uri: str) -> str | None:
+def _get_fact_valid_until(fact_uri: str, tenant_id: str) -> str | None:
     with db() as conn:
         row = conn.execute(
-            "SELECT valid_until FROM facts WHERE entity = ? ORDER BY timestamp DESC LIMIT 1",
-            (fact_uri,),
+            "SELECT valid_until FROM facts WHERE entity = ? AND tenant_id = ?"
+            " ORDER BY timestamp DESC LIMIT 1",
+            (fact_uri, tenant_id),
         ).fetchone()
     if row:
         valid_until: str | None = row["valid_until"]
@@ -297,12 +316,12 @@ def get_boot_stub(
     with db() as conn:
         stub_row = conn.execute(
             "SELECT body, token_count, manifest_version FROM boot_stubs"
-            " WHERE agent_id = ? AND adapter_profile = ?",
-            (agent_id, profile),
+            " WHERE agent_id = ? AND adapter_profile = ? AND tenant_id = ?",
+            (agent_id, profile, identity.tenant_id),
         ).fetchone()
 
         if stub_row is None:
-            manifest_row = _get_current_manifest(conn, agent_id)
+            manifest_row = _get_current_manifest(conn, agent_id, identity.tenant_id)
             if manifest_row is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -331,9 +350,18 @@ def get_boot_stub(
             conn.execute(
                 """INSERT OR REPLACE INTO boot_stubs
                    (agent_id, adapter_profile, stub_version, body, token_count,
-                    generated_at, manifest_version)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (agent_id, profile, 1, stub_body, token_count, now_ms, manifest_row["version"]),
+                    generated_at, manifest_version, tenant_id)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    agent_id,
+                    profile,
+                    1,
+                    stub_body,
+                    token_count,
+                    now_ms,
+                    manifest_row["version"],
+                    identity.tenant_id,
+                ),
             )
             stub_body_out = stub_body
             token_count_out = token_count
@@ -356,9 +384,12 @@ def get_boot_stub(
 
 def _derive_agent_role(agent_id: str, conn: Any) -> str:
     """Best-effort: look up a human-readable role for agent_id."""
+    # Escape LIKE metacharacters so a caller-supplied agent_id cannot inject
+    # wildcards (audit F-10): "%"/"_" must match literally, not every row.
+    escaped = agent_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     row = conn.execute(
-        "SELECT entity_uri FROM api_keys WHERE entity_uri LIKE ? LIMIT 1",
-        (f"%{agent_id}%",),
+        "SELECT entity_uri FROM api_keys WHERE entity_uri LIKE ? ESCAPE '\\' LIMIT 1",
+        (f"%{escaped}%",),
     ).fetchone()
     if row:
         uri: str = row["entity_uri"]
@@ -382,7 +413,7 @@ def get_instruction_manifest(
     _check_agent_access(identity, agent_id)
 
     with db() as conn:
-        row = _get_current_manifest(conn, agent_id)
+        row = _get_current_manifest(conn, agent_id, identity.tenant_id)
 
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="manifest_not_found")
@@ -429,10 +460,11 @@ def publish_instruction_manifest(
     fact_uri = f"instruction:default/agent/{agent_id}/manifest/{req.version}"
 
     with db() as conn:
-        # Check version uniqueness
+        # Check version uniqueness within the caller's tenant
         existing = conn.execute(
-            "SELECT id FROM instruction_manifests WHERE agent_id = ? AND version = ?",
-            (agent_id, req.version),
+            "SELECT id FROM instruction_manifests"
+            " WHERE agent_id = ? AND version = ? AND tenant_id = ?",
+            (agent_id, req.version, identity.tenant_id),
         ).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="manifest_version_conflict")
@@ -449,7 +481,8 @@ def publish_instruction_manifest(
                 # (full N=5 paraphrase eval is Phase 11)
                 if entry.fact_uri:
                     row = conn.execute(
-                        "SELECT id FROM facts WHERE entity = ? LIMIT 1", (entry.fact_uri,)
+                        "SELECT id FROM facts WHERE entity = ? AND tenant_id = ? LIMIT 1",
+                        (entry.fact_uri, identity.tenant_id),
                     ).fetchone()
                     # If fact doesn't exist yet (pre-seeding), warn but don't block
                     coverage_pct = 1.0 if row else 0.5
@@ -476,31 +509,56 @@ def publish_instruction_manifest(
         now_ms = _now_ms()
         manifest_id = str(uuid.uuid4())
 
-        # Supersede previous current version
+        # Supersede previous current version (within this tenant)
         conn.execute(
             "UPDATE instruction_manifests SET superseded_at = ?"
-            " WHERE agent_id = ? AND superseded_at IS NULL",
-            (now_ms, agent_id),
+            " WHERE agent_id = ? AND tenant_id = ? AND superseded_at IS NULL",
+            (now_ms, agent_id, identity.tenant_id),
         )
 
         conn.execute(
             """INSERT INTO instruction_manifests
-                 (id, agent_id, version, fact_uri, token_count, body, created_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (manifest_id, agent_id, req.version, fact_uri, token_count, entries_json, now_ms),
+                 (id, agent_id, version, fact_uri, token_count, body, created_at, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                manifest_id,
+                agent_id,
+                req.version,
+                fact_uri,
+                token_count,
+                entries_json,
+                now_ms,
+                identity.tenant_id,
+            ),
         )
 
-        # Invalidate boot stub cache for all profiles
-        conn.execute("DELETE FROM boot_stubs WHERE agent_id = ?", (agent_id,))
+        # Invalidate boot stub cache for all profiles (within this tenant)
+        conn.execute(
+            "DELETE FROM boot_stubs WHERE agent_id = ? AND tenant_id = ?",
+            (agent_id, identity.tenant_id),
+        )
 
-        # Store the manifest itself as a fact in the instruction: scope
+        # Store the manifest itself as a fact in the instruction: scope.
+        # Stamp the caller's tenant, bind interpret_as, and persist a CID so the
+        # manifest fact is tenant-isolated and read-path integrity-verifiable —
+        # the raw insert previously omitted all three (audit M4).
         fact_id = str(uuid.uuid4())
         ts = datetime.now(UTC).isoformat()
+        manifest_cid = compute_cid(
+            entity=fact_uri,
+            relation="instruction:manifest",
+            value_type="text",
+            value_v=entries_json,
+            source=identity.entity_uri,
+            scope="local",
+            confidence=1.0,
+            interpret_as="instruction",
+        )
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, confidence, scope,
-                timestamp, valid_until, garden_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                timestamp, valid_until, garden_id, tenant_id, interpret_as, cid)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 fact_uri,
@@ -513,6 +571,9 @@ def publish_instruction_manifest(
                 ts,
                 None,
                 None,
+                identity.tenant_id,
+                "instruction",
+                manifest_cid,
             ),
         )
 
@@ -539,6 +600,7 @@ def _resolve_hint_chunks(
     entries: list[ManifestEntry],
     hints: list[str],
     token_budget: int,
+    tenant_id: str,
 ) -> tuple[list[dict[str, Any]], set[str], list[str], int]:
     """Step 1: resolve manifest_hint entries.
 
@@ -554,13 +616,15 @@ def _resolve_hint_chunks(
             missed_hints.append(hint_name)
             continue
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError:
             missed_hints.append(hint_name)
             continue
         tokens = _approx_tokens(content)
         if tokens_used + tokens <= token_budget:
-            chunks.append(_make_chunk(entry, content, tokens, source, score=1.0))
+            chunks.append(
+                _make_chunk(entry, content, tokens, source, score=1.0, tenant_id=tenant_id)
+            )
             used_names.add(entry.name)
             tokens_used += tokens
     return chunks, used_names, missed_hints, tokens_used
@@ -573,6 +637,7 @@ def _resolve_ranked_chunks(
     remaining_slots: int,
     token_budget: int,
     tokens_used: int,
+    tenant_id: str,
 ) -> tuple[list[dict[str, Any]], int]:
     """Step 2: ranked retrieval for remaining slots. Returns (new_chunks, updated_tokens_used)."""
     if remaining_slots <= 0:
@@ -587,13 +652,15 @@ def _resolve_ranked_chunks(
     new_chunks: list[dict[str, Any]] = []
     for score, entry in scored[:remaining_slots]:
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError as exc:
             logger.debug("skipping recall candidate %s: %s", entry.name, exc)
             continue
         tokens = _approx_tokens(content)
         if tokens_used + tokens <= token_budget:
-            new_chunks.append(_make_chunk(entry, content, tokens, source, score=score))
+            new_chunks.append(
+                _make_chunk(entry, content, tokens, source, score=score, tenant_id=tenant_id)
+            )
             used_names.add(entry.name)
             tokens_used += tokens
     return new_chunks, tokens_used
@@ -605,6 +672,7 @@ def _append_guaranteed_chunks(
     chunks: list[dict[str, Any]],
     tokens_used: int,
     token_budget: int,
+    tenant_id: str,
 ) -> tuple[int, bool]:
     """Step 3: insert/append guaranteed entries. Returns (tokens_used, truncated_flag)."""
     truncated = False
@@ -612,12 +680,14 @@ def _append_guaranteed_chunks(
 
     for entry in [e for e in guaranteed if e.force_position == "prepend"]:
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError as exc:
             logger.warning("guaranteed prepend instruction %s unavailable: %s", entry.name, exc)
             continue
         tokens = _approx_tokens(content)
-        chunks.insert(0, _make_chunk(entry, content, tokens, source, score=1.0))
+        chunks.insert(
+            0, _make_chunk(entry, content, tokens, source, score=1.0, tenant_id=tenant_id)
+        )
         used_names.add(entry.name)
         tokens_used += tokens
         if tokens_used > token_budget:
@@ -625,12 +695,12 @@ def _append_guaranteed_chunks(
 
     for entry in [e for e in guaranteed if e.force_position != "prepend"]:
         try:
-            content, source = _fetch_instruction_content(entry)
+            content, source = _fetch_instruction_content(entry, tenant_id)
         except LookupError as exc:
             logger.warning("guaranteed append instruction %s unavailable: %s", entry.name, exc)
             continue
         tokens = _approx_tokens(content)
-        chunks.append(_make_chunk(entry, content, tokens, source, score=1.0))
+        chunks.append(_make_chunk(entry, content, tokens, source, score=1.0, tenant_id=tenant_id))
         used_names.add(entry.name)
         tokens_used += tokens
         if tokens_used > token_budget:
@@ -654,8 +724,8 @@ def _write_recall_audit(
             conn.execute(
                 """INSERT INTO instruction_audit
                    (id, agent_id, heartbeat_id, session_start, intent, loaded_chunks,
-                    used_chunks, missed_chunks, audit_token, audit_closed, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    used_chunks, missed_chunks, audit_token, audit_closed, created_at, tenant_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     audit_id,
                     agent_id,
@@ -668,6 +738,7 @@ def _write_recall_audit(
                     audit_token,
                     None,
                     now_ms,
+                    identity.tenant_id,
                 ),
             )
     except Exception as exc:
@@ -683,7 +754,7 @@ def recall_instruction(
     _check_agent_access(identity, agent_id)
 
     with db() as conn:
-        manifest_row = _get_current_manifest(conn, agent_id)
+        manifest_row = _get_current_manifest(conn, agent_id, identity.tenant_id)
     if manifest_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="manifest_not_found")
 
@@ -693,6 +764,7 @@ def recall_instruction(
         entries,
         req.manifest_hint,
         req.token_budget,
+        identity.tenant_id,
     )
 
     ranked_chunks, tokens_used = _resolve_ranked_chunks(
@@ -702,6 +774,7 @@ def recall_instruction(
         req.max_chunks - len(chunks),
         req.token_budget,
         tokens_used,
+        identity.tenant_id,
     )
     chunks.extend(ranked_chunks)
 
@@ -711,6 +784,7 @@ def recall_instruction(
         chunks,
         tokens_used,
         req.token_budget,
+        identity.tenant_id,
     )
 
     audit_token = _AUDIT_TOKEN_PREFIX + secrets.token_urlsafe(16)
@@ -735,9 +809,9 @@ def recall_instruction(
 
 
 def _make_chunk(
-    entry: ManifestEntry, content: str, tokens: int, source: str, score: float
+    entry: ManifestEntry, content: str, tokens: int, source: str, score: float, tenant_id: str
 ) -> dict[str, Any]:
-    valid_until = _get_fact_valid_until(entry.fact_uri) if entry.fact_uri else None
+    valid_until = _get_fact_valid_until(entry.fact_uri, tenant_id) if entry.fact_uri else None
     # Extract version from fact_uri, e.g. "instruction:.../v2" → "v2"
     version = "v1"
     if entry.fact_uri:
@@ -770,12 +844,18 @@ def submit_discovery_audit(
 
     with db() as conn:
         row = conn.execute(
-            "SELECT id, created_at, audit_closed FROM instruction_audit WHERE audit_token = ?",
-            (req.audit_token,),
+            "SELECT id, agent_id, created_at, audit_closed FROM instruction_audit"
+            " WHERE audit_token = ? AND tenant_id = ?",
+            (req.audit_token, identity.tenant_id),
         ).fetchone()
 
         if row is None:
             raise HTTPException(400, detail="audit_token_invalid")
+
+        # Bind the submitter to the audit's agent (audit F-8): possession of
+        # the token is necessary but not sufficient — the caller must be that
+        # agent (or an admin), else a leaked token closes another agent's audit.
+        _check_agent_access(identity, row["agent_id"])
 
         # Idempotent: already closed
         if row["audit_closed"] is not None:
@@ -789,12 +869,13 @@ def submit_discovery_audit(
         conn.execute(
             "UPDATE instruction_audit"
             " SET used_chunks = ?, missed_chunks = ?, audit_closed = ?"
-            " WHERE audit_token = ?",
+            " WHERE audit_token = ? AND tenant_id = ?",
             (
                 json.dumps(req.used_chunks),
                 json.dumps(req.missed_chunks),
                 now_ms,
                 req.audit_token,
+                identity.tenant_id,
             ),
         )
 
@@ -815,19 +896,19 @@ def get_manifest_coverage(
     _check_agent_access(identity, agent_id)
 
     with db() as conn:
-        manifest_row = _get_current_manifest(conn, agent_id)
+        manifest_row = _get_current_manifest(conn, agent_id, identity.tenant_id)
         if manifest_row is None:
             raise HTTPException(status_code=404, detail="manifest_not_found")
 
         entries_raw: list[dict[str, Any]] = json.loads(manifest_row["body"])
         entries = [ManifestEntry(**e) for e in entries_raw]
 
-        # Compute per-unit metrics from audit log
+        # Compute per-unit metrics from this tenant's audit log
         cutoff_ms = _now_ms() - 7 * 86_400 * 1000  # 7-day window
         audit_rows = conn.execute(
             "SELECT loaded_chunks, used_chunks FROM instruction_audit"
-            " WHERE agent_id = ? AND created_at >= ?",
-            (agent_id, cutoff_ms),
+            " WHERE agent_id = ? AND tenant_id = ? AND created_at >= ?",
+            (agent_id, identity.tenant_id, cutoff_ms),
         ).fetchall()
 
     is_admin = _is_admin(identity)

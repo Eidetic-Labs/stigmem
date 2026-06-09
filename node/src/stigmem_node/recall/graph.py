@@ -144,18 +144,23 @@ def _fetch_incident_edges(
 
     rows = conn.execute(sql, params).fetchall()
 
+    # Garden ACL (§17.3): resolve the caller's read scope ONCE (batched, audit M3
+    # secure-path), then filter edges in-memory via the shared predicate.
+    # Anonymous (identity is None) callers skip garden filtering, as before.
+    from ..fact_visibility import caller_read_scope
+
+    read_scope = caller_read_scope(identity) if identity is not None else None
+
     filtered: list[Any] = []
     for row in rows:
         # Garden ACL (§17.3): hide edges in gardens the caller cannot see
         garden_id = row["garden_id"]
-        if garden_id is not None and identity is not None:
-            from ..memory_garden_acl_gate import recall_filter_enabled
-
-            if recall_filter_enabled():
-                from ..garden_acl import caller_can_see_garden
-
-                if not caller_can_see_garden(garden_id, identity):
-                    continue
+        if (
+            read_scope is not None
+            and garden_id is not None
+            and not read_scope.garden_allows(garden_id)
+        ):
+            continue
 
         # Federation filter (§19.5.2): edges from remote nodes require federate perm
         received_from = row["received_from"]

@@ -35,21 +35,24 @@ INTENT_ROUTING_RELATIONS = frozenset({"intent:handoff_to", "intent:context_ref"}
 _COUNT_SQL = (
     "SELECT COUNT(*) FROM facts f"
     " WHERE 1=1"
+    " AND f.tenant_id = ?"
     " AND f.scope = ?"
     " AND (? IS NULL OR f.entity = ?)"
     " AND (? IS NULL OR f.relation = ?)"
 )
 
 
-def _lint_filter_params(scope: str, entity: str | None, relation: str | None) -> list[Any]:
-    """Return the bind values for ``_F_FILTER_TAIL`` / ``_FA_FILTER_TAIL``.
+def _lint_filter_params(
+    tenant_id: str, scope: str, entity: str | None, relation: str | None
+) -> list[Any]:
+    """Return the bind values for the lint filter tails (tenant-scoped, audit H4).
 
     Empty-string entity/relation are normalized to None so the IS-NULL gate
     preserves the previous ``if entity:`` truthiness behaviour.
     """
     entity_p = entity or None
     relation_p = relation or None
-    return [scope, entity_p, entity_p, relation_p, relation_p]
+    return [tenant_id, scope, entity_p, entity_p, relation_p, relation_p]
 
 
 _CONFLICT_SQL = (
@@ -58,6 +61,7 @@ _CONFLICT_SQL = (
     " JOIN facts fa ON fa.id = c.fact_a_id"
     " JOIN facts fb ON fb.id = c.fact_b_id"
     " WHERE c.status = 'unresolved'"
+    " AND fa.tenant_id = ?"
     " AND fa.scope = ?"
     " AND (? IS NULL OR fa.entity = ?)"
     " AND (? IS NULL OR fa.relation = ?)"
@@ -87,6 +91,7 @@ _STALE_SQL = (
     " WHERE f.valid_until IS NOT NULL"
     " AND f.confidence > 0.0"
     " AND f.valid_until <= ?"
+    " AND f.tenant_id = ?"
     " AND f.scope = ?"
     " AND (? IS NULL OR f.entity = ?)"
     " AND (? IS NULL OR f.relation = ?)"
@@ -123,7 +128,8 @@ def _check_stale(
 
 _ORPHAN_SQL = (
     "SELECT entity FROM facts"
-    " WHERE scope = ?"
+    " WHERE tenant_id = ?"
+    "   AND scope = ?"
     "   AND (? IS NULL OR entity = ?)"
     " GROUP BY entity"
     " HAVING COUNT(*) > 0"
@@ -132,11 +138,13 @@ _ORPHAN_SQL = (
 )
 
 
-def _check_orphans(conn: Any, scope: str, entity: str | None, now: str) -> list[dict[str, Any]]:
+def _check_orphans(
+    conn: Any, tenant_id: str, scope: str, entity: str | None, now: str
+) -> list[dict[str, Any]]:
     """Return orphan-entity findings (entities with no live facts in scope)."""
     findings: list[dict[str, Any]] = []
     entity_p = entity or None
-    for row in conn.execute(_ORPHAN_SQL, [scope, entity_p, entity_p, now]).fetchall():
+    for row in conn.execute(_ORPHAN_SQL, [tenant_id, scope, entity_p, entity_p, now]).fetchall():
         findings.append(
             {
                 "check": "orphan",
@@ -156,22 +164,25 @@ _REF_SQL = (
     " WHERE f.value_type = 'ref'"
     " AND f.confidence > 0.0"
     " AND (f.valid_until IS NULL OR f.valid_until > ?)"
+    " AND f.tenant_id = ?"
     " AND f.scope = ?"
     " AND (? IS NULL OR f.entity = ?)"
     " AND (? IS NULL OR f.relation = ?)"
 )
 
 
-def _check_broken_refs(conn: Any, f_params: list[Any], now: str) -> list[dict[str, Any]]:
+def _check_broken_refs(
+    conn: Any, tenant_id: str, f_params: list[Any], now: str
+) -> list[dict[str, Any]]:
     """Return broken-ref findings for value-type=ref facts whose target has no live facts."""
     findings: list[dict[str, Any]] = []
     for row in conn.execute(_REF_SQL, [now] + f_params).fetchall():
         target_entity = row["value_v"]
         live_count = conn.execute(
             "SELECT COUNT(*) FROM facts"
-            " WHERE entity = ? AND confidence > 0.0"
+            " WHERE entity = ? AND tenant_id = ? AND confidence > 0.0"
             " AND (valid_until IS NULL OR valid_until > ?)",
-            [target_entity, now],
+            [target_entity, tenant_id, now],
         ).fetchone()[0]
         if live_count == 0:
             is_intent = row["relation"] in INTENT_ROUTING_RELATIONS
@@ -194,6 +205,7 @@ _NS_SQL = (
     " WHERE f.confidence > 0.0"
     " AND (f.valid_until IS NULL OR f.valid_until > ?)"
     " AND instr(f.relation, ':') = 0"
+    " AND f.tenant_id = ?"
     " AND f.scope = ?"
     " AND (? IS NULL OR f.entity = ?)"
     " AND (? IS NULL OR f.relation = ?)"
@@ -222,6 +234,7 @@ def _check_namespacing(conn: Any, f_params: list[Any], now: str) -> list[dict[st
 
 
 def _run_lint_sweep(
+    tenant_id: str,
     scope: str,
     checks: list[LintCheck],
     entity: str | None,
@@ -233,8 +246,8 @@ def _run_lint_sweep(
     now = now_dt.isoformat()
     lookahead = (now_dt + timedelta(seconds=stale_lookahead_s)).isoformat()
 
-    f_params = _lint_filter_params(scope, entity, relation)
-    fa_params = _lint_filter_params(scope, entity, relation)
+    f_params = _lint_filter_params(tenant_id, scope, entity, relation)
+    fa_params = _lint_filter_params(tenant_id, scope, entity, relation)
 
     findings: list[dict[str, Any]] = []
     fact_count = 0
@@ -249,10 +262,10 @@ def _run_lint_sweep(
             findings.extend(_check_stale(conn, f_params, now, lookahead, stale_lookahead_s))
 
         if "orphan" in checks:
-            findings.extend(_check_orphans(conn, scope, entity, now))
+            findings.extend(_check_orphans(conn, tenant_id, scope, entity, now))
 
         if "broken_ref" in checks:
-            findings.extend(_check_broken_refs(conn, f_params, now))
+            findings.extend(_check_broken_refs(conn, tenant_id, f_params, now))
 
         if "namespacing" in checks:
             findings.extend(_check_namespacing(conn, f_params, now))
@@ -266,11 +279,12 @@ def _run_lint_sweep(
     }
 
 
-def _lint_job_worker(job_id: str, req: LintRequest) -> None:
+def _lint_job_worker(job_id: str, req: LintRequest, tenant_id: str) -> None:
     """Background task: run lint sweep and update job status."""
     mark_running(job_id)
     try:
         result = _run_lint_sweep(
+            tenant_id=tenant_id,
             scope=req.scope,
             checks=req.checks or ALL_CHECKS,
             entity=req.entity,
@@ -301,21 +315,24 @@ def lint_scope(
     checks_to_run: list[LintCheck] = req.checks if req.checks else ALL_CHECKS
 
     # Count scope facts to choose sync vs. async path (spec §14.5).
+    # Tenant-scoped so the count is not a cross-tenant oracle (audit H4).
     with db() as conn:
         scope_count: int = conn.execute(
-            "SELECT COUNT(*) FROM facts WHERE scope = ?", [req.scope]
+            "SELECT COUNT(*) FROM facts WHERE tenant_id = ? AND scope = ?",
+            [identity.tenant_id, req.scope],
         ).fetchone()[0]
 
     if scope_count > settings.async_job_threshold:
         estimated_s = max(10, scope_count // 5_000)
         job_id = create_job("lint", req.scope, estimated_s)
-        background_tasks.add_task(_lint_job_worker, job_id, req)
+        background_tasks.add_task(_lint_job_worker, job_id, req, identity.tenant_id)
         return JSONResponse(
             status_code=202,
             content={"job_id": job_id, "status": "pending", "estimated_s": estimated_s},
         )
 
     result = _run_lint_sweep(
+        identity.tenant_id,
         req.scope,
         checks_to_run,
         req.entity,

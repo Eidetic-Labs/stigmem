@@ -28,7 +28,11 @@ def test_startup_warns_when_gardens_have_members_and_recall_filter_disabled(
     with stigmem_plugins([]), _client(tmp_db, memory_garden_acl_recall_filter=False):
         pass
 
-    assert "Garden ACL recall filtering is DISABLED" in caplog.text
+    # The flag is off, but because gardens-with-members exist the boundary stays
+    # ENFORCED (fail-closed). The startup notice tells the operator their opt-out
+    # is overridden for safety — it no longer warns of a leak that cannot happen.
+    assert "remains ENFORCED" in caplog.text
+    assert "fail-closed" in caplog.text
 
 
 def test_startup_does_not_warn_when_recall_filter_on_by_default(
@@ -42,7 +46,7 @@ def test_startup_does_not_warn_when_recall_filter_on_by_default(
     with stigmem_plugins([]), _client(tmp_db):
         pass
 
-    assert "recall filtering is DISABLED" not in caplog.text
+    assert "remains ENFORCED" not in caplog.text
 
 
 def test_doctor_reports_memory_garden_acl_filtering_state(tmp_db: str) -> None:

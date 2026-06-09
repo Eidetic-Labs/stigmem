@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import Identity, resolve_identity
 from ..db import db
+from ..fact_visibility import caller_read_scope
 from ..models.constants import VALID_SCOPES
 
 router = APIRouter(prefix="/v1/scopes", tags=["synthesis"])
@@ -26,10 +27,13 @@ def _is_system(entity: str, relation: str) -> bool:
 _SYNTHESIZE_SQL = (
     "SELECT f.*, "
     "       COALESCE(fvo.valid_until, f.valid_until) AS projected_valid_until, "
-    "       COALESCE(fvo.confidence, f.confidence) AS projected_confidence "
+    "       COALESCE(fvo.confidence, f.confidence) AS projected_confidence, "
+    "       COALESCE(fgm.garden_id, f.garden_id) AS projected_garden_id "
     "FROM facts f "
-    "LEFT JOIN fact_validity_overrides fvo ON fvo.fact_id = f.id"
+    "LEFT JOIN fact_validity_overrides fvo ON fvo.fact_id = f.id "
+    "LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
     " WHERE f.scope = ?"
+    "   AND f.tenant_id = ?"
     "   AND (? = 1"
     "        OR COALESCE(fvo.valid_until, f.valid_until) IS NULL"
     "        OR COALESCE(fvo.valid_until, f.valid_until) > ?)"
@@ -38,8 +42,10 @@ _SYNTHESIZE_SQL = (
 )
 
 
-def _build_synthesize_params(scope: str, include_expired: bool, limit: int, now: str) -> list[Any]:
-    """Return the bind values for ``_SYNTHESIZE_SQL``.
+def _build_synthesize_params(
+    scope: str, tenant_id: str, include_expired: bool, limit: int, now: str
+) -> list[Any]:
+    """Return the bind values for ``_SYNTHESIZE_SQL`` (tenant-scoped, audit synthesize).
 
     The SQL text is a module-level constant; this helper only computes
     bind values.  Keeping the SQL string out of any function that
@@ -49,7 +55,7 @@ def _build_synthesize_params(scope: str, include_expired: bool, limit: int, now:
     when the returned SQL value is invariant.
     """
     expired_flag = 1 if include_expired else 0
-    return [scope, expired_flag, now, limit]
+    return [scope, tenant_id, expired_flag, now, limit]
 
 
 def _count_pair_occurrences(rows: list[Any]) -> dict[tuple[str, str], int]:
@@ -109,10 +115,16 @@ def synthesize_scope(
 
     now = datetime.now(UTC).isoformat()
 
-    params = _build_synthesize_params(scope, include_expired, limit, now)
+    params = _build_synthesize_params(scope, identity.tenant_id, include_expired, limit, now)
 
     with db() as conn:
         rows = conn.execute(_SYNTHESIZE_SQL, params).fetchall()
+
+    # Garden ACL (audit synthesize sibling of H1/M3): drop facts whose projected
+    # garden the caller cannot see BEFORE aggregating, so the summary and stats
+    # never expose restricted-garden content. Fail-closed + batched.
+    read_scope = caller_read_scope(identity)
+    rows = [r for r in rows if read_scope.garden_allows(r["projected_garden_id"])]
 
     # Count occurrences per (entity, relation) among non-system facts to detect contradictions
     seen = _count_pair_occurrences(rows)

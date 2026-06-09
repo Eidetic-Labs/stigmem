@@ -29,6 +29,11 @@ def _mint_admin_key() -> str:
     return create_api_key("agent:admin", ["admin", "read", "write"])
 
 
+def _mint_federation_admin_key() -> str:
+    """Admin key that also holds admin:federation (cross-tenant minting authority, M2)."""
+    return create_api_key("agent:fedadmin", ["admin", "admin:federation", "read", "write"])
+
+
 def _new_raw_key() -> str:
     """64-hex-char key value, matching `openssl rand -hex 32`."""
     return secrets.token_hex(32)
@@ -40,6 +45,41 @@ def _new_raw_key() -> str:
 
 
 class TestRegisterStaticKey:
+    def test_admin_cannot_mint_key_in_foreign_tenant(
+        self, authed_client: tuple[TestClient, str]
+    ) -> None:
+        """A tenant-scoped admin (no admin:federation) cannot mint in another tenant (M2)."""
+        client, _ = authed_client
+        admin_key = _mint_admin_key()  # tenant "default", no admin:federation
+        resp = client.post(
+            "/v1/auth/keys",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "raw_key": _new_raw_key(),
+                "entity_uri": "agent:cross-tenant",
+                "permissions": ["read"],
+                "tenant_id": "tenant-b",
+            },
+        )
+        assert resp.status_code == 403, resp.text
+
+    def test_admin_can_mint_key_in_own_tenant(
+        self, authed_client: tuple[TestClient, str]
+    ) -> None:
+        client, _ = authed_client
+        admin_key = _mint_admin_key()  # tenant "default"
+        resp = client.post(
+            "/v1/auth/keys",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "raw_key": _new_raw_key(),
+                "entity_uri": "agent:same-tenant",
+                "permissions": ["read"],
+                "tenant_id": "default",
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
     def test_admin_can_register_static_key(self, authed_client: tuple[TestClient, str]) -> None:
         client, _ = authed_client
         admin_key = _mint_admin_key()
@@ -110,7 +150,8 @@ class TestRegisterStaticKey:
         self, authed_client: tuple[TestClient, str]
     ) -> None:
         client, _ = authed_client
-        admin_key = _mint_admin_key()
+        # cross-tenant minting requires admin:federation (M2)
+        admin_key = _mint_federation_admin_key()
 
         resp = client.post(
             "/v1/auth/keys",
@@ -130,7 +171,8 @@ class TestRegisterStaticKey:
         self, authed_client: tuple[TestClient, str]
     ) -> None:
         client, _ = authed_client
-        admin_key = _mint_admin_key()
+        # cross-tenant authority (M2); an invalid tenant id is still rejected with 400
+        admin_key = _mint_federation_admin_key()
 
         resp = client.post(
             "/v1/auth/keys",

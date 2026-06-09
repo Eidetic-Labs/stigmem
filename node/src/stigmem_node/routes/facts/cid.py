@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ...auth import Identity, resolve_identity
 from ...cid import compute_cid_from_row, stored_cid_from_row
 from ...db import db
+from ...garden_acl import require_fact_garden_read
 from .common import logger, router
 
 
@@ -38,8 +39,11 @@ def verify_cid(
             "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
             (fact_id, identity.tenant_id),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="fact not found")
+        if row is None:
+            raise HTTPException(status_code=404, detail="fact not found")
+        # Garden ACL: a restricted-garden fact's CID is an existence/content
+        # oracle — hide it from non-members (spec §17.3; sibling of single-get).
+        require_fact_garden_read(conn, fact_id, identity.tenant_id, identity)
     computed = compute_cid_from_row(row)
     stored = stored_cid_from_row(row)
     if stored is None:

@@ -76,6 +76,30 @@ def _insert_tombstone(
     return tid
 
 
+def test_as_of_hides_restricted_garden_fact_from_non_member(
+    client: TestClient, tmp_db: str
+) -> None:
+    """/v1/facts?as_of= must not surface a restricted-garden fact to a non-member.
+
+    The recall as_of path was garden-filtered in M3; the /v1/facts?as_of= query
+    (_AS_OF_SELECT_SQL) was a separate, unfiltered sibling (audit F-AS-OF-FACTS).
+    """
+    fact = _assert(client, entity="user:gardentt")
+    conn = sqlite3.connect(tmp_db)
+    conn.execute(
+        "INSERT INTO fact_garden_membership (fact_id, garden_id, updated_at)"
+        " VALUES (?, 'restricted', '2026-01-01T00:00:00Z')",
+        (fact["id"],),
+    )
+    conn.commit()
+    conn.close()
+
+    as_of = datetime.now(UTC).isoformat()  # after the write, not in the future
+    r = client.get(f"/v1/facts?as_of={as_of}&entity=user:gardentt")
+    assert r.status_code == 200, r.text
+    assert all(f["id"] != fact["id"] for f in r.json()["facts"])  # restricted fact hidden
+
+
 # ---------------------------------------------------------------------------
 # GET /v1/facts — as_of validation
 # ---------------------------------------------------------------------------

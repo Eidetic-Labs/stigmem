@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -29,10 +30,7 @@ import stigmem_node.settings as settings_mod
 from stigmem_node.plugins.testing import stigmem_plugins
 
 _FEATURE_SRC = (
-    Path(__file__).resolve().parents[3]
-    / "experimental"
-    / "lazy-instruction-discovery"
-    / "src"
+    Path(__file__).resolve().parents[3] / "experimental" / "lazy-instruction-discovery" / "src"
 )
 if str(_FEATURE_SRC) not in sys.path:
     sys.path.insert(0, str(_FEATURE_SRC))
@@ -542,6 +540,113 @@ class TestAuditSubmission:
         assert row is not None
         used = json.loads(row["used_chunks"])
         assert "heartbeat-procedure" in used
+
+
+class TestAuditPrincipalBinding:
+    """Audit submit binds the caller to the audit's agent (audit F-8)."""
+
+    @staticmethod
+    def _seed_audit(tmp_db: str, agent_id: str, token: str) -> None:
+        now = int(time.time() * 1000)
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            """INSERT INTO instruction_audit
+               (id, agent_id, heartbeat_id, session_start, intent, loaded_chunks,
+                used_chunks, missed_chunks, audit_token, audit_closed, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            ("aud-" + token, agent_id, "hb", now, "boot", "[]", "[]", "[]", token, None, now),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_submit_denied_for_foreign_agent(
+        self, authed_client: tuple[TestClient, str], tmp_db: str
+    ) -> None:
+        client, key = authed_client  # entity_uri agent:test, non-admin
+        self._seed_audit(tmp_db, "other-agent", "audi_foreign")
+        r = client.post(
+            "/v1/instruction/audit",
+            json={"audit_token": "audi_foreign", "used_chunks": [], "missed_chunks": []},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert r.status_code == 403
+
+    def test_submit_allowed_for_own_agent(
+        self, authed_client: tuple[TestClient, str], tmp_db: str
+    ) -> None:
+        client, key = authed_client  # agent:test → segment "test" matches agent_id
+        self._seed_audit(tmp_db, "test", "audi_own")
+        r = client.post(
+            "/v1/instruction/audit",
+            json={"audit_token": "audi_own", "used_chunks": [], "missed_chunks": []},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert r.status_code == 204
+
+
+class TestInstructionContentTenantScoping:
+    """_fetch_instruction_content resolves only within the caller's tenant (audit H2)."""
+
+    @staticmethod
+    def _seed_fact(tmp_db: str, fid: str, uri: str, value: str, ts: str, tenant: str) -> None:
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            "INSERT INTO facts"
+            " (id, entity, relation, value_type, value_v, source, timestamp,"
+            "  confidence, scope, tenant_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (fid, uri, "instruction:content", "text", value, "admin", ts, 1.0, "local", tenant),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_fetch_content_scoped_by_tenant(self, admin_client: TestClient, tmp_db: str) -> None:
+        from stigmem_node.models.instruction import ManifestEntry
+        from stigmem_node.routes.instruction import _fetch_instruction_content
+
+        uri = "instruction:test/agent/x/unit/v1"
+        # Default-tenant fact is OLDER; the other tenant's fact is NEWER. Without
+        # tenant scoping the newest-timestamp row wins and leaks across tenants.
+        self._seed_fact(tmp_db, "f-def", uri, "DEFAULT-CONTENT", "2026-01-01T00:00:00Z", "default")
+        self._seed_fact(
+            tmp_db, "f-oth", uri, "OTHER-CONTENT", "2026-12-31T00:00:00Z", "other-tenant"
+        )
+
+        entry = ManifestEntry(name="unit", description="d", fact_uri=uri)
+        content_default, _ = _fetch_instruction_content(entry, "default")
+        assert content_default == "DEFAULT-CONTENT"  # not the newer other-tenant fact
+        content_other, _ = _fetch_instruction_content(entry, "other-tenant")
+        assert content_other == "OTHER-CONTENT"
+
+
+class TestManifestFactIntegrity:
+    """Manifest-as-fact is written with tenant_id + interpret_as + CID (audit M4)."""
+
+    def test_manifest_fact_has_tenant_interpret_and_cid(
+        self, admin_client: TestClient, tmp_db: str
+    ) -> None:
+        from stigmem_node.cid import compute_cid_from_row
+
+        agent_id = str(uuid.uuid4())
+        r = admin_client.put(f"/v1/agents/{agent_id}/instruction-manifest", json=_manifest_body())
+        assert r.status_code == 200
+        fact_uri = r.json()["fact_uri"]
+
+        conn = sqlite3.connect(tmp_db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM facts WHERE entity = ? AND relation = 'instruction:manifest'"
+            " ORDER BY timestamp DESC LIMIT 1",
+            (fact_uri,),
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row["tenant_id"] == "default"  # admin_client's tenant, not a column default
+        assert row["interpret_as"] == "instruction"
+        assert row["cid"] is not None
+        # Read-path integrity: the stored CID recomputes from the row body.
+        assert compute_cid_from_row(row) == row["cid"]
 
 
 # ---------------------------------------------------------------------------
