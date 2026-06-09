@@ -12,6 +12,7 @@ from ... import settings as _settings_pkg
 from ...auth import Identity, resolve_identity
 from ...db import db
 from ...entity_normalizer import NormalizationError, normalize_entity_uri
+from ...fact_visibility import ReadScope, caller_read_scope
 from ...garden_acl import get_garden_by_garden_uri, require_garden_read
 from ...memory_garden_acl_gate import garden_acl_enforced
 from ...metrics import FACT_READ
@@ -83,7 +84,9 @@ def _legal_hold_blocks_query(conn: Any, entity: str) -> bool:
 
 
 _AS_OF_SELECT_SQL = (
-    "SELECT f.* FROM facts f"
+    "SELECT f.*, COALESCE(fgm.garden_id, f.garden_id) AS projected_garden_id"
+    " FROM facts f"
+    " LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
     " WHERE f.tenant_id = ?"
     " AND f.timestamp <= ?"
     " AND (f.valid_until IS NULL OR f.valid_until > ?)"
@@ -207,6 +210,7 @@ def _query_facts_as_of_impl(
     as_of: str,
     is_admin_caller: bool,
     tenant_id: str,
+    read_scope: ReadScope,
     limit: int,
     cursor: str | None,
 ) -> QueryResponse:
@@ -231,9 +235,15 @@ def _query_facts_as_of_impl(
         limit=limit,
     )
 
-    rows = conn.execute(_AS_OF_SELECT_SQL, params).fetchall()
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    raw = conn.execute(_AS_OF_SELECT_SQL, params).fetchall()
+    has_more = len(raw) > limit
+    page = raw[:limit]
+    # Garden ACL (fail-closed): drop facts whose projected garden the caller
+    # cannot see, BEFORE building records/contradiction counts. The id-cursor
+    # below continues from the page boundary (page[-1]), so dropping rows here
+    # never skips or duplicates a visible fact across pages (audit F-AS-OF-FACTS;
+    # the recall as_of path was fixed in M3, this is the /v1/facts?as_of= sibling).
+    rows = [r for r in page if read_scope.garden_allows(r["projected_garden_id"])]
 
     seen: dict[tuple[str, str, str], int] = {}
     for r in rows:
@@ -259,7 +269,9 @@ def _query_facts_as_of_impl(
             records = [r for r in records if r.entity not in excluded]
             tombstone_filtered = True
 
-    next_cursor = rows[-1]["id"] if has_more and rows else None
+    # Cursor advances from the page boundary (not the last visible row) so
+    # garden-filtered rows don't stall pagination.
+    next_cursor = page[-1]["id"] if has_more and page else None
     # §23.3.3 r.3: suppress total when tombstone filtering was applied to prevent oracle leakage
     total = None if tombstone_filtered else len(records)
     return QueryResponse(
@@ -386,6 +398,7 @@ def query_facts(
                 as_of=as_of,
                 is_admin_caller=identity.is_admin(),
                 tenant_id=identity.tenant_id,
+                read_scope=caller_read_scope(identity),
                 limit=limit,
                 cursor=cursor,
             )
