@@ -255,12 +255,21 @@ class LibSQLBackend(StorageBackend):
                 version = f.stem
                 if version in applied:
                     continue
-                for stmt in _split_sql(f.read_text()):
-                    conn.execute(stmt)
-                conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                    (version, datetime.now(UTC).isoformat()),
-                )
-                conn.commit()
+                # Apply each migration atomically (audit F-MIG-TXN): statements +
+                # the schema_migrations record commit together; any failure rolls
+                # the whole file back so a rebuild can't leave a half-applied
+                # schema. (_split_sql strips in-file BEGIN/COMMIT, so the runner
+                # owns the transaction boundary here.)
+                try:
+                    for stmt in _split_sql(f.read_text()):
+                        conn.execute(stmt)
+                    conn.execute(
+                        "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                        (version, datetime.now(UTC).isoformat()),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
         finally:
             conn.close()

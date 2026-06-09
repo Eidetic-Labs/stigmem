@@ -15,6 +15,7 @@ every new connection and creates the ``vec_facts`` virtual table if absent::
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -25,6 +26,11 @@ from typing import Any
 from .base import StorageBackend
 
 logger = logging.getLogger("stigmem.storage.sqlite")
+
+# A migration that opens its own top-level transaction (e.g. 019, 029) must not
+# be wrapped again — `BEGIN` inside an open transaction errors. Trigger bodies
+# use a bare `BEGIN` (no semicolon), so this only matches transaction control.
+_MANAGES_OWN_TXN = re.compile(r"^\s*BEGIN\s*;", re.IGNORECASE | re.MULTILINE)
 
 
 class SQLiteBackend(StorageBackend):
@@ -128,7 +134,19 @@ class SQLiteBackend(StorageBackend):
                 version = f.stem
                 if version in applied:
                     continue
-                conn.executescript(f.read_text())
+                # Apply each migration atomically (audit F-MIG-TXN). executescript()
+                # runs in autocommit and disregards isolation_level, so a multi-
+                # statement rebuild (CREATE/DROP/RENAME) that failed partway left a
+                # half-applied, committed schema. Wrap the body in an explicit
+                # transaction unless the migration already manages its own (e.g.
+                # 019, 029) — double-BEGIN would error.
+                sql = f.read_text()
+                script = sql if _MANAGES_OWN_TXN.search(sql) else f"BEGIN;\n{sql}\nCOMMIT;"
+                try:
+                    conn.executescript(script)
+                except Exception:
+                    conn.rollback()
+                    raise
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     (version, datetime.now(UTC).isoformat()),
