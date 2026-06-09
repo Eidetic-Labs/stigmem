@@ -252,6 +252,42 @@ def test_lint_is_tenant_scoped(two_tenants: tuple) -> None:
     assert "bob-only" not in r.text
 
 
+def test_synthesize_is_tenant_scoped(two_tenants: tuple) -> None:
+    """GET /v1/scopes/{scope}/synthesize returns only the caller's tenant content.
+
+    The route previously returned every tenant's full fact content for a scope —
+    a Critical cross-tenant disclosure (sibling of H4, found by the adversarial
+    review of the Wave-1 fixes).
+    """
+    client, key_a, key_b = two_tenants
+
+    for key, src, ent, val in [
+        (key_a, "agent:alice", "stigmem://test/alice-syn", "alice-only-syn"),
+        (key_b, "agent:bob", "stigmem://test/bob-secret-syn", "bob-only-syn"),
+    ]:
+        resp = client.post(
+            "/v1/facts",
+            json={
+                "entity": ent,
+                "relation": "memory:knows",
+                "value": {"type": "string", "v": val},
+                "source": src,
+                "scope": "company",
+            },
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp.status_code == 201, resp.text
+
+    r = client.get(
+        "/v1/scopes/company/synthesize",
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["fact_count"] == 1  # alice's fact only
+    assert "bob-secret-syn" not in r.text  # tenant B's content not disclosed
+    assert "bob-only-syn" not in r.text
+
+
 def test_tenant_b_query_returns_empty(two_tenants: tuple) -> None:
     """GET /v1/facts query for Tenant B returns no Tenant A facts."""
     client, key_a, key_b = two_tenants
