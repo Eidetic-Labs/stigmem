@@ -8,13 +8,28 @@ from fastapi import Depends, HTTPException, status
 
 from ...auth import Identity, resolve_identity
 from ...db import db
+from ...fact_visibility import ReadScope, caller_read_scope
 from ...garden_acl import require_fact_garden_read
 from ...models.provenance import ProvenanceEntry, ProvenanceResponse
 from .common import _get_tombstone_filter, logger, router
 
+_REF_SELECT = (
+    "SELECT f.*, COALESCE(fgm.garden_id, f.garden_id) AS projected_garden_id FROM facts f"
+    " LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
+    " WHERE f.id = ? AND f.tenant_id = ?"
+)
 
-def _resolve_provenance_entry(entry: Any, tenant_id: str) -> tuple[str, Any] | None:
-    """Resolve a derived_from entry to (hash_val, ref_row | None); skip non-dict entries."""
+
+def _resolve_provenance_entry(
+    entry: Any, tenant_id: str, read_scope: ReadScope
+) -> tuple[str, Any] | None:
+    """Resolve a derived_from entry to (hash_val, ref_row | None); skip non-dict entries.
+
+    A ref whose PROJECTED garden the caller cannot see is treated as unresolved
+    (ref_row=None) so a restricted-garden ancestor's existence / fact_id / entity
+    URI is not disclosed via lineage (audit F-PROV-REF). It then redacts to the
+    same {hash, exists:false} shape as tombstoned/missing refs.
+    """
     if not isinstance(entry, dict):
         return None
     hash_val: str = entry.get("hash", "")
@@ -23,20 +38,16 @@ def _resolve_provenance_entry(entry: Any, tenant_id: str) -> tuple[str, Any] | N
     ref_row = None
     with db() as conn:
         if entry_fact_id:
-            ref_row = conn.execute(
-                "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
-                (entry_fact_id, tenant_id),
-            ).fetchone()
+            ref_row = conn.execute(_REF_SELECT, (entry_fact_id, tenant_id)).fetchone()
         elif hash_val.startswith("sha256:"):
             alias = conn.execute(
                 "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?",
                 (hash_val,),
             ).fetchone()
             if alias:
-                ref_row = conn.execute(
-                    "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
-                    (alias["fact_id"], tenant_id),
-                ).fetchone()
+                ref_row = conn.execute(_REF_SELECT, (alias["fact_id"], tenant_id)).fetchone()
+    if ref_row is not None and not read_scope.garden_allows(ref_row["projected_garden_id"]):
+        ref_row = None  # garden-hidden ancestor → redact like tombstoned
     return hash_val, ref_row
 
 
@@ -98,10 +109,11 @@ def get_provenance(
         logger.warning("ignoring malformed provenance for fact %s: %s", fact_id, exc)
         entries_raw = []
 
-    # Resolve each derived_from entry to its referenced fact row
+    # Resolve each derived_from entry to its referenced fact row (garden-gated)
+    read_scope = caller_read_scope(identity)
     resolved: list[tuple[str, Any]] = []  # (hash_val, ref_row | None)
     for entry in entries_raw:
-        resolved_entry = _resolve_provenance_entry(entry, identity.tenant_id)
+        resolved_entry = _resolve_provenance_entry(entry, identity.tenant_id, read_scope)
         if resolved_entry is not None:
             resolved.append(resolved_entry)
 
