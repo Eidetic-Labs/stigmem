@@ -76,12 +76,12 @@ def list_aliases(
         extra += " AND canonical_uri = ?"
         params.append(canonical_uri)
 
-    sql = (
-        "SELECT raw_uri, canonical_uri, kind, created_at FROM entity_aliases"
-        " WHERE tenant_id = ?" + extra + " ORDER BY created_at DESC"
-    )
+    # Base predicate is a pure literal (incl. `tenant_id = ?` so the CI tenant-scope
+    # guard sees it); `extra` is built only from literal fragments, values in params.
+    base_sql = "SELECT raw_uri, canonical_uri, kind, created_at FROM entity_aliases WHERE tenant_id = ?"  # noqa: E501
+    sql = base_sql + extra + " ORDER BY created_at DESC"  # noqa: S608  # nosec B608
     with db() as conn:
-        rows = conn.execute(sql, params).fetchall()  # noqa: S608  # nosec B608 — fragments are literal; values in params
+        rows = conn.execute(sql, params).fetchall()
 
     return [AliasRecord(**dict(r)) for r in rows]
 
