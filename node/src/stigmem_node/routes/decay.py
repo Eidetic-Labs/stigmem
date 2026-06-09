@@ -71,13 +71,19 @@ def decay_sweep(
 
     # Dry-run is always synchronous (spec §15.4).
     if not dry_run:
+        # Tenant-scope the sizing counts so the sync-vs-async branch is not a
+        # cross-tenant fact-count oracle (audit decay sibling of H4).
         with db() as conn:
             if scope is not None:
                 scope_count: int = conn.execute(
-                    "SELECT COUNT(*) FROM facts WHERE scope = ?", [scope]
+                    "SELECT COUNT(*) FROM facts WHERE scope = ? AND tenant_id = ?",
+                    [scope, identity.tenant_id],
                 ).fetchone()[0]
             else:
-                scope_count = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+                scope_count = conn.execute(
+                    "SELECT COUNT(*) FROM facts WHERE tenant_id = ?",
+                    [identity.tenant_id],
+                ).fetchone()[0]
 
         if scope_count > settings.async_job_threshold:
             estimated_s = max(60, scope_count // 1_000)
