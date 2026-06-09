@@ -115,6 +115,27 @@ def _encryption_env(encrypt: str, monkeypatch: pytest.MonkeyPatch) -> Generator[
         yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_tombstone_cache() -> Generator[None, None, None]:
+    """Reset the process-global tombstone cache around every test.
+
+    ``stigmem_node.lifecycle.tombstone_cache`` refreshes from the DB at most once
+    per 60 s (monotonic) and keeps its set in a module-global ``_state``. Across
+    the in-process test suite that means a test which warms the cache leaks its
+    tombstone set into later tests that share the process but use a *different*
+    ``tmp_db`` — intermittently suppressing subscription delivery (an event whose
+    entity appears tombstoned in the stale set is dropped, so ``post`` is never
+    called). Per-test ``invalidate()`` guards added in #604 were lost when the
+    tests were reorganized (#466); resetting here is reorg-proof and keeps every
+    test reading tombstones from its own DB.
+    """
+    from stigmem_node.lifecycle import tombstone_cache
+
+    tombstone_cache.invalidate()
+    yield
+    tombstone_cache.invalidate()
+
+
 # ---------------------------------------------------------------------------
 # Key helpers
 # ---------------------------------------------------------------------------
