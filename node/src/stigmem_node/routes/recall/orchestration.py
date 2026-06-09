@@ -256,16 +256,21 @@ def _caller_sees_all_card_gardens(
     ranker's per-fact garden ACL, so the card must not be served when any
     contributing fact lives in a garden the caller cannot see (audit H1).
     """
+    # Use the PROJECTED garden (the same COALESCE(fgm, f) the card aggregation and
+    # the rest of recall use): a fact promoted into a restricted garden via
+    # fact_garden_membership has raw facts.garden_id NULL, and checking the raw
+    # column alone would miss it and serve the card (audit F-C bypass of H1).
     rows = conn.execute(
-        "SELECT DISTINCT garden_id FROM facts"
-        " WHERE entity = ? AND scope = ? AND tenant_id = ?"
-        "   AND confidence > 0"
-        "   AND (valid_until IS NULL OR valid_until > ?)"
-        "   AND (quarantine_status IS NULL OR quarantine_status != 'pending')"
-        "   AND garden_id IS NOT NULL",
+        "SELECT DISTINCT COALESCE(fgm.garden_id, f.garden_id) AS gid FROM facts f"
+        " LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
+        " WHERE f.entity = ? AND f.scope = ? AND f.tenant_id = ?"
+        "   AND f.confidence > 0"
+        "   AND (f.valid_until IS NULL OR f.valid_until > ?)"
+        "   AND (f.quarantine_status IS NULL OR f.quarantine_status != 'pending')"
+        "   AND COALESCE(fgm.garden_id, f.garden_id) IS NOT NULL",
         (entity_uri, scope, identity.tenant_id, now),
     ).fetchall()
-    return all(caller_can_see_garden(row["garden_id"], identity) for row in rows)
+    return all(caller_can_see_garden(row["gid"], identity) for row in rows)
 
 
 def _build_card_for_entity(

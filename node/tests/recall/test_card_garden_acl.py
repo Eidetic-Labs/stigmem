@@ -24,7 +24,8 @@ class _Conn:
         self._garden_ids = garden_ids
 
     def execute(self, _sql: str, _params: tuple) -> _Cursor:
-        return _Cursor([{"garden_id": g} for g in self._garden_ids])
+        # _caller_sees_all_card_gardens aliases the projected garden as "gid".
+        return _Cursor([{"gid": g} for g in self._garden_ids])
 
 
 def _identity() -> SimpleNamespace:
@@ -71,6 +72,34 @@ def test_card_built_when_caller_sees_all_gardens(monkeypatch) -> None:
     sf, owned = result
     assert sf.from_card is True
     assert owned == ["f1"]
+
+
+def test_caller_sees_all_card_gardens_uses_projected_garden(monkeypatch) -> None:
+    """A fact promoted into a restricted garden via fact_garden_membership (raw
+    facts.garden_id NULL) must still be caught — checking the raw column alone
+    served the card to a non-member (audit F-C, bypass of H1)."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE facts (id TEXT, entity TEXT, scope TEXT, tenant_id TEXT,"
+        " confidence REAL, valid_until TEXT, quarantine_status TEXT, garden_id TEXT)"
+    )
+    conn.execute("CREATE TABLE fact_garden_membership (fact_id TEXT, garden_id TEXT)")
+    # raw garden_id NULL; the effective garden comes only from the membership table.
+    conn.execute(
+        "INSERT INTO facts (id, entity, scope, tenant_id, confidence, valid_until,"
+        " quarantine_status, garden_id) VALUES ('f1','e:x','local','default',1.0,NULL,NULL,NULL)"
+    )
+    conn.execute(
+        "INSERT INTO fact_garden_membership (fact_id, garden_id) VALUES ('f1','restricted')"
+    )
+    monkeypatch.setattr(orch, "caller_can_see_garden", lambda gid, ident: False)
+    ident = SimpleNamespace(tenant_id="default", entity_uri="user:outsider")
+
+    # The projected garden "restricted" must be detected → caller can NOT see all.
+    assert orch._caller_sees_all_card_gardens("e:x", "local", ident, conn, "z") is False
 
 
 def test_filter_visible_gardens_drops_hidden(monkeypatch) -> None:
