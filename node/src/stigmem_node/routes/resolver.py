@@ -47,7 +47,9 @@ def resolve_entity_uri(
         raise HTTPException(status_code=403, detail="read permission required")
 
     with db() as conn:
-        result = resolve_entity(uri, conn, top_k=top_k, threshold=threshold)
+        result = resolve_entity(
+            uri, conn, tenant_id=identity.tenant_id, top_k=top_k, threshold=threshold
+        )
 
     return {
         "query": result.query,

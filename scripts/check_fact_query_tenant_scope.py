@@ -54,16 +54,6 @@ ALLOWLIST: dict[str, list[tuple[str, str]]] = {
     "recall/vector_search.py": [
         ("fact_embedding_status", "recall vector candidates; tenant enforced by the scoped query"),
     ],
-    # --- KNOWN-REMAINING (adversarial review): real gaps tracked for a follow-up
-    # increment, NOT yet fixed. Listed so the guard passes today while still
-    # failing on any NEW unscoped facts query. Do not remove without fixing. ---
-    "recall/entity_resolver.py": [
-        ("entity = ? AND confidence", "TODO(adversarial): scope Layer-1 resolver probe"),
-        ("entity LIKE ? AND confidence", "TODO(adversarial): scope Layer-3 enumeration"),
-    ],
-    "routes/instruction.py": [
-        ("WHERE entity = ? LIMIT 1", "TODO(adversarial): scope coverage probe (low; write-gated)"),
-    ],
 }
 
 

@@ -119,6 +119,8 @@ def _token_score(a_tokens: list[str], b_tokens: list[str]) -> float:
 def resolve_entity(
     raw: str,
     conn: sqlite3.Connection,
+    *,
+    tenant_id: str = "default",
     top_k: int = 5,
     threshold: float = FUZZY_SCORE_THRESHOLD,
 ) -> ResolveResult:
@@ -147,8 +149,8 @@ def resolve_entity(
 
     # Check if the canonical form itself appears in the fact graph.
     live_check = conn.execute(
-        "SELECT 1 FROM facts WHERE entity = ? AND confidence > 0.0 LIMIT 1",
-        (canonical,),
+        "SELECT 1 FROM facts WHERE entity = ? AND tenant_id = ? AND confidence > 0.0 LIMIT 1",
+        (canonical, tenant_id),
     ).fetchone()
     if live_check:
         result.layer1_match = True
@@ -189,9 +191,9 @@ def resolve_entity(
     prefix_pattern = f"{type_prefix}:%"
     candidate_rows: list[Any] = conn.execute(
         """SELECT DISTINCT entity FROM facts
-           WHERE entity LIKE ? AND confidence > 0.0
+           WHERE entity LIKE ? AND tenant_id = ? AND confidence > 0.0
            LIMIT 2000""",
-        (prefix_pattern,),
+        (prefix_pattern, tenant_id),
     ).fetchall()
 
     scored: list[ResolveCandidate] = []

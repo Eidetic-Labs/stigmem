@@ -397,6 +397,46 @@ def test_instruction_manifest_is_tenant_isolated(
         db_mod.settings = original
 
 
+def test_entity_resolve_is_tenant_scoped(two_tenants: tuple) -> None:
+    """GET /v1/entities/resolve must not confirm existence of, or enumerate,
+    another tenant's entities (adversarial F-H4-S3 cross-tenant enumeration)."""
+    client, key_a, key_b = two_tenants
+
+    client.post(
+        "/v1/facts",
+        json={
+            "entity": "user:zzz-secret-resolve",
+            "relation": "memory:knows",
+            "value": {"type": "string", "v": "x"},
+            "source": "agent:alice",
+            "scope": "company",
+        },
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+
+    # Tenant B: exact URI must not be confirmed, and fuzzy must not surface it.
+    rb = client.get(
+        "/v1/entities/resolve",
+        params={"uri": "user:zzz-secret-resolve"},
+        headers={"Authorization": f"Bearer {key_b}"},
+    )
+    assert rb.status_code == 200, rb.text
+    body_b = rb.json()
+    # Existence not confirmed (Layer 1) and no fuzzy enumeration of A's entities
+    # (Layer 3). The query/canonical fields just echo the caller's own input URI.
+    assert body_b["layer1_match"] is False
+    assert body_b["layer3_candidates"] == []
+
+    # Tenant A resolves its own entity.
+    ra = client.get(
+        "/v1/entities/resolve",
+        params={"uri": "user:zzz-secret-resolve"},
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert ra.status_code == 200, ra.text
+    assert ra.json()["layer1_match"] is True
+
+
 def test_tenant_b_query_returns_empty(two_tenants: tuple) -> None:
     """GET /v1/facts query for Tenant B returns no Tenant A facts."""
     client, key_a, key_b = two_tenants
