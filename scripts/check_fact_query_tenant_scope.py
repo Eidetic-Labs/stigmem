@@ -23,10 +23,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent / "node" / "src" / "stigmem_node"
 SCAN_DIRS = [ROOT / "routes", ROOT / "recall"]
 
+# Tenant-bearing tables this guard defends. All carry a `tenant_id` column (facts
+# from the start; entity_aliases/instruction_manifests/boot_stubs/instruction_audit
+# since migrations 039/040) — a route/recall query against any of them must scope
+# by tenant or it can leak across tenants.
+TENANT_TABLES = r"(?:facts|entity_aliases|instruction_manifests|boot_stubs|instruction_audit)"
 # Case-sensitive: SQL keywords are uppercase in this codebase, so this skips
 # prose like "from facts.py" in docstrings.
-FROM_FACTS = re.compile(r"FROM\s+facts\b")
-WINDOW = 800  # max chars after "FROM facts" to search (further bounded to the statement)
+FROM_FACTS = re.compile(rf"FROM\s+{TENANT_TABLES}\b")
+WINDOW = 800  # max chars after the FROM to search (further bounded to the statement)
 
 # The window is cut at the first of these (end of the execute() call / statement),
 # so a later, unrelated query's predicate can't bleed in and mask an unscoped one.
@@ -45,7 +50,7 @@ HELPER_MARKERS = ("scope_sql", "visible_facts_where", "read_scope")
 # unguessable UUIDs already produced by a tenant-scoped query upstream — not an
 # enumeration/oracle surface. Treated as scoped by construction.
 BY_ID_LOOKUP = re.compile(
-    r"FROM\s+facts\b[^;]{0,160}?WHERE\s+(?:f\.)?id\s*(?:=\s*\?|IN\s*\()", re.DOTALL
+    rf"FROM\s+{TENANT_TABLES}\b[^;]{{0,160}}?WHERE\s+(?:f\.)?id\s*(?:=\s*\?|IN\s*\()", re.DOTALL
 )
 
 # Allowlist: {relative_path: [(anchor, reason), ...]}. An occurrence is exempt
@@ -123,18 +128,77 @@ def find_violations(scan_dirs: list[Path], root: Path) -> list[str]:
     return violations
 
 
+# --- Garden dimension -------------------------------------------------------
+# A fact-by-id read route returning content must also enforce the garden ACL,
+# not just the tenant. provenance/cid leaked restricted-garden facts (F-A1/F-A2)
+# and /v1/facts?as_of= leaked them too (F-AS-OF-FACTS) — all satisfied the
+# tenant guard. So: any routes/facts file that SELECTs fact CONTENT must
+# reference a garden gate. (By-id is NOT exempt here — F-A1 was a by-id read.)
+GARDEN_SCAN_DIR = ROOT / "routes" / "facts"
+GARDEN_MARKERS = (
+    "require_fact_garden_read",
+    "require_garden_read",
+    "caller_read_scope",
+    "garden_allows",
+    "fact_visible",
+    "_query_visible_gardens",
+    "projected_garden",
+    "_caller_sees_all_card_gardens",
+)
+# A `FROM facts` is "content" unless it is a COUNT/existence probe (no row data).
+_NON_CONTENT = re.compile(r"(?:COUNT\s*\(|SELECT\s+1\b|EXISTS\s*\()", re.IGNORECASE)
+
+
+def _file_returns_fact_content(text: str) -> bool:
+    for m in FROM_FACTS.finditer(text):
+        preceding = text[max(0, m.start() - 120) : m.start()]
+        if not _NON_CONTENT.search(preceding):
+            return True
+    return False
+
+
+def find_garden_violations(garden_dir: Path, root: Path) -> list[str]:
+    """Return files under routes/facts/ that return fact content with no garden gate."""
+    violations: list[str] = []
+    if not garden_dir.exists():
+        return violations
+    for path in sorted(garden_dir.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if not text.count("facts"):
+            continue
+        if _file_returns_fact_content(text) and not any(g in text for g in GARDEN_MARKERS):
+            rel = str(path.relative_to(root))
+            violations.append(f"{rel}: returns fact content with no garden-ACL gate")
+    return violations
+
+
 def main() -> int:
     violations = find_violations(SCAN_DIRS, ROOT)
+    garden_violations = find_garden_violations(GARDEN_SCAN_DIR, ROOT)
+    failed = False
     if violations:
+        failed = True
         sys.stderr.write(
-            "Fact-query tenant-scope guard FAILED — these `FROM facts` queries lack a "
+            "Fact-query tenant-scope guard FAILED — these tenant-table queries lack a "
             "tenant_id predicate (route through stigmem_node.fact_visibility, or add to "
             "ALLOWLIST with a reason if intentionally cross-tenant):\n\n"
         )
         for v in violations:
             sys.stderr.write(f"  {v}\n")
+    if garden_violations:
+        failed = True
+        sys.stderr.write(
+            "\nFact-query garden-ACL guard FAILED — these routes/facts files return fact "
+            "content without a garden gate (add require_fact_garden_read / a projected-garden "
+            "filter, like single/provenance/cid):\n\n"
+        )
+        for v in garden_violations:
+            sys.stderr.write(f"  {v}\n")
+    if failed:
         return 1
-    print("Fact-query tenant-scope guard: OK")
+    print("Fact-query tenant-scope + garden-ACL guard: OK")
     return 0
 
 

@@ -16,6 +16,56 @@ def test_real_tree_is_clean() -> None:
     assert violations == [], "\n".join(violations)
 
 
+def test_real_tree_has_no_garden_violations() -> None:
+    """Every routes/facts file returning fact content has a garden-ACL gate."""
+    violations = guard.find_garden_violations(guard.GARDEN_SCAN_DIR, guard.ROOT)
+    assert violations == [], "\n".join(violations)
+
+
+def test_guard_scans_new_tenant_tables(tmp_path: Path) -> None:
+    """An unscoped query on a newly tenant-bearing table is flagged."""
+    d = tmp_path / "routes"
+    d.mkdir()
+    (d / "leaky.py").write_text(
+        'conn.execute("SELECT * FROM instruction_manifests WHERE agent_id = ?", (a,))\n'
+    )
+    violations = guard.find_violations([d], tmp_path)
+    assert len(violations) == 1
+    assert "instruction_manifests" in violations[0]
+
+
+def test_garden_guard_flags_content_query_without_gate(tmp_path: Path) -> None:
+    """A routes/facts file returning fact content with no garden marker is flagged."""
+    d = tmp_path / "routes" / "facts"
+    d.mkdir(parents=True)
+    (d / "leaky.py").write_text(
+        'row = conn.execute("SELECT * FROM facts WHERE id = ? AND tenant_id = ?", a).fetchone()\n'
+    )
+    violations = guard.find_garden_violations(d, tmp_path)
+    assert len(violations) == 1
+    assert "leaky.py" in violations[0]
+
+
+def test_garden_guard_accepts_gated_content_query(tmp_path: Path) -> None:
+    d = tmp_path / "routes" / "facts"
+    d.mkdir(parents=True)
+    (d / "ok.py").write_text(
+        'row = conn.execute("SELECT * FROM facts WHERE id = ?", a).fetchone()\n'
+        "require_fact_garden_read(conn, fact_id, tenant_id, identity)\n"
+    )
+    assert guard.find_garden_violations(d, tmp_path) == []
+
+
+def test_garden_guard_ignores_count_only(tmp_path: Path) -> None:
+    """A COUNT/existence probe returns no content → no garden gate required."""
+    d = tmp_path / "routes" / "facts"
+    d.mkdir(parents=True)
+    (d / "count.py").write_text(
+        'n = conn.execute("SELECT COUNT(*) FROM facts WHERE tenant_id = ?", (t,)).fetchone()\n'
+    )
+    assert guard.find_garden_violations(d, tmp_path) == []
+
+
 def test_guard_flags_a_new_unscoped_query(tmp_path: Path) -> None:
     """A newly-introduced unscoped fact query must be caught."""
     d = tmp_path / "routes"

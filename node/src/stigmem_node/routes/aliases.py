@@ -64,24 +64,24 @@ def list_aliases(
             detail=f"kind must be one of {sorted(_VALID_KINDS)}",
         )
 
-    # Always scope to the caller's tenant (aliases are tenant-isolated).
-    conditions: list[str] = ["tenant_id = ?"]
+    # Always scope to the caller's tenant (aliases are tenant-isolated). The
+    # base `tenant_id = ?` predicate is inlined in the SQL literal (not a
+    # variable) so it is statically verifiable by the tenant-scope CI guard.
     params: list[Any] = [identity.tenant_id]
+    extra = ""
     if kind:
-        conditions.append("kind = ?")
+        extra += " AND kind = ?"
         params.append(kind)
     if canonical_uri:
-        conditions.append("canonical_uri = ?")
+        extra += " AND canonical_uri = ?"
         params.append(canonical_uri)
 
-    where = "WHERE " + " AND ".join(conditions)
-
+    sql = (
+        "SELECT raw_uri, canonical_uri, kind, created_at FROM entity_aliases"
+        " WHERE tenant_id = ?" + extra + " ORDER BY created_at DESC"
+    )
     with db() as conn:
-        rows = conn.execute(
-            f"SELECT raw_uri, canonical_uri, kind, created_at FROM entity_aliases"  # nosec B608 — where is built from literal fragments; values in params
-            f" {where} ORDER BY created_at DESC",
-            params,
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()  # noqa: S608  # nosec B608 — fragments are literal; values in params
 
     return [AliasRecord(**dict(r)) for r in rows]
 
