@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, status
 
 from ...auth import Identity, resolve_identity
 from ...db import db
+from ...garden_acl import require_fact_garden_read
 from ...models.provenance import ProvenanceEntry, ProvenanceResponse
 from .common import _get_tombstone_filter, logger, router
 
@@ -78,8 +79,11 @@ def get_provenance(
             "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
             (fact_id, identity.tenant_id),
         ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="fact not found")
+        if row is None:
+            raise HTTPException(status_code=404, detail="fact not found")
+        # Garden ACL: don't expose a restricted-garden fact's CID/lineage to a
+        # non-member (spec §17.3; sibling of the single-get gate).
+        require_fact_garden_read(conn, fact_id, identity.tenant_id, identity)
 
     derived_from_raw = row["derived_from"] if "derived_from" in row.keys() else None  # noqa: SIM118
     cid_val = row["cid"] if "cid" in row.keys() else None  # noqa: SIM118
