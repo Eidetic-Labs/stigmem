@@ -51,3 +51,28 @@ def test_guard_accepts_helper_routed_query(tmp_path: Path) -> None:
         'sql = f"SELECT f.* FROM facts f {JOIN} WHERE x = ? {scope_sql}"\n'
     )
     assert guard.find_violations([d], tmp_path) == []
+
+
+def test_guard_flags_when_tenant_id_only_a_bare_token(tmp_path: Path) -> None:
+    """A `tenant_id` mention that is NOT a predicate (comment / column) must not
+    count as scoped — the guard must not fail open."""
+    d = tmp_path / "routes"
+    d.mkdir()
+    (d / "sneaky.py").write_text(
+        'conn.execute("SELECT * FROM facts WHERE entity = ? -- tenant_id elsewhere", (e,))\n'
+    )
+    violations = guard.find_violations([d], tmp_path)
+    assert len(violations) == 1
+
+
+def test_guard_does_not_bleed_from_a_later_statement(tmp_path: Path) -> None:
+    """An unscoped query must be flagged even when a *later* statement nearby
+    carries a tenant_id predicate (window must be statement-bounded)."""
+    d = tmp_path / "routes"
+    d.mkdir()
+    (d / "bleed.py").write_text(
+        'a = conn.execute("SELECT * FROM facts WHERE entity = ?", (e,)).fetchall()\n'
+        'b = conn.execute("SELECT * FROM facts WHERE x = ? AND tenant_id = ?", (x, t))\n'
+    )
+    violations = guard.find_violations([d], tmp_path)
+    assert any("bleed.py:1:" in v for v in violations)  # first query still flagged

@@ -77,7 +77,7 @@ _TABLE_PK: dict[str, list[str]] = {
     "node_meta": ["key"],
     "entity_aliases": ["raw_uri"],
     "vec_facts": ["fact_id"],
-    "boot_stubs": ["agent_id", "adapter_profile"],
+    "boot_stubs": ["agent_id", "adapter_profile", "tenant_id"],
     "schema_migrations": ["version"],
 }
 

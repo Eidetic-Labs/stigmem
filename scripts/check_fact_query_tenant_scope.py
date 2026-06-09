@@ -26,17 +26,27 @@ SCAN_DIRS = [ROOT / "routes", ROOT / "recall"]
 # Case-sensitive: SQL keywords are uppercase in this codebase, so this skips
 # prose like "from facts.py" in docstrings.
 FROM_FACTS = re.compile(r"FROM\s+facts\b")
-WINDOW = 800  # chars after "FROM facts" to search for tenant_id (same statement)
+WINDOW = 800  # max chars after "FROM facts" to search (further bounded to the statement)
 
-# A query counts as tenant-scoped if its window contains a literal tenant_id
-# predicate OR a marker that it is routed through the shared read-scope helper
+# The window is cut at the first of these (end of the execute() call / statement),
+# so a later, unrelated query's predicate can't bleed in and mask an unscoped one.
+WINDOW_TERMINATORS = (".fetchone", ".fetchall", ".fetchmany", ".fetchval", ";")
+
+# A query is tenant-scoped only when tenant_id appears in PREDICATE position
+# (tenant_id = ? / tenant_id IN (...)) — a bare mention in a comment or an
+# adjacent column does NOT count (avoids failing open).
+TENANT_PREDICATE = re.compile(r"tenant_id\s*(?:=|<|>|!=|\bIN\b)", re.IGNORECASE)
+
+# …or the query is routed through the shared read-scope helper
 # (stigmem_node.fact_visibility), which injects the tenant predicate.
-SCOPED_MARKERS = ("tenant_id", "scope_sql", "visible_facts_where", "read_scope")
+HELPER_MARKERS = ("scope_sql", "visible_facts_where", "read_scope")
 
-# A primary-key lookup `... FROM facts ... WHERE id = ?` targets one unguessable
-# UUID, whose id is already produced by a tenant-scoped query upstream — not an
+# A primary-key lookup `... FROM facts ... WHERE id = ?` (or `id IN (...)`) targets
+# unguessable UUIDs already produced by a tenant-scoped query upstream — not an
 # enumeration/oracle surface. Treated as scoped by construction.
-BY_ID_LOOKUP = re.compile(r"FROM\s+facts\b[^;]{0,160}?WHERE\s+(?:f\.)?id\s*=\s*\?", re.DOTALL)
+BY_ID_LOOKUP = re.compile(
+    r"FROM\s+facts\b[^;]{0,160}?WHERE\s+(?:f\.)?id\s*(?:=\s*\?|IN\s*\()", re.DOTALL
+)
 
 # Allowlist: {relative_path: [(anchor, reason), ...]}. An occurrence is exempt
 # when the anchor substring appears in its window. Keep reasons specific.
@@ -47,6 +57,9 @@ ALLOWLIST: dict[str, list[tuple[str, str]]] = {
     ],
     "routes/quarantine.py": [
         ("where_clause", "garden-membership-scoped via the dynamic where_clause"),
+    ],
+    "routes/federation/replication.py": [
+        ("WHERE {where}", "federation egress; tenant-scoped via the built {where} (tenant_id = ?)"),
     ],
     "routes/recall/common.py": [
         ("fact_validity_overrides", "recall candidate fetch; ids from the scoped entry query"),
@@ -61,13 +74,33 @@ def _exempt(rel: str, window: str) -> bool:
     return any(anchor in window for anchor, _reason in ALLOWLIST.get(rel, []))
 
 
-def window_is_scoped(rel: str, window: str) -> bool:
-    """True if a `FROM facts` window is tenant-scoped (or legitimately exempt)."""
-    if any(marker in window for marker in SCOPED_MARKERS):
+def _bounded_window(text: str, start: int) -> str:
+    """Window from `start`, cut at the first statement terminator (so a later
+    query's predicate cannot bleed in), capped at WINDOW chars."""
+    raw = text[start : start + WINDOW]
+    end = len(raw)
+    for term in WINDOW_TERMINATORS:
+        idx = raw.find(term)
+        if idx != -1:
+            end = min(end, idx)
+    return raw[:end]
+
+
+def window_is_scoped(rel: str, window: str, ctx: str) -> bool:
+    """True if a `FROM facts` window is tenant-scoped (or legitimately exempt).
+
+    ``window`` is the strict statement-bounded slice used for the automatic
+    checks (no bleed from later statements). ``ctx`` includes some leading text
+    (the SELECT clause) and is used only for the curated, human-vetted allowlist
+    anchors, some of which reference text before ``FROM`` (e.g. ``COUNT(*)``).
+    """
+    if TENANT_PREDICATE.search(window):
+        return True
+    if any(marker in window for marker in HELPER_MARKERS):
         return True
     if BY_ID_LOOKUP.match(window):
         return True
-    return _exempt(rel, window)
+    return _exempt(rel, ctx)
 
 
 def find_violations(scan_dirs: list[Path], root: Path) -> list[str]:
@@ -80,8 +113,9 @@ def find_violations(scan_dirs: list[Path], root: Path) -> list[str]:
             text = path.read_text(encoding="utf-8")
             rel = str(path.relative_to(root))
             for m in FROM_FACTS.finditer(text):
-                window = text[m.start() : m.start() + WINDOW]
-                if window_is_scoped(rel, window):
+                window = _bounded_window(text, m.start())
+                ctx = text[max(0, m.start() - 120) : m.start() + WINDOW]
+                if window_is_scoped(rel, window, ctx):
                     continue
                 line = text.count("\n", 0, m.start()) + 1
                 snippet = text[m.start() : m.start() + 70].replace("\n", " ").strip()

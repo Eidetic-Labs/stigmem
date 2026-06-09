@@ -403,38 +403,40 @@ class TestSQLAdaptation:
 
 class TestCompositeKeyUpsert:
     def test_boot_stubs_insert_or_replace(self, pg_backend) -> None:
+        # boot_stubs PK is (agent_id, adapter_profile, tenant_id) after migration
+        # 039 — the INSERT OR REPLACE → ON CONFLICT rewrite must target all three
+        # columns (_TABLE_PK), and rows for different tenants must NOT collide.
         agent_id = f"agent-{uuid.uuid4()}"
+        cols = (
+            "(agent_id, adapter_profile, stub_version, body, token_count, "
+            "generated_at, manifest_version, tenant_id)"
+        )
         with pg_backend.connection() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO boot_stubs "
-                "(agent_id, adapter_profile, stub_version, body, token_count, "
-                "generated_at, manifest_version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (agent_id, "generic", 1, "# stub v1", 10, 1000, "v1"),
+                f"INSERT OR REPLACE INTO boot_stubs {cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (agent_id, "generic", 1, "# stub v1", 10, 1000, "v1", "default"),
             )
-            first_row = conn.execute(
-                """SELECT stub_version, body FROM boot_stubs
-                   WHERE agent_id = ? AND adapter_profile = ?""",
-                (agent_id, "generic"),
-            ).fetchone()
-            assert first_row is not None
-            assert first_row["stub_version"] == 1
-            assert first_row["body"] == "# stub v1"
+            # Same agent+profile in another tenant — must be a SEPARATE row.
             conn.execute(
-                "INSERT OR REPLACE INTO boot_stubs "
-                "(agent_id, adapter_profile, stub_version, body, token_count, "
-                "generated_at, manifest_version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (agent_id, "generic", 2, "# stub v2", 12, 2000, "v2"),
+                f"INSERT OR REPLACE INTO boot_stubs {cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (agent_id, "generic", 1, "# stub tenant-x", 9, 1500, "v1", "tenant-x"),
             )
-            row = conn.execute(
-                """SELECT stub_version, body FROM boot_stubs
-                   WHERE agent_id = ? AND adapter_profile = ?""",
+            # Upsert the default-tenant row (same 3-col key) — must overwrite it only.
+            conn.execute(
+                f"INSERT OR REPLACE INTO boot_stubs {cols} VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (agent_id, "generic", 2, "# stub v2", 12, 2000, "v2", "default"),
+            )
+            rows = conn.execute(
+                """SELECT tenant_id, stub_version, body FROM boot_stubs
+                   WHERE agent_id = ? AND adapter_profile = ?
+                   ORDER BY tenant_id""",
                 (agent_id, "generic"),
-            ).fetchone()
-        assert row is not None
-        assert row["stub_version"] == 2
-        assert row["body"] == "# stub v2"
+            ).fetchall()
+        by_tenant = {r["tenant_id"]: (r["stub_version"], r["body"]) for r in rows}
+        assert by_tenant == {
+            "default": (2, "# stub v2"),  # upserted, not duplicated
+            "tenant-x": (1, "# stub tenant-x"),  # isolated, untouched
+        }
 
 
 # ---------------------------------------------------------------------------

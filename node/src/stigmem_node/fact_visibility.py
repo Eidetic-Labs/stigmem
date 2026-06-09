@@ -26,10 +26,9 @@ from typing import Any
 
 from .memory_garden_acl_gate import caller_visible_gardens, garden_acl_enforced
 
-# SQL building blocks for queries that select from ``facts f`` and want the
-# projected garden available for filtering.
+# SQL building block: callers that splice visible_facts_where() must also join
+# fact_garden_membership so the projected-garden predicate resolves.
 PROJECTED_GARDEN_JOIN = "LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id"
-PROJECTED_GARDEN_SELECT = "COALESCE(fgm.garden_id, f.garden_id) AS projected_garden_id"
 
 
 @dataclass(frozen=True)
