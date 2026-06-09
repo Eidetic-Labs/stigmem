@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -542,6 +543,48 @@ class TestAuditSubmission:
         assert row is not None
         used = json.loads(row["used_chunks"])
         assert "heartbeat-procedure" in used
+
+
+class TestAuditPrincipalBinding:
+    """Audit submit binds the caller to the audit's agent (audit F-8)."""
+
+    @staticmethod
+    def _seed_audit(tmp_db: str, agent_id: str, token: str) -> None:
+        now = int(time.time() * 1000)
+        conn = sqlite3.connect(tmp_db)
+        conn.execute(
+            """INSERT INTO instruction_audit
+               (id, agent_id, heartbeat_id, session_start, intent, loaded_chunks,
+                used_chunks, missed_chunks, audit_token, audit_closed, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            ("aud-" + token, agent_id, "hb", now, "boot", "[]", "[]", "[]", token, None, now),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_submit_denied_for_foreign_agent(
+        self, authed_client: tuple[TestClient, str], tmp_db: str
+    ) -> None:
+        client, key = authed_client  # entity_uri agent:test, non-admin
+        self._seed_audit(tmp_db, "other-agent", "audi_foreign")
+        r = client.post(
+            "/v1/instruction/audit",
+            json={"audit_token": "audi_foreign", "used_chunks": [], "missed_chunks": []},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert r.status_code == 403
+
+    def test_submit_allowed_for_own_agent(
+        self, authed_client: tuple[TestClient, str], tmp_db: str
+    ) -> None:
+        client, key = authed_client  # agent:test → segment "test" matches agent_id
+        self._seed_audit(tmp_db, "test", "audi_own")
+        r = client.post(
+            "/v1/instruction/audit",
+            json={"audit_token": "audi_own", "used_chunks": [], "missed_chunks": []},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert r.status_code == 204
 
 
 # ---------------------------------------------------------------------------

@@ -781,12 +781,18 @@ def submit_discovery_audit(
 
     with db() as conn:
         row = conn.execute(
-            "SELECT id, created_at, audit_closed FROM instruction_audit WHERE audit_token = ?",
+            "SELECT id, agent_id, created_at, audit_closed FROM instruction_audit"
+            " WHERE audit_token = ?",
             (req.audit_token,),
         ).fetchone()
 
         if row is None:
             raise HTTPException(400, detail="audit_token_invalid")
+
+        # Bind the submitter to the audit's agent (audit F-8): possession of
+        # the token is necessary but not sufficient — the caller must be that
+        # agent (or an admin), else a leaked token closes another agent's audit.
+        _check_agent_access(identity, row["agent_id"])
 
         # Idempotent: already closed
         if row["audit_closed"] is not None:
