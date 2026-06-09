@@ -12,7 +12,9 @@ from fastapi.responses import JSONResponse
 from ...auth import Identity, resolve_identity
 from ...card_materializer import CARD_MIN_CONFIDENCE, get_fresh_card
 from ...db import db
+from ...garden_acl import caller_can_see_garden
 from ...lifecycle.tombstone_cache import is_tombstoned as _is_tombstoned
+from ...memory_garden_acl_gate import recall_filter_enabled
 from ...metrics import FACT_READ, RECALL_RANKER_DURATION, observe_duration
 from ...models.constants import VALID_SCOPES
 from ...models.facts import FactRecord, FactValue
@@ -245,6 +247,27 @@ def _expand_graph_neighbours(
     )
 
 
+def _caller_sees_all_card_gardens(
+    entity_uri: str, scope: str, identity: Identity, conn: Any, now: str
+) -> bool:
+    """True if the caller may see every garden contributing to this entity's card.
+
+    The card summary aggregates an entity's fact values verbatim and bypasses the
+    ranker's per-fact garden ACL, so the card must not be served when any
+    contributing fact lives in a garden the caller cannot see (audit H1).
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT garden_id FROM facts"
+        " WHERE entity = ? AND scope = ? AND tenant_id = ?"
+        "   AND confidence > 0"
+        "   AND (valid_until IS NULL OR valid_until > ?)"
+        "   AND (quarantine_status IS NULL OR quarantine_status != 'pending')"
+        "   AND garden_id IS NOT NULL",
+        (entity_uri, scope, identity.tenant_id, now),
+    ).fetchall()
+    return all(caller_can_see_garden(row["garden_id"], identity) for row in rows)
+
+
 def _build_card_for_entity(
     entity_uri: str,
     entity_fact_ids: list[str],
@@ -259,6 +282,12 @@ def _build_card_for_entity(
     """
     if _is_tombstoned(entity_uri, identity.tenant_id):
         # §23.3.2 r.3: cards whose about_entity is tombstoned are fully excluded.
+        return None
+    # Garden ACL (audit H1): the card path bypasses the ranker's per-fact ACL,
+    # so a non-member must not receive a card aggregated from a garden's facts.
+    if recall_filter_enabled() and not _caller_sees_all_card_gardens(
+        entity_uri, req.scope, identity, conn, now
+    ):
         return None
     card = get_fresh_card(entity_uri, req.scope, identity.tenant_id, conn)
     if (
