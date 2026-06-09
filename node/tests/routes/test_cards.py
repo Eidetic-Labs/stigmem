@@ -105,8 +105,6 @@ class TestCardLifecycle:
         """The direct card route must not serve a card aggregated from a garden
         the caller cannot see (audit cards-route sibling of H1). Uses the
         projected garden via fact_garden_membership."""
-        import sqlite3
-
         # Write a fact (garden_id NULL), then promote it into "restricted" via
         # the membership side-table — the caller (anon) is not a member.
         r = client.post("/v1/facts", json=_fact(_BOB, "memory:secret", "topsecret-card-value"))

@@ -139,8 +139,6 @@ class TestAsOfDispatch:
         """Time-travel recall must not surface restricted-garden facts to a
         non-member — the as_of path has its own scoring loop and previously
         applied NO garden ACL (audit M3, as_of gap)."""
-        import sqlite3
-
         client = time_travel_client
         past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
         conn = sqlite3.connect(tmp_db)
