@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import stigmem_node.routes.recall.orchestration as orch
 import stigmem_node.routes.recall.ranking as ranking
+from stigmem_node.fact_visibility import ReadScope
 
 
 class _Cursor:
@@ -103,8 +104,13 @@ def test_caller_sees_all_card_gardens_uses_projected_garden(monkeypatch) -> None
 
 
 def test_filter_visible_gardens_drops_hidden(monkeypatch) -> None:
-    monkeypatch.setattr(ranking, "garden_acl_enforced", lambda: True)
-    monkeypatch.setattr(ranking, "caller_visible_gardens", lambda ident: frozenset({"VISIBLE"}))
+    monkeypatch.setattr(
+        ranking,
+        "caller_read_scope",
+        lambda identity: ReadScope(
+            tenant_id="t", enforce_gardens=True, visible_gardens=frozenset({"VISIBLE"})
+        ),
+    )
     facts = {
         "a": SimpleNamespace(garden_id=None),  # no garden → kept
         "b": SimpleNamespace(garden_id="VISIBLE"),  # member → kept
@@ -115,7 +121,13 @@ def test_filter_visible_gardens_drops_hidden(monkeypatch) -> None:
 
 
 def test_filter_visible_gardens_noop_when_disabled(monkeypatch) -> None:
-    monkeypatch.setattr(ranking, "garden_acl_enforced", lambda: False)
+    monkeypatch.setattr(
+        ranking,
+        "caller_read_scope",
+        lambda identity: ReadScope(
+            tenant_id="t", enforce_gardens=False, visible_gardens=frozenset()
+        ),
+    )
     facts = {"c": SimpleNamespace(garden_id="HIDDEN")}
     out = ranking._filter_visible_gardens(facts, _identity())
     assert set(out) == {"c"}  # unchanged when the recall garden filter is off

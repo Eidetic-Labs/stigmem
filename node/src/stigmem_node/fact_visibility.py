@@ -39,18 +39,23 @@ class ReadScope:
     enforce_gardens: bool
     visible_gardens: frozenset[str]
 
-    def fact_visible(self, *, tenant_id: Any, projected_garden_id: Any) -> bool:
-        """True if a fact with this tenant + projected garden is readable.
+    def garden_allows(self, projected_garden_id: Any) -> bool:
+        """Garden half of the visibility check, for surfaces that already enforce
+        tenant scoping in SQL (recall ranker, graph edges, synthesize rows).
 
-        ``projected_garden_id`` must be the COALESCE(fgm, facts) value, not the
-        raw ``facts.garden_id`` (a fact promoted via fact_garden_membership has
-        raw garden_id NULL).
+        True when the garden boundary is not enforced, the fact is garden-less,
+        or the caller is a member of the (projected) garden. ``projected_garden_id``
+        must be the COALESCE(fgm, facts) value, not raw ``facts.garden_id``.
         """
-        if tenant_id != self.tenant_id:
-            return False
         if self.enforce_gardens and projected_garden_id is not None:
             return projected_garden_id in self.visible_gardens
         return True
+
+    def fact_visible(self, *, tenant_id: Any, projected_garden_id: Any) -> bool:
+        """True if a fact with this tenant + projected garden is readable."""
+        if tenant_id != self.tenant_id:
+            return False
+        return self.garden_allows(projected_garden_id)
 
 
 def caller_read_scope(identity: Any) -> ReadScope:

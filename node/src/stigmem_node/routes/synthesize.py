@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import Identity, resolve_identity
 from ..db import db
-from ..memory_garden_acl_gate import caller_visible_gardens, garden_acl_enforced
+from ..fact_visibility import caller_read_scope
 from ..models.constants import VALID_SCOPES
 
 router = APIRouter(prefix="/v1/scopes", tags=["synthesis"])
@@ -123,13 +123,8 @@ def synthesize_scope(
     # Garden ACL (audit synthesize sibling of H1/M3): drop facts whose projected
     # garden the caller cannot see BEFORE aggregating, so the summary and stats
     # never expose restricted-garden content. Fail-closed + batched.
-    if garden_acl_enforced():
-        visible = caller_visible_gardens(identity)
-        rows = [
-            r
-            for r in rows
-            if r["projected_garden_id"] is None or r["projected_garden_id"] in visible
-        ]
+    read_scope = caller_read_scope(identity)
+    rows = [r for r in rows if read_scope.garden_allows(r["projected_garden_id"])]
 
     # Count occurrences per (entity, relation) among non-system facts to detect contradictions
     seen = _count_pair_occurrences(rows)
