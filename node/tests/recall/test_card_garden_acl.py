@@ -37,7 +37,7 @@ def _req() -> SimpleNamespace:
 
 def test_card_dropped_when_caller_cannot_see_a_contributing_garden(monkeypatch) -> None:
     monkeypatch.setattr(orch, "_is_tombstoned", lambda *a, **k: False)
-    monkeypatch.setattr(orch, "recall_filter_enabled", lambda: True)
+    monkeypatch.setattr(orch, "garden_acl_enforced", lambda: True)
     monkeypatch.setattr(orch, "caller_can_see_garden", lambda gid, ident: False)
     # The card must be dropped BEFORE materialization — guard get_fresh_card.
     reached = {"card": False}
@@ -55,7 +55,7 @@ def test_card_dropped_when_caller_cannot_see_a_contributing_garden(monkeypatch) 
 
 def test_card_built_when_caller_sees_all_gardens(monkeypatch) -> None:
     monkeypatch.setattr(orch, "_is_tombstoned", lambda *a, **k: False)
-    monkeypatch.setattr(orch, "recall_filter_enabled", lambda: True)
+    monkeypatch.setattr(orch, "garden_acl_enforced", lambda: True)
     monkeypatch.setattr(orch, "caller_can_see_garden", lambda gid, ident: True)
     card = SimpleNamespace(
         is_stale=False,
@@ -74,8 +74,8 @@ def test_card_built_when_caller_sees_all_gardens(monkeypatch) -> None:
 
 
 def test_filter_visible_gardens_drops_hidden(monkeypatch) -> None:
-    monkeypatch.setattr(ranking, "recall_filter_enabled", lambda: True)
-    monkeypatch.setattr(ranking, "caller_can_see_garden", lambda gid, ident: gid == "VISIBLE")
+    monkeypatch.setattr(ranking, "garden_acl_enforced", lambda: True)
+    monkeypatch.setattr(ranking, "caller_visible_gardens", lambda ident: frozenset({"VISIBLE"}))
     facts = {
         "a": SimpleNamespace(garden_id=None),  # no garden → kept
         "b": SimpleNamespace(garden_id="VISIBLE"),  # member → kept
@@ -86,7 +86,7 @@ def test_filter_visible_gardens_drops_hidden(monkeypatch) -> None:
 
 
 def test_filter_visible_gardens_noop_when_disabled(monkeypatch) -> None:
-    monkeypatch.setattr(ranking, "recall_filter_enabled", lambda: False)
+    monkeypatch.setattr(ranking, "garden_acl_enforced", lambda: False)
     facts = {"c": SimpleNamespace(garden_id="HIDDEN")}
     out = ranking._filter_visible_gardens(facts, _identity())
     assert set(out) == {"c"}  # unchanged when the recall garden filter is off

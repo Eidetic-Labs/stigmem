@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from ...auth import Identity
-from ...garden_acl import caller_can_see_garden
-from ...memory_garden_acl_gate import recall_filter_enabled
+from ...memory_garden_acl_gate import caller_visible_gardens, garden_acl_enforced
 from ...models.facts import FactRecord
 from ...models.recall import RecallWeights, ScoreBreakdown, ScoredFact
 from ...plugins import get_registry
@@ -18,15 +17,18 @@ def _filter_visible_gardens(
 
     Applied to the candidate set of EVERY recall path (live and time-travel/as_of)
     so the per-record garden check is a redundant backstop rather than the sole
-    gate. Uses the projected ``record.garden_id`` (consistent with the ranker).
-    No-op when the recall garden filter is disabled.
+    gate. Uses the projected ``record.garden_id`` (consistent with the ranker) and
+    a single batched membership lookup. No-op only when the boundary is not
+    enforced (``garden_acl_enforced`` is fail-closed: it stays on once gardens
+    exist, regardless of the operator flag).
     """
-    if not recall_filter_enabled():
+    if not garden_acl_enforced():
         return facts
+    visible = caller_visible_gardens(identity)
     return {
         k: v
         for k, v in facts.items()
-        if v.garden_id is None or caller_can_see_garden(v.garden_id, identity)
+        if v.garden_id is None or v.garden_id in visible
     }
 
 
@@ -47,6 +49,13 @@ def _score_candidates(
 
     results: list[ScoredFact] = []
 
+    # Garden ACL: resolve enforcement + the caller's visible gardens ONCE, then
+    # filter in-memory per fact (batched, audit M3 secure-path). This is a
+    # redundant backstop — the candidate set is pre-filtered by
+    # _filter_visible_gardens — but it keeps the ranker self-defending.
+    enforce_gardens = garden_acl_enforced()
+    visible_gardens = caller_visible_gardens(identity) if enforce_gardens else frozenset()
+
     for fact_id, record in all_facts.items():
         # Skip quarantined / fully-redacted
         if record.quarantine_status == "pending":
@@ -57,8 +66,8 @@ def _score_candidates(
 
         # Salience signal: garden tier (quarantine garden = 0, normal = 1)
         garden_factor = 1.0
-        if record.garden_id is not None and recall_filter_enabled():
-            if not caller_can_see_garden(record.garden_id, identity):
+        if enforce_gardens and record.garden_id is not None:
+            if record.garden_id not in visible_gardens:
                 continue  # hidden by ACL
             # Penalise quarantine-tagged gardens (§17)
             garden_factor = 0.5

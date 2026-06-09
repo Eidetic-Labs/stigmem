@@ -14,7 +14,7 @@ from ...card_materializer import CARD_MIN_CONFIDENCE, get_fresh_card
 from ...db import db
 from ...garden_acl import caller_can_see_garden
 from ...lifecycle.tombstone_cache import is_tombstoned as _is_tombstoned
-from ...memory_garden_acl_gate import recall_filter_enabled
+from ...memory_garden_acl_gate import garden_acl_enforced
 from ...metrics import FACT_READ, RECALL_RANKER_DURATION, observe_duration
 from ...models.constants import VALID_SCOPES
 from ...models.facts import FactRecord, FactValue
@@ -285,7 +285,7 @@ def _build_card_for_entity(
         return None
     # Garden ACL (audit H1): the card path bypasses the ranker's per-fact ACL,
     # so a non-member must not receive a card aggregated from a garden's facts.
-    if recall_filter_enabled() and not _caller_sees_all_card_gardens(
+    if garden_acl_enforced() and not _caller_sees_all_card_gardens(
         entity_uri, req.scope, identity, conn, now
     ):
         return None

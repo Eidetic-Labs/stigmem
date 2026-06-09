@@ -41,7 +41,7 @@ def memory_garden_acl_filtering_state() -> str:
     writes are guarded, but tenant-wide query, recall, graph, OIDC ceiling, and
     subscription-delivery filtering are not all enabled.
     """
-    if not recall_filter_enabled():
+    if not garden_acl_enforced():
         return "disabled"
     if oidc_permission_ceiling_enabled():
         return "enabled-full"
@@ -55,14 +55,53 @@ def gardens_with_members_exist() -> bool:
     return row is not None
 
 
+def garden_acl_enforced() -> bool:
+    """True when the garden access boundary must be enforced on read surfaces.
+
+    Fail-closed: enforced when the operator flag is on OR — regardless of the
+    flag — whenever any garden-with-members exists. The flag can never *disable*
+    the boundary once gardens exist; it can only be a no-op when there is nothing
+    to protect (no garden-with-members → every fact's ``garden_id`` is NULL, so
+    filtering changes nothing). Call once per request, not per fact.
+    """
+    if bool(_live_settings().memory_garden_acl_recall_filter):
+        return True
+    return gardens_with_members_exist()
+
+
+def caller_visible_gardens(identity: Any) -> frozenset[str]:
+    """Garden ids the caller is a member of — one query, for in-memory filtering.
+
+    Lets callers batch the membership check (O(1) per fact against this set)
+    instead of one DB lookup per candidate fact, so there is no performance
+    reason to ever disable the boundary.
+    """
+    entity_uri = getattr(identity, "entity_uri", None)
+    if entity_uri is None:
+        return frozenset()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT garden_id FROM garden_members WHERE entity_uri = ?",
+            (entity_uri,),
+        ).fetchall()
+    return frozenset(row["garden_id"] for row in rows)
+
+
 def warn_if_memory_garden_acl_filtering_disabled(logger: Logger) -> None:
-    """Warn at startup when gardens exist but recall ACL filtering is disabled."""
-    if recall_filter_enabled() or not gardens_with_members_exist():
+    """Inform at startup when the disable flag is set but ACL stays enforced.
+
+    The flag cannot create a leak: once gardens-with-members exist the boundary
+    is enforced regardless (see ``garden_acl_enforced``). This logs that the
+    operator's opt-out is being overridden for safety, rather than warning of a
+    leak that can no longer happen.
+    """
+    flag_off = not bool(_live_settings().memory_garden_acl_recall_filter)
+    if not flag_off or not gardens_with_members_exist():
         return
     logger.warning(
-        "SECURITY WARNING: Garden ACL recall filtering is DISABLED "
-        "(STIGMEM_MEMORY_GARDEN_ACL_RECALL_FILTER=false) while gardens with "
-        "members exist. Restricted gardens will leak into tenant-wide queries, "
-        "recall ranking, push subscriptions, and graph traversal. Re-enable it "
-        "unless you intend tenant-wide garden visibility."
+        "Garden ACL recall filtering flag is OFF "
+        "(STIGMEM_MEMORY_GARDEN_ACL_RECALL_FILTER=false) but gardens with members "
+        "exist, so the garden access boundary remains ENFORCED on recall, query, "
+        "graph, and subscription delivery (fail-closed: the flag cannot disable it "
+        "once gardens exist). Remove the override to silence this notice."
     )

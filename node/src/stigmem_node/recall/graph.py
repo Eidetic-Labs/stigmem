@@ -144,18 +144,20 @@ def _fetch_incident_edges(
 
     rows = conn.execute(sql, params).fetchall()
 
+    # Garden ACL (§17.3): resolve enforcement + the caller's visible gardens ONCE
+    # (batched, audit M3 secure-path), then filter edges in-memory. Fail-closed:
+    # garden_acl_enforced stays on once gardens exist regardless of the flag.
+    from ..memory_garden_acl_gate import caller_visible_gardens, garden_acl_enforced
+
+    enforce_gardens = identity is not None and garden_acl_enforced()
+    visible_gardens = caller_visible_gardens(identity) if enforce_gardens else frozenset()
+
     filtered: list[Any] = []
     for row in rows:
         # Garden ACL (§17.3): hide edges in gardens the caller cannot see
         garden_id = row["garden_id"]
-        if garden_id is not None and identity is not None:
-            from ..memory_garden_acl_gate import recall_filter_enabled
-
-            if recall_filter_enabled():
-                from ..garden_acl import caller_can_see_garden
-
-                if not caller_can_see_garden(garden_id, identity):
-                    continue
+        if enforce_gardens and garden_id is not None and garden_id not in visible_gardens:
+            continue
 
         # Federation filter (§19.5.2): edges from remote nodes require federate perm
         received_from = row["received_from"]

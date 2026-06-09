@@ -13,7 +13,7 @@ from ...auth import Identity, resolve_identity
 from ...db import db
 from ...entity_normalizer import NormalizationError, normalize_entity_uri
 from ...garden_acl import get_garden_by_garden_uri, require_garden_read
-from ...memory_garden_acl_gate import recall_filter_enabled
+from ...memory_garden_acl_gate import garden_acl_enforced
 from ...metrics import FACT_READ
 from ...models.constants import VALID_SCOPES
 from ...models.facts import FactRecord, QueryResponse, row_to_record
@@ -503,7 +503,7 @@ def _resolve_garden_visibility(
     """Return query visibility mode, exact garden id, and visible garden id set."""
     if garden is not None:
         return _GARDEN_VISIBILITY_EXACT, garden["id"], []
-    if not recall_filter_enabled():
+    if not garden_acl_enforced():
         return _GARDEN_VISIBILITY_NONE, None, []
 
     visible_garden_ids = [
