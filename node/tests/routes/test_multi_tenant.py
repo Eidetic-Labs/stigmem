@@ -219,6 +219,39 @@ def test_tenant_a_fact_invisible_to_tenant_b(two_tenants: tuple) -> None:
     )
 
 
+def test_lint_is_tenant_scoped(two_tenants: tuple) -> None:
+    """POST /v1/lint counts and reports only the caller's tenant (audit H4)."""
+    client, key_a, key_b = two_tenants
+
+    for key, src, ent, val in [
+        (key_a, "agent:alice", "stigmem://test/alice-fact", "alice-only"),
+        (key_b, "agent:bob", "stigmem://test/bob-secret", "bob-only"),
+    ]:
+        resp = client.post(
+            "/v1/facts",
+            json={
+                "entity": ent,
+                "relation": "secret:value",
+                "value": {"type": "string", "v": val},
+                "source": src,
+                "scope": "company",
+            },
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp.status_code == 201, resp.text
+
+    # Tenant A lints scope "company" — must see only its own fact, not tenant B's.
+    r = client.post(
+        "/v1/lint",
+        json={"scope": "company"},
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["fact_count"] == 1  # alice's fact only, not bob's
+    assert "bob-secret" not in r.text
+    assert "bob-only" not in r.text
+
+
 def test_tenant_b_query_returns_empty(two_tenants: tuple) -> None:
     """GET /v1/facts query for Tenant B returns no Tenant A facts."""
     client, key_a, key_b = two_tenants
