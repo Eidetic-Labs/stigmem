@@ -367,9 +367,12 @@ def get_boot_stub(
 
 def _derive_agent_role(agent_id: str, conn: Any) -> str:
     """Best-effort: look up a human-readable role for agent_id."""
+    # Escape LIKE metacharacters so a caller-supplied agent_id cannot inject
+    # wildcards (audit F-10): "%"/"_" must match literally, not every row.
+    escaped = agent_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     row = conn.execute(
-        "SELECT entity_uri FROM api_keys WHERE entity_uri LIKE ? LIMIT 1",
-        (f"%{agent_id}%",),
+        "SELECT entity_uri FROM api_keys WHERE entity_uri LIKE ? ESCAPE '\\' LIMIT 1",
+        (f"%{escaped}%",),
     ).fetchone()
     if row:
         uri: str = row["entity_uri"]
