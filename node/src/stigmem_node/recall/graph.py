@@ -149,13 +149,17 @@ def _fetch_incident_edges(
     # Anonymous (identity is None) callers skip garden filtering, as before.
     from ..fact_visibility import caller_read_scope
 
-    scope = caller_read_scope(identity) if identity is not None else None
+    read_scope = caller_read_scope(identity) if identity is not None else None
 
     filtered: list[Any] = []
     for row in rows:
         # Garden ACL (§17.3): hide edges in gardens the caller cannot see
         garden_id = row["garden_id"]
-        if scope is not None and garden_id is not None and not scope.garden_allows(garden_id):
+        if (
+            read_scope is not None
+            and garden_id is not None
+            and not read_scope.garden_allows(garden_id)
+        ):
             continue
 
         # Federation filter (§19.5.2): edges from remote nodes require federate perm
