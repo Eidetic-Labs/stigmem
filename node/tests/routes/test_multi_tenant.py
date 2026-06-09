@@ -288,6 +288,32 @@ def test_synthesize_is_tenant_scoped(two_tenants: tuple) -> None:
     assert "bob-only-syn" not in r.text
 
 
+def test_get_intent_is_tenant_scoped(two_tenants: tuple) -> None:
+    """GET /v1/intents/{id} must not reconstruct another tenant's intent
+    (cross-tenant sibling, found by the adversarial review)."""
+    client, key_a, key_b = two_tenants
+
+    create = client.post(
+        "/v1/intents",
+        json={
+            "id": "intent:bob-secret",
+            "from": "stigmem://test/agent/bob",
+            "to": ["stigmem://test/agent/carol"],
+            "goal": "bob-secret-intent-goal",
+        },
+        headers={"Authorization": f"Bearer {key_b}"},
+    )
+    assert create.status_code in (200, 201), create.text
+
+    # Tenant A cannot read tenant B's intent.
+    r = client.get("/v1/intents/intent:bob-secret", headers={"Authorization": f"Bearer {key_a}"})
+    assert r.status_code == 404
+    assert "bob-secret-intent-goal" not in r.text
+    # Tenant B can read its own.
+    rb = client.get("/v1/intents/intent:bob-secret", headers={"Authorization": f"Bearer {key_b}"})
+    assert rb.status_code == 200
+
+
 def test_tenant_b_query_returns_empty(two_tenants: tuple) -> None:
     """GET /v1/facts query for Tenant B returns no Tenant A facts."""
     client, key_a, key_b = two_tenants
