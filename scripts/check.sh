@@ -116,6 +116,7 @@ run_python() {
   timed_run python-constant-time uv run python scripts/check_constant_time.py node/src/ sdks/stigmem-py/src/
   timed_run python-admin-determination uv run python scripts/check_admin_determination_consistency.py
   timed_run python-tenant-resolution uv run python scripts/check_tenant_resolution_consistency.py
+  timed_run python-fact-query-tenant-scope uv run python scripts/check_fact_query_tenant_scope.py
   timed_run python-plugin-readme-sections uv run python scripts/check_plugin_readme_sections.py
   timed_run python-plugin-manifest-version uv run python scripts/check_plugin_manifest_version_consistency.py
   timed_run python-plugin-readme-pypi-consistency uv run python scripts/check_plugin_readme_pypi_consistency.py
