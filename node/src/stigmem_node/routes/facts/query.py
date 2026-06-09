@@ -93,7 +93,8 @@ _AS_OF_SELECT_SQL = (
     " )"
     " AND (? IS NULL"
     "      OR f.entity = ?"
-    "      OR f.entity IN (SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ?))"
+    "      OR f.entity IN ("
+    "          SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ? AND tenant_id = ?))"
     " AND (? IS NULL OR f.relation = ?)"
     " AND (? IS NULL OR f.scope = ?)"
     " AND (? IS NULL OR f.id > ?)"
@@ -133,11 +134,13 @@ _FACT_QUERY_SQL = (
     " AND (? IS NULL OR f.attested = ?)"
     " AND (? IS NULL"
     "      OR f.entity = ?"
-    "      OR f.entity IN (SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ?))"
+    "      OR f.entity IN ("
+    "          SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ? AND tenant_id = ?))"
     " AND (? IS NULL OR f.relation = ?)"
     " AND (? IS NULL"
     "      OR f.source = ?"
-    "      OR f.source IN (SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ?))"
+    "      OR f.source IN ("
+    "          SELECT raw_uri FROM entity_aliases WHERE canonical_uri = ? AND tenant_id = ?))"
     " AND (? IS NULL OR f.scope = ?)"
     " AND (? IS NULL OR f.timestamp > ?)"
     " AND (? IS NULL OR f.id > ?)"
@@ -184,6 +187,7 @@ def _build_as_of_params(
         entity_p,
         entity_p,
         entity_p,
+        tenant_id,  # entity-alias subquery tenant scope
         relation_p,
         relation_p,
         scope_p,
@@ -576,11 +580,13 @@ def _build_query_params(  # noqa: PLR0913 — narrow internal helper, keeps quer
         normalised_entity,
         normalised_entity,
         normalised_entity,
+        identity.tenant_id,  # entity-alias subquery tenant scope
         relation or None,
         relation or None,
         normalised_source,
         normalised_source,
         normalised_source,
+        identity.tenant_id,  # source-alias subquery tenant scope
         scope or None,
         scope or None,
         after or None,

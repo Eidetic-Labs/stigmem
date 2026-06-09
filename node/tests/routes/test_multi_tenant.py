@@ -397,6 +397,38 @@ def test_instruction_manifest_is_tenant_isolated(
         db_mod.settings = original
 
 
+def test_entity_aliases_are_tenant_isolated(two_tenants: tuple) -> None:
+    """A semantic alias registered by one tenant must not be listable, deletable,
+    or resolvable by another (adversarial entity_aliases / resolver Layer-2)."""
+    client, key_a, key_b = two_tenants
+
+    ra = client.post(
+        "/v1/aliases",
+        json={"raw_uri": "stigmem://test/agent/a-old", "canonical_uri": "stigmem://test/agent/a"},
+        headers={"Authorization": f"Bearer {key_a}"},
+    )
+    assert ra.status_code == 201, ra.text
+    raw = ra.json()["raw_uri"]  # normalized form
+
+    # Tenant B does not see it; tenant A does.
+    lb = client.get("/v1/aliases", headers={"Authorization": f"Bearer {key_b}"})
+    assert lb.status_code == 200
+    assert all(r["raw_uri"] != raw for r in lb.json())
+    la = client.get("/v1/aliases", headers={"Authorization": f"Bearer {key_a}"})
+    assert any(r["raw_uri"] == raw for r in la.json())
+
+    # Tenant B cannot delete tenant A's alias.
+    from urllib.parse import quote
+
+    db = client.delete(
+        f"/v1/aliases/{quote(raw, safe='')}", headers={"Authorization": f"Bearer {key_b}"}
+    )
+    assert db.status_code == 404
+    # Still present for tenant A.
+    la2 = client.get("/v1/aliases", headers={"Authorization": f"Bearer {key_a}"})
+    assert any(r["raw_uri"] == raw for r in la2.json())
+
+
 def test_entity_resolve_is_tenant_scoped(two_tenants: tuple) -> None:
     """GET /v1/entities/resolve must not confirm existence of, or enumerate,
     another tenant's entities (adversarial F-H4-S3 cross-tenant enumeration)."""

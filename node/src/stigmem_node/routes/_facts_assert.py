@@ -78,7 +78,7 @@ def _verify_or_require_attestation(req: AssertRequest, identity: Identity) -> st
     return None
 
 
-def _normalise_and_alias_uris(req: AssertRequest) -> tuple[str, str]:
+def _normalise_and_alias_uris(req: AssertRequest, tenant_id: str) -> tuple[str, str]:
     """Layer-1 strict normalisation + Layer-2 alias lookup. Emits deprecation warnings."""
     try:
         entity = normalize_entity_uri(req.entity)
@@ -103,9 +103,13 @@ def _normalise_and_alias_uris(req: AssertRequest) -> tuple[str, str]:
             file=sys.stderr,
         )
 
-    # Layer 2: resolve user-defined semantic aliases (spec §2.6.6) on canonical forms.
+    # Layer 2: resolve user-defined semantic aliases (spec §2.6.6) on canonical
+    # forms, scoped to the caller's tenant.
     with db() as _alias_conn:
-        return resolve_entity(_alias_conn, entity), resolve_entity(_alias_conn, source)
+        return (
+            resolve_entity(_alias_conn, entity, tenant_id),
+            resolve_entity(_alias_conn, source, tenant_id),
+        )
 
 
 def _resolve_garden_for_assert(req: AssertRequest, identity: Identity) -> Any:
@@ -307,7 +311,7 @@ def assert_fact_impl(
         )
 
     attested_key_id = _verify_or_require_attestation(req, identity)
-    entity, source = _normalise_and_alias_uris(req)
+    entity, source = _normalise_and_alias_uris(req, identity.tenant_id)
 
     # P-INJ-1: a fact's source is attested when it matches the writing principal.
     # Mismatches are flagged (attested=False); enforce mode rejects them.

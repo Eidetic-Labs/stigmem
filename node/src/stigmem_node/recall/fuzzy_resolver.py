@@ -24,15 +24,17 @@ from typing import Any
 from ..utility.entity_normalizer import NormalizationError, normalize_entity_uri
 
 
-def resolve_entity(conn: sqlite3.Connection, normalized_uri: str) -> str:
+def resolve_entity(
+    conn: sqlite3.Connection, normalized_uri: str, tenant_id: str = "default"
+) -> str:
     """Layer 2 alias lookup. Input MUST already be Layer 1–normalized.
 
-    Returns canonical_uri from entity_aliases if a registered alias exists,
-    otherwise returns normalized_uri unchanged (Layer 3 passthrough).
+    Returns canonical_uri from the caller's tenant aliases if a registered alias
+    exists, otherwise returns normalized_uri unchanged (Layer 3 passthrough).
     """
     row = conn.execute(
-        "SELECT canonical_uri FROM entity_aliases WHERE raw_uri = ?",
-        (normalized_uri,),
+        "SELECT canonical_uri FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+        (normalized_uri, tenant_id),
     ).fetchone()
     return str(row["canonical_uri"]) if row else normalized_uri
 
@@ -43,11 +45,13 @@ def register_alias(
     canonical_uri: str,
     *,
     kind: str = "user",
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Register or replace a semantic alias (raw_uri resolves to canonical_uri).
 
     Both URIs are Layer 1–normalized before storage so the caller need not
-    pre-normalize them. Raises ValueError on empty input or identical endpoints.
+    pre-normalize them. The alias is scoped to ``tenant_id``. Raises ValueError
+    on empty input or identical endpoints.
 
     Returns the stored alias record as a plain dict.
     """
@@ -62,9 +66,9 @@ def register_alias(
 
     now = datetime.now(UTC).isoformat()
     conn.execute(
-        """INSERT OR REPLACE INTO entity_aliases (raw_uri, canonical_uri, kind, created_at)
-           VALUES (?, ?, ?, ?)""",
-        (norm_raw, norm_canonical, kind, now),
+        "INSERT OR REPLACE INTO entity_aliases"
+        " (raw_uri, canonical_uri, kind, created_at, tenant_id) VALUES (?, ?, ?, ?, ?)",
+        (norm_raw, norm_canonical, kind, now, tenant_id),
     )
     return {
         "raw_uri": norm_raw,

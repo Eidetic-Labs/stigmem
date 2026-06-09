@@ -35,7 +35,9 @@ def create_alias(
 
     with db() as conn:
         try:
-            result = register_alias(conn, req.raw_uri, req.canonical_uri, kind="user")
+            result = register_alias(
+                conn, req.raw_uri, req.canonical_uri, kind="user", tenant_id=identity.tenant_id
+            )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -62,8 +64,9 @@ def list_aliases(
             detail=f"kind must be one of {sorted(_VALID_KINDS)}",
         )
 
-    conditions: list[str] = []
-    params: list[Any] = []
+    # Always scope to the caller's tenant (aliases are tenant-isolated).
+    conditions: list[str] = ["tenant_id = ?"]
+    params: list[Any] = [identity.tenant_id]
     if kind:
         conditions.append("kind = ?")
         params.append(kind)
@@ -71,7 +74,7 @@ def list_aliases(
         conditions.append("canonical_uri = ?")
         params.append(canonical_uri)
 
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    where = "WHERE " + " AND ".join(conditions)
 
     with db() as conn:
         rows = conn.execute(
@@ -98,7 +101,8 @@ def delete_alias(
 
     with db() as conn:
         row = conn.execute(
-            "SELECT kind FROM entity_aliases WHERE raw_uri = ?", (decoded,)
+            "SELECT kind FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+            (decoded, identity.tenant_id),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="alias not found")
@@ -110,4 +114,7 @@ def delete_alias(
                     "and cannot be deleted via API"
                 ),
             )
-        conn.execute("DELETE FROM entity_aliases WHERE raw_uri = ?", (decoded,))
+        conn.execute(
+            "DELETE FROM entity_aliases WHERE raw_uri = ? AND tenant_id = ?",
+            (decoded, identity.tenant_id),
+        )
