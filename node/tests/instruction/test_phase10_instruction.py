@@ -619,6 +619,36 @@ class TestInstructionContentTenantScoping:
         assert content_other == "OTHER-CONTENT"
 
 
+class TestManifestFactIntegrity:
+    """Manifest-as-fact is written with tenant_id + interpret_as + CID (audit M4)."""
+
+    def test_manifest_fact_has_tenant_interpret_and_cid(
+        self, admin_client: TestClient, tmp_db: str
+    ) -> None:
+        from stigmem_node.cid import compute_cid_from_row
+
+        agent_id = str(uuid.uuid4())
+        r = admin_client.put(f"/v1/agents/{agent_id}/instruction-manifest", json=_manifest_body())
+        assert r.status_code == 200
+        fact_uri = r.json()["fact_uri"]
+
+        conn = sqlite3.connect(tmp_db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM facts WHERE entity = ? AND relation = 'instruction:manifest'"
+            " ORDER BY timestamp DESC LIMIT 1",
+            (fact_uri,),
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row["tenant_id"] == "default"  # admin_client's tenant, not a column default
+        assert row["interpret_as"] == "instruction"
+        assert row["cid"] is not None
+        # Read-path integrity: the stored CID recomputes from the row body.
+        assert compute_cid_from_row(row) == row["cid"]
+
+
 # ---------------------------------------------------------------------------
 # Coverage report
 # ---------------------------------------------------------------------------

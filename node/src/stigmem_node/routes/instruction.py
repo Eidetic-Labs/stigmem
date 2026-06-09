@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import PlainTextResponse
 
 from ..auth import Identity, resolve_identity
+from ..cid import compute_cid
 from ..db import db
 from ..models.instruction import (
     AuditSubmitRequest,
@@ -513,14 +514,27 @@ def publish_instruction_manifest(
         # Invalidate boot stub cache for all profiles
         conn.execute("DELETE FROM boot_stubs WHERE agent_id = ?", (agent_id,))
 
-        # Store the manifest itself as a fact in the instruction: scope
+        # Store the manifest itself as a fact in the instruction: scope.
+        # Stamp the caller's tenant, bind interpret_as, and persist a CID so the
+        # manifest fact is tenant-isolated and read-path integrity-verifiable —
+        # the raw insert previously omitted all three (audit M4).
         fact_id = str(uuid.uuid4())
         ts = datetime.now(UTC).isoformat()
+        manifest_cid = compute_cid(
+            entity=fact_uri,
+            relation="instruction:manifest",
+            value_type="text",
+            value_v=entries_json,
+            source=identity.entity_uri,
+            scope="local",
+            confidence=1.0,
+            interpret_as="instruction",
+        )
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, confidence, scope,
-                timestamp, valid_until, garden_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                timestamp, valid_until, garden_id, tenant_id, interpret_as, cid)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 fact_uri,
@@ -533,6 +547,9 @@ def publish_instruction_manifest(
                 ts,
                 None,
                 None,
+                identity.tenant_id,
+                "instruction",
+                manifest_cid,
             ),
         )
 
