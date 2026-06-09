@@ -279,7 +279,16 @@ def register_static_key(
             detail="raw_key already exists; generate a new key value",
         )
 
+    # Minting a key in a tenant other than the caller's own is a cross-tenant
+    # privilege escalation (audit M2): a tenant-scoped admin could otherwise mint
+    # an admin key in any other tenant. Require the elevated cross-cutting
+    # admin:federation capability to cross the tenant boundary; default same-tenant.
     target_tenant = body.tenant_id or identity.tenant_id
+    if target_tenant != identity.tenant_id and not identity.can_admin_federation():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="cannot mint keys in a tenant other than your own",
+        )
 
     # Persist via the existing helper.  Caller-provided raw_key, never
     # auto-generated.
