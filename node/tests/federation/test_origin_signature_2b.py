@@ -156,3 +156,86 @@ def test_canonical_tuple_is_order_insensitive():
                                origin_allowed_scopes=["public", "team"],
                                origin_allowed_tenants=["a", "b"], valid_until=None)
     assert a == b
+
+
+def _insert_peer(conn, peer_id, node_id, **cols):
+    base = {
+        "id": peer_id, "node_id": node_id, "node_url": "http://x",
+        "federation_pubkey": "PUB", "allowed_scopes": "[]", "status": "active",
+        "declaration_sig": "SIG", "signed_at": "2026-01-01T00:00:00Z",
+    }
+    base.update(cols)
+    keys = ", ".join(base)
+    ph = ", ".join("?" * len(base))
+    conn.execute(f"INSERT INTO peers ({keys}) VALUES ({ph})", tuple(base.values()))  # noqa: S608
+
+
+def test_origin_tenant_explicit_mapping_wins(client):
+    from stigmem_node.db import db
+    from stigmem_node.federation.peer_policy import resolve_origin_tenant_for_peer
+    with db() as conn:
+        _insert_peer(conn, "pt1", "stigmem:node:t1")
+        conn.execute("INSERT INTO peer_tenant_map (peer_id, origin_tenant, local_tenant) "
+                     "VALUES ('pt1', 'acme', 'tenant-acme')")
+        conn.commit()
+        peer = conn.execute("SELECT * FROM peers WHERE id='pt1'").fetchone()
+        assert resolve_origin_tenant_for_peer(peer, "acme", conn) == "tenant-acme"
+
+
+def test_origin_tenant_unmapped_nondefault_denied(client):
+    import pytest
+
+    from stigmem_node.db import db
+    from stigmem_node.federation.peer_policy import PeerPolicyError, resolve_origin_tenant_for_peer
+    with db() as conn:
+        _insert_peer(conn, "pt2", "stigmem:node:t2")
+        conn.commit()
+        peer = conn.execute("SELECT * FROM peers WHERE id='pt2'").fetchone()
+        with pytest.raises(PeerPolicyError):
+            resolve_origin_tenant_for_peer(peer, "acme", conn)
+
+
+def test_origin_tenant_default_falls_back_on_single_tenant_node(client):
+    """No map rows + origin_tenant='default' on a single-tenant node -> Phase-1 pin."""
+    from stigmem_node.db import db
+    from stigmem_node.federation.peer_policy import resolve_origin_tenant_for_peer
+    with db() as conn:
+        _insert_peer(conn, "pt3", "stigmem:node:t3", ingest_tenant="default")
+        conn.commit()
+        peer = conn.execute("SELECT * FROM peers WHERE id='pt3'").fetchone()
+        assert resolve_origin_tenant_for_peer(peer, "default", conn) == "default"
+
+
+def test_origin_tenant_default_denied_when_map_exists(client):
+    import pytest
+
+    from stigmem_node.db import db
+    from stigmem_node.federation.peer_policy import PeerPolicyError, resolve_origin_tenant_for_peer
+    with db() as conn:
+        _insert_peer(conn, "pt4", "stigmem:node:t4", ingest_tenant="default")
+        conn.execute("INSERT INTO peer_tenant_map (peer_id, origin_tenant, local_tenant) "
+                     "VALUES ('pt4', 'acme', 'tenant-acme')")
+        conn.commit()
+        peer = conn.execute("SELECT * FROM peers WHERE id='pt4'").fetchone()
+        with pytest.raises(PeerPolicyError):
+            resolve_origin_tenant_for_peer(peer, "default", conn)
+
+
+def test_origin_tenant_default_denied_on_multitenant_node(client, monkeypatch):
+    """F-4 security crux: on a multi-tenant node an unmapped origin_tenant='default'
+    is DENIED — never silently landing in the default tenant. The probe is imported
+    function-locally from ..multi_tenant_gate, so patch it at that source module."""
+    import pytest
+
+    from stigmem_node.db import db
+    from stigmem_node.federation.peer_policy import PeerPolicyError, resolve_origin_tenant_for_peer
+
+    monkeypatch.setattr(
+        "stigmem_node.multi_tenant_gate.multi_tenant_plugin_registered", lambda: True
+    )
+    with db() as conn:
+        _insert_peer(conn, "pt5", "stigmem:node:t5", ingest_tenant="default")
+        conn.commit()
+        peer = conn.execute("SELECT * FROM peers WHERE id='pt5'").fetchone()
+        with pytest.raises(PeerPolicyError):
+            resolve_origin_tenant_for_peer(peer, "default", conn)
