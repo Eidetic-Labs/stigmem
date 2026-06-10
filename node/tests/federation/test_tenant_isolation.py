@@ -255,7 +255,7 @@ def test_unconfigured_peer_pull_serves_default_facts(fed_node: FedNode) -> None:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200, r.text
-    returned_ids = {f["id"] for f in r.json()["facts"]}
+    returned_ids = {e["fact"]["id"] for e in r.json()["facts"]}
     assert default_id in returned_ids
 
 
@@ -292,5 +292,5 @@ def test_explicit_default_pull_tenant_serves_default_facts(fed_node: FedNode) ->
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200, r.text
-    returned_ids = {f["id"] for f in r.json()["facts"]}
+    returned_ids = {e["fact"]["id"] for e in r.json()["facts"]}
     assert default_id in returned_ids

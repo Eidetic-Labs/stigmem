@@ -40,7 +40,7 @@ from ..models.tombstones import (
     TombstoneRecord,
     TombstoneRevocationRecord,
 )
-from ..net_util import assert_safe_url
+from ..net_util import assert_safe_url, node_url_is_loopback
 from ..plugins import Deny, TenantContext, get_registry
 
 logger = logging.getLogger("stigmem.federation")
@@ -240,7 +240,20 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
     # Try to fetch the peer's manifest from their well-known endpoint
     manifest_obj = None
     try:
-        assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
+        # The SSRF guard normally blocks loopback/private addresses. We skip
+        # assert_safe_url for this approval-time manifest fetch ONLY under the
+        # conjunction (federation_insecure dev mode AND a literal loopback host),
+        # so a loopback dev cluster can bind the peer's entity_uri (Phase 2a) —
+        # without the skip, assert_safe_url rejects the loopback URL, the binding
+        # never fires, resolve_origin_key fails, and no v2 fact federates between
+        # loopback nodes. In production (federation_insecure off) the guard is
+        # always enforced. Note: the registration-time well-known fetch in
+        # _make_federation_client is unguarded (no assert_safe_url at all) — it is
+        # NOT flag+loopback-gated like this fetch, so do not treat the two as the
+        # same mechanism.
+        _loopback_dev = _fed.settings.federation_insecure and node_url_is_loopback(node_url)
+        if not _loopback_dev:
+            assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{node_url}/.well-known/stigmem-manifest.json",

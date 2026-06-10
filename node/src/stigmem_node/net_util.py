@@ -5,10 +5,10 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-__all__ = ["assert_safe_url"]
+__all__ = ["assert_safe_url", "node_url_is_loopback"]
 
 if TYPE_CHECKING:
-    from .utility.net_util import assert_safe_url
+    from .utility.net_util import assert_safe_url, node_url_is_loopback
 else:
     from .utility import net_util as _impl
 

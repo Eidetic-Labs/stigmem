@@ -191,6 +191,47 @@ def _wait_healthy(base_url: str, name: str, timeout: float = STARTUP_TIMEOUT_S) 
     raise RuntimeError(f"{name} did not become healthy within {timeout}s")
 
 
+def _publish_manifest(
+    node_url: str,
+    federate_key: str,
+    node_id: str,
+    pub_b64: str,
+    priv_b64: str,
+) -> None:
+    """Publish this node's OWN OrgManifest so peers can bind its entity_uri (Phase 2a/2b).
+
+    The manifest's ``entity_uri`` equals the node's well-known entity_uri (``node_url``
+    by default), its ``public_key`` equals this node's federation key (required by the
+    2a key-unification PUT guard), and ``entities`` includes the node_id so that the
+    registrar's approval-time binding (``manifest.public_key == peer.federation_pubkey``
+    AND ``node_id in manifest.entities``) fires and sets ``peers.entity_uri``. Without a
+    bound entity_uri, ``resolve_origin_key`` fails and zero v2 facts federate.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from stigmem_node.identity.key_rotation import generate_key_id
+    from stigmem_node.identity.manifest import OrgManifest, manifest_to_dict, sign_manifest
+
+    priv = Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(_pad(priv_b64)))
+    now = datetime.now(UTC)
+    manifest = OrgManifest(
+        entity_uri=node_url,
+        key_id=generate_key_id(priv.public_key()),
+        public_key=pub_b64,
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(days=365)).isoformat(),
+        entities=[node_url, node_id],
+    )
+    sign_manifest(manifest, priv)
+    resp = httpx.put(
+        f"{node_url}/v1/federation/manifest",
+        json=manifest_to_dict(manifest),
+        headers={"Authorization": f"Bearer {federate_key}"},
+        timeout=10.0,
+    )
+    assert resp.status_code == 200, f"manifest publish failed: {resp.status_code} {resp.text}"
+
+
 def _register_peer(
     registrar_url: str,
     federate_key: str,
@@ -355,6 +396,18 @@ def cluster(tmp_path_factory) -> Generator[list[NodeInfo], None, None]:
         # Phase 2: Wait for all nodes healthy
         for node in nodes:
             _wait_healthy(node.host_url, node.name)
+
+        # Phase 2.5 (Phase 2a/2b): each node publishes its own manifest so that
+        # approval-time entity_uri binding fires on every registrar — a precondition
+        # for resolve_origin_key on the v2 ingest path. Without this, no fact federates.
+        for node in nodes:
+            _publish_manifest(
+                node_url=node.host_url,
+                federate_key=node.federate_key,
+                node_id=node.node_id,
+                pub_b64=node.pub_b64,
+                priv_b64=node.priv_b64,
+            )
 
         # Phase 3: Register full-mesh peers
         for registrar in nodes:

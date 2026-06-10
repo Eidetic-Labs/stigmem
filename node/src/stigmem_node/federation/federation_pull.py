@@ -23,7 +23,13 @@ from .federation_ingest import (
     ingest_fact,
     write_audit_log,
 )
-from .peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
+from .origin_identity import OriginIdentityError, resolve_origin_key
+from .origin_signature import OriginSignatureError, verify_origin_signature
+from .peer_policy import (
+    PeerPolicyError,
+    resolve_ingest_tenant_for_peer,
+    resolve_origin_tenant_for_peer,
+)
 from .peer_token import create_peer_token
 from .tls import check_peer_san
 
@@ -120,48 +126,115 @@ async def pull_from_peer_once(
 
         data = resp.json()
 
-        # F-FED-INGEST-TENANT: resolve the local tenant this peer's inbound facts
-        # are stamped into (fail-closed per peer policy). A misconfigured peer
-        # (non-default tenant without the multi-tenant plugin, or an unpinned peer
-        # on a multi-tenant node) yields a PeerPolicyError — skip this whole page
-        # rather than silently land facts in 'default'.
-        try:
-            with db() as conn:
-                tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
-        except PeerPolicyError as exc:
+        # F-FED-2b: clean break — only the v2 signed-origin envelope is consumed
+        # (no v1 interop). A non-v2 page is dropped wholesale; advance no cursor.
+        if data.get("v") != 2:
             logger.warning(
-                "Skipping pull from %s: peer tenant policy unsafe: %s",
+                "Pull from %s returned non-v2 envelope (v=%r); dropping page",
                 peer["node_id"],
-                exc,
+                data.get("v"),
             )
-            write_audit_log(
-                peer["node_id"],
-                "federation_tenant_policy_rejected",
-                {"reason": str(exc)},
-            )
-            return cursor  # fail-closed: ingest nothing from a mis-pinned peer
+            return cursor
 
-        # origin_allowed_scopes = peer's registered declaration scope (spec §6.8.1).
-        # These fields are internal and MUST NOT be re-replicated (§3.1), so we
-        # derive them from the peer registry rather than reading from the fact payload.
+        # §3.1 (Phase 2b rewrite): origin fields (origin_tenant, origin_allowed_scopes,
+        # origin_allowed_tenants, origin_node_id) now arrive ON THE WIRE rather than being
+        # derived from the local peer registry. This is safe because each entry carries an
+        # origin signature that is cryptographically verified below — trust in these fields
+        # moved from "registry-derived (the receiver guesses)" to "verified (the origin
+        # asserts and signs)". The per-fact ordered checks mirror the push path exactly:
+        # cid → origin==sender → resolve key → verify sig → scope-in-grant → resolve tenant.
+        sender_node_id = peer["node_id"]
         ingested = 0
-        for fact in data.get("facts", []):
+        for entry in data.get("facts", []):
+            if not isinstance(entry, dict):
+                logger.warning("Pull from %s: malformed entry (not an object)", sender_node_id)
+                continue
+            fact = entry.get("fact")
+            origin = entry.get("origin")
+            origin_sig = entry.get("origin_sig")
+            if not isinstance(fact, dict) or not isinstance(origin, dict) or not origin_sig:
+                logger.warning(
+                    "Pull from %s: entry missing fact/origin/origin_sig", sender_node_id
+                )
+                continue
+            fact_scope = fact.get("scope", "")
+
+            # 0. fact id present (later steps sign over / index by it)
+            if not fact.get("id"):
+                logger.warning("Pull from %s: skip fact (id_required)", sender_node_id)
+                continue
+            # 1. cid present
+            if not fact.get("cid"):
+                logger.warning("Pull from %s: skip fact (cid_required)", sender_node_id)
+                continue
+            # 2. origin node_id == authenticated sender
+            if origin.get("node_id") != sender_node_id:
+                logger.warning("Pull from %s: skip fact (origin_not_sender)", sender_node_id)
+                continue
+            # 3. resolve the origin's signing key set (regardless of trust_mode)
+            try:
+                keys = resolve_origin_key(origin["node_id"])
+            except OriginIdentityError as exc:
+                logger.warning(
+                    "Pull from %s: skip fact (origin_unresolvable): %s", sender_node_id, exc
+                )
+                continue
+            # 4. verify origin signature
+            try:
+                verify_origin_signature(
+                    origin_sig,
+                    fact_id=fact["id"],
+                    cid=fact["cid"],
+                    origin=origin,
+                    valid_until=fact.get("valid_until"),
+                    allowed_pubkeys=keys,
+                )
+            except OriginSignatureError as exc:
+                logger.warning(
+                    "Pull from %s: skip fact (origin_sig_invalid): %s", sender_node_id, exc
+                )
+                continue
+            # 5. fact scope must be inside the origin's granted scopes
+            if fact_scope not in origin.get("allowed_scopes", []):
+                logger.warning(
+                    "Pull from %s: skip fact (scope_not_in_origin_grant)", sender_node_id
+                )
+                continue
+            # 6. resolve the wire-carried origin tenant to a local tenant (default-deny)
+            try:
+                with db() as conn:
+                    local_tenant = resolve_origin_tenant_for_peer(peer, origin["tenant"], conn)
+            except PeerPolicyError as exc:
+                logger.warning(
+                    "Pull from %s: skip fact (tenant policy unsafe): %s", sender_node_id, exc
+                )
+                write_audit_log(
+                    sender_node_id,
+                    "federation_tenant_policy_rejected",
+                    {"reason": str(exc)},
+                )
+                continue
+            # 7. ingest only after every check passed
             try:
                 ingest_fact(
                     fact,
-                    peer["node_id"],
-                    origin_allowed_scopes=allowed_scopes,
-                    tenant_id=tenant_id,
+                    sender_node_id,
+                    tenant_id=local_tenant,
+                    origin_node_id=origin["node_id"],
+                    origin_allowed_scopes=origin["allowed_scopes"],
+                    origin_tenant=origin["tenant"],
+                    origin_allowed_tenants=origin["allowed_tenants"],
+                    origin_sig=origin_sig,
                 )
             except FederationIntegrityError as exc:
                 logger.warning(
                     "Rejected federated fact %s from %s: %s",
                     exc.fact_id,
-                    peer["node_id"],
+                    sender_node_id,
                     exc.reason,
                 )
                 write_audit_log(
-                    peer["node_id"],
+                    sender_node_id,
                     "federation_integrity_rejected",
                     {
                         "fact_id": exc.fact_id,

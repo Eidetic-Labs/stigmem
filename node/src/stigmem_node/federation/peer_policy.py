@@ -81,6 +81,51 @@ def resolve_ingest_tenant_for_peer(peer: dict[str, Any] | Any, conn: Any) -> str
     )
 
 
+def resolve_origin_tenant_for_peer(
+    peer: dict[str, Any] | Any, origin_tenant: str, conn: Any
+) -> str:
+    """Resolve a wire-carried ``origin_tenant`` from a peer to a local tenant (default-deny).
+
+    Phase 2b per-origin mapping. Resolution order for ``(peer, origin_tenant)``:
+
+    1. An explicit ``peer_tenant_map`` row for ``(peer["id"], origin_tenant)`` ->
+       its ``local_tenant``.
+    2. NO map rows exist for this peer AND ``origin_tenant == "default"`` AND the
+       node is genuinely single-tenant (multi-tenant plugin NOT registered) ->
+       fall back to the Phase-1 single-scalar pin
+       (:func:`resolve_ingest_tenant_for_peer`) for backward compatibility.
+    3. Everything else -> :class:`PeerPolicyError` (fail-closed / default-deny).
+
+    The branch-2 guard (single-tenant only) is the F-4 tightening: on a
+    multi-tenant node an unmapped origin tenant -- including ``"default"`` -- is
+    denied rather than silently collapsed.
+    """
+    from ..multi_tenant_gate import multi_tenant_plugin_registered
+
+    peer_id = _get(peer, "id")
+    row = conn.execute(
+        "SELECT local_tenant FROM peer_tenant_map WHERE peer_id = ? AND origin_tenant = ?",
+        (peer_id, origin_tenant),
+    ).fetchone()
+    if row is not None:
+        return str(row["local_tenant"])
+
+    has_any_map = conn.execute(
+        "SELECT 1 FROM peer_tenant_map WHERE peer_id = ? LIMIT 1", (peer_id,)
+    ).fetchone()
+    if (
+        has_any_map is None
+        and origin_tenant == DEFAULT_TENANT_ID
+        and not multi_tenant_plugin_registered()
+    ):
+        return resolve_ingest_tenant_for_peer(peer, conn)
+
+    raise PeerPolicyError(
+        f"no peer_tenant_map entry for peer {peer_id!r} origin_tenant={origin_tenant!r}; "
+        "configure the mapping explicitly (fail-closed)"
+    )
+
+
 def _get(peer: Any, key: str) -> Any:
     """Read a key from a dict or a sqlite3.Row-like object, returning None if absent."""
     try:

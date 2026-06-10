@@ -230,7 +230,14 @@ def _audit_valid_until_extension(
 
 
 def _is_valid_until_extension(stored: str | None, incoming: str | None) -> bool:
-    """Return True when incoming would extend locally observed visibility."""
+    """Return True when incoming would extend locally observed visibility.
+
+    R-18 is independent of Phase 2b origin signing: a signed ``valid_until``
+    authenticates the *value* the origin asserted, it does NOT grant the right
+    to extend an already-observed visibility window. This guard fires on the
+    locally-stored value regardless of whether the inbound fact carried a valid
+    origin_sig.
+    """
 
     if stored is None:
         return False
@@ -253,6 +260,9 @@ def ingest_fact(
     origin_allowed_scopes: list[str] | None = None,
     *,
     tenant_id: str,
+    origin_tenant: str | None = None,
+    origin_allowed_tenants: list[str] | None = None,
+    origin_sig: str | None = None,
     identity_strength_boost: float | None = None,
 ) -> bool:
     """Idempotently ingest a federated fact.
@@ -319,12 +329,21 @@ def ingest_fact(
             quarantine_reason = "trust_below_threshold"
 
     # Scope-propagation columns (spec §6.8.1)
+    # The v2 path passes explicit verified values for origin_node_id; the
+    # origin==sender equality invariant is enforced at the route/client layer
+    # (Phase 2b Task 5), not here — this resolver only fills the column.
     eff_origin_node_id = origin_node_id or sender_node_id
     eff_origin_scopes: str | None
     if origin_allowed_scopes is not None:
         eff_origin_scopes = json.dumps(sorted(origin_allowed_scopes))
     else:
         eff_origin_scopes = json.dumps([scope])
+    # Phase 2b origin block (Migration 044): persist the verified per-origin tenant
+    # claim byte-identical to the signed canonical form (F-8: json.dumps(sorted(...))
+    # mirrors eff_origin_scopes). Populated by the v2 route/client in Task 5.
+    eff_origin_tenants: str | None = (
+        json.dumps(sorted(origin_allowed_tenants)) if origin_allowed_tenants is not None else None
+    )
     # company-scope facts: re-federation is blocked by default (§6.8.2)
     re_fed_blocked = 1 if scope == "company" else 0
 
@@ -381,8 +400,9 @@ def ingest_fact(
                 valid_until, confidence, scope, hlc, received_from,
                 origin_node_id, origin_allowed_scopes, re_federation_blocked,
                 source_trust, quarantine_garden_id, quarantine_status,
-                quarantine_reason, interpret_as, cid, tenant_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                quarantine_reason, interpret_as, cid, tenant_id,
+                origin_tenant, origin_allowed_tenants, origin_sig)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 fact["entity"],
@@ -406,6 +426,9 @@ def ingest_fact(
                 interpret_as,
                 inbound_cid,
                 tenant_id,
+                origin_tenant,
+                eff_origin_tenants,
+                origin_sig,
             ),
         )
 

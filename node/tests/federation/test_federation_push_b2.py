@@ -196,6 +196,59 @@ def _fact(
     }
 
 
+def _priv_from_settings() -> Ed25519PrivateKey:
+    """Reconstruct the fixture's federation private key from patched settings."""
+    raw = settings_module.settings.node_private_key
+    return Ed25519PrivateKey.from_private_bytes(
+        base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    )
+
+
+def _bind_issuer_as_peer(db_file: str, issuer: str) -> None:
+    """Register *issuer* as an active, entity_uri-bound peer.
+
+    The push fixture already stores a self-verifying manifest for *issuer* (the
+    cap-token subject), so adding a peer row with node_id==entity_uri==issuer makes
+    ``resolve_origin_key(issuer)`` succeed — the cap-token success path can ingest.
+    """
+    conn = sqlite3.connect(db_file)
+    try:
+        conn.execute(
+            """INSERT INTO peers
+               (id, node_id, node_url, federation_pubkey, allowed_scopes,
+                status, entity_uri, declaration_sig, signed_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                str(uuid.uuid4()),
+                issuer,
+                "http://issuer",
+                settings_module.settings.federation_pubkey,
+                '["public"]',
+                "active",
+                issuer,
+                "dummy_sig",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _v2_body(issuer: str, fact: dict, *, allowed_scopes: list[str] | None = None) -> dict:
+    """Wrap *fact* in a signed v2 push body (origin.node_id == cap-token subject)."""
+    from .helpers import make_v2_entry
+
+    origin = {
+        "tenant": "default",
+        "node_id": issuer,
+        "allowed_scopes": allowed_scopes if allowed_scopes is not None else [fact["scope"]],
+        "allowed_tenants": ["default"],
+    }
+    entry = make_v2_entry(_priv_from_settings(), fact=fact, origin=origin)
+    return {"v": 2, "facts": [entry]}
+
+
 # ---------------------------------------------------------------------------
 # /v1/federation/facts/push branches
 # ---------------------------------------------------------------------------
@@ -231,7 +284,7 @@ class TestPushFactsBranches:
     ) -> None:
         """No peer JWT, no capability header → 401 (lines 638-640)."""
         client, _issuer, _token, _db = push_setup
-        r = client.post("/v1/federation/facts/push", json={"facts": []})
+        r = client.post("/v1/federation/facts/push", json={"v": 2, "facts": []})
         assert r.status_code == 401
         assert "peer token or X-Stigmem-Capability" in r.json()["detail"]
 
@@ -250,7 +303,7 @@ class TestPushFactsBranches:
         client, _issuer, _token, _db = push_setup
         r = client.post(
             "/v1/federation/facts/push",
-            json={"facts": []},
+            json={"v": 2, "facts": []},
             headers={"X-Stigmem-Capability": "this is definitely not json"},
         )
         # Verification fails on malformed token → 401 → triggers audit log path
@@ -263,7 +316,7 @@ class TestPushFactsBranches:
         client, _issuer, _token, db_file = push_setup
         r = client.post(
             "/v1/federation/facts/push",
-            json={"facts": []},
+            json={"v": 2, "facts": []},
             headers={"X-Stigmem-Capability": '{"verb":"write","sig":"bad"}'},
         )
         assert r.status_code == 401
@@ -282,12 +335,13 @@ class TestCapTokenFactBranches:
     def test_cap_token_source_not_owned(self, push_setup: tuple[TestClient, str, str, str]) -> None:
         """Fact source != cap-token subject → rejected with source_not_owned (line 688)."""
         client, issuer, token, _db = push_setup
-        # Source is a different node — should be rejected
+        # Source is a different node — should be rejected (source-non-forgery check
+        # runs before the origin checks, so this fires regardless of binding).
         bad_fact = _fact(issuer, entity="test:e", source="stigmem://other-node")
 
         r = client.post(
             "/v1/federation/facts/push",
-            json={"facts": [bad_fact]},
+            json=_v2_body(issuer, bad_fact),
             headers={"X-Stigmem-Capability": token},
         )
         assert r.status_code == 202
@@ -309,15 +363,61 @@ class TestCapTokenFactBranches:
         in which case we settle for hitting the cap-token success path
         instead (already covered).
         """
-        client, issuer, token, _db = push_setup
+        client, issuer, token, db_file = push_setup
+        _bind_issuer_as_peer(db_file, issuer)
         f = _fact(issuer, entity="test:e", scope="public")
         r = client.post(
             "/v1/federation/facts/push",
-            json={"facts": [f]},
+            json=_v2_body(issuer, f),
             headers={"X-Stigmem-Capability": token},
         )
         assert r.status_code == 202
         # accepted OR rejected — both paths exercise scoring code
+
+    def test_cap_token_v2_entry_missing_fact_id_rejected(
+        self, push_setup: tuple[TestClient, str, str, str]
+    ) -> None:
+        """NF-3: a v2 entry whose inner ``fact`` omits ``id`` is rejected with
+        ``id_required`` and ingests nothing — no uncaught KeyError / HTTP 500.
+
+        The entry is hand-built (not via make_v2_entry, which signs over fact["id"])
+        so the missing-id guard is the first per-fact check to fire. We do NOT need a
+        valid origin_sig: the id guard runs before signature verification.
+        """
+        client, issuer, token, db_file = push_setup
+        _bind_issuer_as_peer(db_file, issuer)
+
+        fact_no_id = {
+            "entity": "test:e",
+            "relation": "test:value",
+            "value": {"type": "string", "v": "v"},
+            "source": issuer,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "hlc": None,
+            "confidence": 1.0,
+            "scope": "public",
+            "valid_until": None,
+            "cid": "sha256:" + "a" * 64,
+        }
+        origin = {
+            "tenant": "default",
+            "node_id": issuer,
+            "allowed_scopes": ["public"],
+            "allowed_tenants": ["default"],
+        }
+        entry = {"fact": fact_no_id, "origin": origin, "origin_sig": "x"}
+
+        r = client.post(
+            "/v1/federation/facts/push",
+            json={"v": 2, "facts": [entry]},
+            headers={"X-Stigmem-Capability": token},
+        )
+        # Must NOT 500 — the missing id is a clean per-fact rejection.
+        assert r.status_code == 202, r.text
+        body = r.json()
+        assert body["accepted"] == 0
+        assert body["rejected"] == 1
+        assert body["errors"][0]["error"] == "id_required"
 
     def test_cap_token_ingest_exception_handled(
         self,
@@ -325,7 +425,10 @@ class TestCapTokenFactBranches:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """ingest_fact raising → ingest_error (lines 697-698)."""
-        client, issuer, token, _db = push_setup
+        client, issuer, token, db_file = push_setup
+        # Bind the cap-token subject so the origin checks pass and execution reaches
+        # the ingest call, where the synthetic failure must surface as ingest_error.
+        _bind_issuer_as_peer(db_file, issuer)
 
         from stigmem_node.routes import federation as fed_mod
 
@@ -337,7 +440,7 @@ class TestCapTokenFactBranches:
         f = _fact(issuer, entity="test:e", scope="public")
         r = client.post(
             "/v1/federation/facts/push",
-            json={"facts": [f]},
+            json=_v2_body(issuer, f),
             headers={"X-Stigmem-Capability": token},
         )
         assert r.status_code == 202

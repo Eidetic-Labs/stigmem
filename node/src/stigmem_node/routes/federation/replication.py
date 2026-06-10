@@ -7,18 +7,29 @@ from typing import Annotated, Any
 
 from fastapi import Header, HTTPException, Query, Request
 
-from ...db import db
+from ...db import db, get_or_create_node_id
 from ...federation.federation_ingest import (
     FederationHlcSkewError,
     FederationIntegrityError,
 )
-from ...federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
+from ...federation.origin_identity import OriginIdentityError, resolve_origin_key
+from ...federation.origin_signature import (
+    OriginSignatureError,
+    sign_origin,
+    verify_origin_signature,
+)
+from ...federation.peer_policy import PeerPolicyError, resolve_origin_tenant_for_peer
+from ...federation.peer_token import _get_privkey_obj
 from ...federation.tls import check_peer_san
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
 from ...metrics import FEDERATION_EGRESS
 from ...models.facts import row_to_record
-from ...models.federation import FederationFactsResponse
+from ...models.federation import (
+    FederationEnvelopeEntry,
+    FederationFactsResponse,
+    OriginBlock,
+)
 from ...plugins import Deny, TenantContext, get_registry
 from .common import (
     PeerTokenDep,
@@ -151,8 +162,35 @@ def pull_facts(
     )
 
     new_cursor: str | None = rows[-1]["hlc"] if rows else cursor
-    FEDERATION_EGRESS.labels(peer_id=peer["node_id"], status="ok").inc(len(records))
-    return FederationFactsResponse(facts=records, cursor=new_cursor, has_more=has_more)
+
+    # F-FED-2b: build the signed v2 envelope from the POST-filter records (records is
+    # reassigned by the filter/sign chains above, so a positional zip(records, rows)
+    # would misalign). Each entry carries the fact, an origin block, and the origin
+    # signature over (fact_id, cid, origin, valid_until).
+    priv = _get_privkey_obj()
+    own_node_id = get_or_create_node_id()
+    entries: list[FederationEnvelopeEntry] = []
+    for record in records:
+        if record.cid is None:
+            logger.warning("federation egress skip: fact %s has no cid", record.id)
+            continue
+        origin = OriginBlock(
+            tenant=pull_tenant,
+            node_id=own_node_id,
+            allowed_scopes=(record.origin_allowed_scopes or [record.scope]),
+            allowed_tenants=[pull_tenant],
+        )
+        sig = sign_origin(
+            priv,
+            fact_id=record.id,
+            cid=record.cid,
+            origin=origin.model_dump(),
+            valid_until=record.valid_until,
+        )
+        entries.append(FederationEnvelopeEntry(fact=record, origin=origin, origin_sig=sig))
+
+    FEDERATION_EGRESS.labels(peer_id=peer["node_id"], status="ok").inc(len(entries))
+    return FederationFactsResponse(facts=entries, cursor=new_cursor, has_more=has_more)
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +312,13 @@ def push_facts(
     if not _public_module().settings.federation_push_enabled:
         raise HTTPException(status_code=405, detail="push replication not enabled on this node")
 
+    # F-FED-2b: clean break — only the v2 signed-origin envelope is accepted (no v1 interop).
+    if body.get("v") != 2:
+        raise HTTPException(
+            status_code=422,
+            detail="federation requires the v2 envelope (no v1 interop)",
+        )
+
     # --- Phase 1: try peer JWT auth ---
     peer_auth = _try_peer_token_auth(authorization)
 
@@ -304,33 +349,41 @@ def push_facts(
             detail="peer token or X-Stigmem-Capability header required",
         )
 
-    # F-FED-INGEST-TENANT: resolve the local tenant for this push connection once,
-    # fail-closed. The peer-token path uses the registered peer's pinned policy; the
-    # capability-token path has no registered peer, so it is treated as an unpinned
-    # peer (default on a single-tenant node, PeerPolicyError -> 409 on a multi-tenant
-    # node — an explicit per-peer pin is required to land non-default federated facts).
-    policy_peer: dict[str, Any] = peer if peer is not None else {}
-    try:
-        with db() as conn:
-            tenant_id = resolve_ingest_tenant_for_peer(policy_peer, conn)
-    except PeerPolicyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # F-FED-2b: the local tenant is now resolved PER FACT from the wire-carried,
+    # signed origin tenant (see _push_fact_with_*). No pre-loop single-tenant resolve.
 
-    facts = body.get("facts", [])
+    entries = body.get("facts", [])
     accepted = 0
     rejected = 0
     errors: list[dict[str, Any]] = []
 
-    for fact in facts:
+    for entry in entries:
+        if not isinstance(entry, dict):
+            rejected += 1
+            errors.append({"fact_id": None, "error": "missing_origin_block"})
+            continue
+        fact = entry.get("fact")
+        origin = entry.get("origin")
+        origin_sig = entry.get("origin_sig")
+        if not isinstance(fact, dict) or not isinstance(origin, dict) or not origin_sig:
+            rejected += 1
+            errors.append(
+                {
+                    "fact_id": (fact.get("id") if isinstance(fact, dict) else None),
+                    "error": "missing_origin_block",
+                }
+            )
+            continue
+
         fact_scope = fact.get("scope", "")
 
         if using_cap_token:
             assert cap_token is not None
-            ok, err = _push_fact_with_cap_token(fact, fact_scope, cap_token, tenant_id)
+            ok, err = _push_fact_with_cap_token(fact, fact_scope, origin, origin_sig, cap_token)
         else:
             assert peer is not None and token_payload is not None
             ok, err = _push_fact_with_peer_token(
-                fact, fact_scope, peer, token_payload, tenant_id
+                fact, fact_scope, origin, origin_sig, peer, token_payload
             )
 
         if ok:
@@ -343,15 +396,67 @@ def push_facts(
     return {"accepted": accepted, "rejected": rejected, "errors": errors}
 
 
+def _verify_origin_and_resolve_tenant(
+    fact: dict[str, Any],
+    fact_scope: str,
+    origin: dict[str, Any],
+    origin_sig: str,
+    sender_node_id: str,
+    peer_row: dict[str, Any] | Any,
+    conn: Any,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Run the 7 fail-closed ordered origin checks; return (local_tenant, error).
+
+    On any failure returns (None, error_dict) and the fact MUST NOT be ingested.
+    Raises HTTPException(409) only for an unresolvable per-origin tenant policy
+    (PeerPolicyError) — the push handler turns that into a 409 response.
+    """
+    fact_id = fact.get("id")
+    # 0. fact id present (later steps sign over / index by it)
+    if not fact_id:
+        return None, {"fact_id": None, "error": "id_required"}
+    # 1. cid present
+    if not fact.get("cid"):
+        return None, {"fact_id": fact_id, "error": "cid_required"}
+    # 2. origin node_id == authenticated sender
+    if origin.get("node_id") != sender_node_id:
+        return None, {"fact_id": fact_id, "error": "origin_not_sender"}
+    # 3. resolve the signing key set for the origin (regardless of trust_mode)
+    try:
+        keys = resolve_origin_key(origin["node_id"])
+    except OriginIdentityError:
+        return None, {"fact_id": fact_id, "error": "origin_unresolvable"}
+    # 4. verify origin signature over (fact_id, cid, origin, valid_until)
+    try:
+        verify_origin_signature(
+            origin_sig,
+            fact_id=fact_id,
+            cid=fact["cid"],
+            origin=origin,
+            valid_until=fact.get("valid_until"),
+            allowed_pubkeys=keys,
+        )
+    except OriginSignatureError:
+        return None, {"fact_id": fact_id, "error": "origin_sig_invalid"}
+    # 5. fact scope must be inside the origin's granted scopes
+    if fact_scope not in origin.get("allowed_scopes", []):
+        return None, {"fact_id": fact_id, "error": "scope_not_in_origin_grant"}
+    # 6. resolve the wire-carried origin tenant to a local tenant (default-deny);
+    #    PeerPolicyError bubbles up as a 409 on the push path.
+    local_tenant = resolve_origin_tenant_for_peer(peer_row, origin["tenant"], conn)
+    return local_tenant, None
+
+
 def _push_fact_with_cap_token(
     fact: dict[str, Any],
     fact_scope: str,
+    origin: dict[str, Any],
+    origin_sig: str,
     cap_token: dict[str, Any],
-    tenant_id: str,
 ) -> tuple[bool, dict[str, Any] | None]:
-    """Validate + ingest a single fact under capability-token auth.
+    """Validate + ingest a single v2 fact under capability-token auth.
 
-    Returns (ok, error_dict_or_None).
+    Returns (ok, error_dict_or_None). Opens its own DB connection.
     """
     # H-SEC-2: verify capability token object covers this fact's scope
     token_object = cap_token.get("object", "")
@@ -367,33 +472,60 @@ def _push_fact_with_cap_token(
     if fact_source != sender_node_id:
         return False, {"fact_id": fact.get("id"), "error": "source_not_owned"}
 
-    tenant = TenantContext(
-        tenant_id="default",
-        metadata={"tenant_context_source": "pinned"},
-    )
-    registry = get_registry()
-    decision = registry.fire_voting(
-        "federation_inbound_validate",
-        fact=fact,
-        fact_scope=fact_scope,
-        cap_token=cap_token,
-        tenant=tenant,
-    )
-    if isinstance(decision, Deny):
-        return False, {"fact_id": fact.get("id"), "error": decision.reason}
-    filtered_fact = registry.fire_filter_chain(
-        "federation_inbound_filter",
-        fact,
-        fact_scope=fact_scope,
-        cap_token=cap_token,
-        tenant=tenant,
-    )
+    with db() as conn:
+        # The cap-token subject is the origin node_id; load its (bound) peer row so the
+        # per-origin tenant map resolves. No hardcoded tenant="default" any more.
+        peer_row = conn.execute(
+            "SELECT * FROM peers WHERE node_id = ? AND status = 'active'",
+            (sender_node_id,),
+        ).fetchone()
+        peer_row = dict(peer_row) if peer_row is not None else {}
+
+        try:
+            local_tenant, err = _verify_origin_and_resolve_tenant(
+                fact, fact_scope, origin, origin_sig, sender_node_id, peer_row, conn
+            )
+        except PeerPolicyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if err is not None:
+            return False, err
+        assert local_tenant is not None
+
+        # The cap-token push tenant is RESOLVED per-fact from the origin's
+        # per-peer tenant map (``resolve_origin_tenant_for_peer``), not a
+        # hardcoded default pin, so the tenant_context_source is "resolved".
+        tenant = TenantContext(
+            tenant_id=local_tenant,
+            metadata={"tenant_context_source": "resolved"},
+        )
+        registry = get_registry()
+        decision = registry.fire_voting(
+            "federation_inbound_validate",
+            fact=fact,
+            fact_scope=fact_scope,
+            cap_token=cap_token,
+            tenant=tenant,
+        )
+        if isinstance(decision, Deny):
+            return False, {"fact_id": fact.get("id"), "error": decision.reason}
+        filtered_fact = registry.fire_filter_chain(
+            "federation_inbound_filter",
+            fact,
+            fact_scope=fact_scope,
+            cap_token=cap_token,
+            tenant=tenant,
+        )
 
     try:
         _public_module().ingest_fact(
             filtered_fact,
             sender_node_id,
-            tenant_id=tenant_id,
+            tenant_id=local_tenant,
+            origin_node_id=origin["node_id"],
+            origin_allowed_scopes=origin["allowed_scopes"],
+            origin_tenant=origin["tenant"],
+            origin_allowed_tenants=origin["allowed_tenants"],
+            origin_sig=origin_sig,
             identity_strength_boost=0.5,  # §19.4.2 boost for valid capability token
         )
         return True, None
@@ -408,13 +540,14 @@ def _push_fact_with_cap_token(
 def _push_fact_with_peer_token(
     fact: dict[str, Any],
     fact_scope: str,
+    origin: dict[str, Any],
+    origin_sig: str,
     peer: dict[str, Any],
     token_payload: dict[str, Any],
-    tenant_id: str,
 ) -> tuple[bool, dict[str, Any] | None]:
-    """Validate + ingest a single fact under peer-JWT auth.
+    """Validate + ingest a single v2 fact under peer-JWT auth.
 
-    Returns (ok, error_dict_or_None).
+    Returns (ok, error_dict_or_None). Opens its own DB connection.
     """
     permitted = _allowed_output_scopes(peer, token_payload)
 
@@ -441,36 +574,55 @@ def _push_fact_with_peer_token(
         )
         return False, {"fact_id": fact.get("id"), "error": "source_not_owned"}
 
-    tenant = TenantContext(
-        tenant_id="default",
-        metadata={"tenant_context_source": "pinned"},
-    )
-    registry = get_registry()
-    decision = registry.fire_voting(
-        "federation_inbound_validate",
-        fact=fact,
-        fact_scope=fact_scope,
-        peer=peer,
-        token_payload=token_payload,
-        tenant=tenant,
-    )
-    if isinstance(decision, Deny):
-        return False, {"fact_id": fact.get("id"), "error": decision.reason}
-    filtered_fact = registry.fire_filter_chain(
-        "federation_inbound_filter",
-        fact,
-        fact_scope=fact_scope,
-        peer=peer,
-        token_payload=token_payload,
-        tenant=tenant,
-    )
+    sender_node_id = peer["node_id"]
+    with db() as conn:
+        try:
+            local_tenant, err = _verify_origin_and_resolve_tenant(
+                fact, fact_scope, origin, origin_sig, sender_node_id, peer, conn
+            )
+        except PeerPolicyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if err is not None:
+            return False, err
+        assert local_tenant is not None
+
+        # The peer-token push tenant is RESOLVED per-fact from the origin's
+        # per-peer tenant map (``resolve_origin_tenant_for_peer``), not a
+        # hardcoded default pin, so the tenant_context_source is "resolved".
+        tenant = TenantContext(
+            tenant_id=local_tenant,
+            metadata={"tenant_context_source": "resolved"},
+        )
+        registry = get_registry()
+        decision = registry.fire_voting(
+            "federation_inbound_validate",
+            fact=fact,
+            fact_scope=fact_scope,
+            peer=peer,
+            token_payload=token_payload,
+            tenant=tenant,
+        )
+        if isinstance(decision, Deny):
+            return False, {"fact_id": fact.get("id"), "error": decision.reason}
+        filtered_fact = registry.fire_filter_chain(
+            "federation_inbound_filter",
+            fact,
+            fact_scope=fact_scope,
+            peer=peer,
+            token_payload=token_payload,
+            tenant=tenant,
+        )
 
     try:
         _public_module().ingest_fact(
             filtered_fact,
-            peer["node_id"],
-            origin_allowed_scopes=json.loads(peer["allowed_scopes"]),
-            tenant_id=tenant_id,
+            sender_node_id,
+            tenant_id=local_tenant,
+            origin_node_id=origin["node_id"],
+            origin_allowed_scopes=origin["allowed_scopes"],
+            origin_tenant=origin["tenant"],
+            origin_allowed_tenants=origin["allowed_tenants"],
+            origin_sig=origin_sig,
         )
         return True, None
     except FederationHlcSkewError:

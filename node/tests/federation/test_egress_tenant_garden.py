@@ -37,8 +37,8 @@ def _insert_fact(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                confidence, scope, hlc, tenant_id, garden_id, quarantine_garden_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                confidence, scope, hlc, tenant_id, garden_id, quarantine_garden_id, cid)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 entity or f"egress:{tenant_id}:{uuid.uuid4()}",
@@ -53,6 +53,8 @@ def _insert_fact(
                 tenant_id,
                 garden_id,
                 quarantine_garden_id,
+                # cid-less self-originated rows are egress-skipped (F-FED-2b); stamp one.
+                f"bafy{uuid.uuid4().hex}",
             ),
         )
     return fact_id
@@ -107,7 +109,8 @@ def _pull(fed_node: FedNode, pull_tenant: str | None) -> list[dict]:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert r.status_code == 200, r.text
-    return r.json()["facts"]
+    # v2 envelope: unwrap each entry to its inner FactRecord.
+    return [e["fact"] for e in r.json()["facts"]]
 
 
 def test_egress_serves_only_peer_pull_tenant(fed_node: FedNode) -> None:

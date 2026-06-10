@@ -72,30 +72,38 @@ class TestMaliciousPeer:
         node_b_id, pub, priv = self._push_node(fed_node, monkeypatch)
         token = make_peer_token(priv, node_b_id, fed_node.node_id, ["public", "company"])
 
+        # v2 envelope: the scope check fires before origin verification, so the
+        # origin block / signature need not be valid — the scope-violation INTENT
+        # is what's under test (reason now surfaces via scope_not_permitted + audit).
+        fact = {
+            "id": str(uuid.uuid4()),
+            "entity": "company:secret",
+            "relation": "test:val",
+            "value": {"type": "string", "v": "leak"},
+            "source": node_b_id,
+            "timestamp": "2026-05-02T00:00:00Z",
+            "hlc": f"{int(time.time() * 1000)}.000",
+            "confidence": 1.0,
+            "scope": "company",  # peer only allows "public"
+            "valid_until": None,
+            "cid": "bafytestcid",
+        }
+        origin = {
+            "tenant": "default",
+            "node_id": node_b_id,
+            "allowed_scopes": ["company"],
+            "allowed_tenants": ["default"],
+        }
         r = fed_node.client.post(
             "/v1/federation/facts/push",
-            json={
-                "facts": [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "entity": "company:secret",
-                        "relation": "test:val",
-                        "value": {"type": "string", "v": "leak"},
-                        "source": node_b_id,
-                        "timestamp": "2026-05-02T00:00:00Z",
-                        "hlc": f"{int(time.time() * 1000)}.000",
-                        "confidence": 1.0,
-                        "scope": "company",  # peer only allows "public"
-                        "valid_until": None,
-                    }
-                ]
-            },
+            json={"v": 2, "facts": [{"fact": fact, "origin": origin, "origin_sig": "x"}]},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert r.status_code == 202
         data = r.json()
         assert data["rejected"] == 1
         assert data["accepted"] == 0
+        assert any(e.get("error") == "scope_not_permitted" for e in data["errors"])
 
         with _db_ctx() as conn:
             entry = conn.execute(
@@ -111,24 +119,30 @@ class TestMaliciousPeer:
         token = make_peer_token(priv, node_b_id, fed_node.node_id, ["public"])
 
         forged_fact_id = str(uuid.uuid4())
+        # v2 envelope: source-non-forgery fires before origin verification, so the
+        # origin block / signature need not be valid — the forgery INTENT is the test.
+        fact = {
+            "id": forged_fact_id,
+            "entity": "user:alice",
+            "relation": "test:val",
+            "value": {"type": "string", "v": "injected"},
+            "source": "user:alice",  # not the peer's node_id → forgery
+            "timestamp": "2026-05-02T00:00:00Z",
+            "hlc": f"{int(time.time() * 1000)}.000",
+            "confidence": 1.0,
+            "scope": "public",
+            "valid_until": None,
+            "cid": "bafytestcid",
+        }
+        origin = {
+            "tenant": "default",
+            "node_id": node_b_id,
+            "allowed_scopes": ["public"],
+            "allowed_tenants": ["default"],
+        }
         r = fed_node.client.post(
             "/v1/federation/facts/push",
-            json={
-                "facts": [
-                    {
-                        "id": forged_fact_id,
-                        "entity": "user:alice",
-                        "relation": "test:val",
-                        "value": {"type": "string", "v": "injected"},
-                        "source": "user:alice",  # not the peer's node_id → forgery
-                        "timestamp": "2026-05-02T00:00:00Z",
-                        "hlc": f"{int(time.time() * 1000)}.000",
-                        "confidence": 1.0,
-                        "scope": "public",
-                        "valid_until": None,
-                    }
-                ]
-            },
+            json={"v": 2, "facts": [{"fact": fact, "origin": origin, "origin_sig": "x"}]},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert r.status_code == 202
