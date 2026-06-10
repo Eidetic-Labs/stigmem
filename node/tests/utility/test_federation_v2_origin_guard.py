@@ -47,6 +47,18 @@ def test_verify_gates_write_passes_on_single_gated_call():
     assert mod.check_verify_gates_write(good) is True
 
 
+def test_verify_gates_write_detects_same_line_second_call():
+    # Teeth (hardening nit 1): a re-introduced ungated ingest written as a SAME-LINE second
+    # statement must still be counted (occurrence count, not line count) and trip the guard.
+    mod = _load()
+    same_line = (
+        "verify_origin_signature(sig)\n"
+        "ingest_fact(fact); ingest_fact(sneaky)\n"
+    )
+    assert mod._count_ingest_calls(same_line) == 2
+    assert mod.check_verify_gates_write(same_line) is False
+
+
 def test_markers_present_detects_missing_marker():
     # Teeth: a text missing a required marker must be reported as a failure.
     mod = _load()

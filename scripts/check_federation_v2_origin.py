@@ -12,13 +12,15 @@ Static text checks (cheap, no imports of the app):
      preceding verify_origin_signature(. The encoded invariant is:
        (a) the first verify_origin_signature( occurrence index < the first ingest_fact( CALL
            occurrence index (no ungated ingest), AND
-       (b) there is EXACTLY ONE ingest_fact( CALL site (lines containing 'ingest_fact(' that
-           are not import/def lines). After the v2 cutover the per-entry loop ingests through a
-           single gated call; a re-introduced unconditional loop would add a second call site
-           and trip this guard.
+       (b) there is EXACTLY ONE ingest_fact( CALL occurrence (counted as substrings on
+           non-import/def lines, so a same-line second statement is also counted). After the
+           v2 cutover the per-entry loop ingests through a single gated call; a re-introduced
+           unconditional ingest (on its own line OR same-line) adds a second occurrence and
+           trips this guard.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -36,28 +38,32 @@ def markers_present(text: str, markers: list[str]) -> bool:
     return all(m in text for m in markers)
 
 
-def _ingest_call_sites(text: str) -> list[str]:
-    """Lines that are ingest_fact() CALL sites, excluding import / def lines."""
-    sites = []
+def _count_ingest_calls(text: str) -> int:
+    """Total ingest_fact() CALL occurrences, excluding import / def lines.
+
+    Counts SUBSTRING occurrences (``line.count``), not lines — so a re-introduced
+    ungated ingest written as a same-line second statement (``ingest_fact(a); ingest_fact(b)``)
+    is still counted (would push the total past the expected single gated call).
+    """
+    total = 0
     for line in text.splitlines():
         stripped = line.strip()
         if "ingest_fact(" not in stripped:
             continue
         if stripped.startswith(("import ", "from ", "def ")) or "ingest_fact," in stripped:
             continue  # import / re-export / def signature — not a call
-        sites.append(stripped)
-    return sites
+        total += stripped.count("ingest_fact(")
+    return total
 
 
 def check_verify_gates_write(pull_text: str) -> bool:
     """F-5 invariant on the pull-client text (callable on arbitrary text for testability):
-    exactly one ingest_fact() CALL site, and the first verify_origin_signature( precedes the
-    first ingest_fact( call."""
-    call_sites = _ingest_call_sites(pull_text)
-    if len(call_sites) != _EXPECTED_INGEST_CALLS:
+    exactly one ingest_fact() CALL occurrence, and the first verify_origin_signature( precedes
+    the first ingest_fact( call."""
+    if _count_ingest_calls(pull_text) != _EXPECTED_INGEST_CALLS:
         return False
     first_verify = pull_text.find("verify_origin_signature(")
-    first_ingest_call = pull_text.find(call_sites[0])
+    first_ingest_call = pull_text.find("ingest_fact(")
     if first_verify == -1 or first_ingest_call == -1:
         return False
     return first_verify < first_ingest_call
@@ -81,7 +87,12 @@ def check() -> int:
         failures.append("federation_pull.py: pull client must call verify_origin_signature(")
 
     ingest = _INGEST.read_text(encoding="utf-8")
-    if "origin_sig" not in ingest:
+    # Scope the check to an actual `INSERT INTO facts (<cols>)` column list (not a stray
+    # whole-file substring): at least one facts-INSERT must name origin_sig in its columns.
+    insert_cols = re.findall(
+        r"INSERT\s+INTO\s+facts\s*\(([^)]*)\)", ingest, re.IGNORECASE | re.DOTALL
+    )
+    if not any("origin_sig" in cols for cols in insert_cols):
         failures.append("federation_ingest.py: facts INSERT column list must include origin_sig")
 
     if not check_verify_gates_write(pull):
