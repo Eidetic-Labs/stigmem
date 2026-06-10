@@ -61,21 +61,41 @@ def pull_facts(
     else:
         query_scopes = permitted
 
+    # F-FED-GARDEN T1: egress is a PEER concern. Pin to the peer's explicit
+    # pull_tenant; only an explicit pin overrides the default tenant.
+    pull_tenant = peer["pull_tenant"] or "default"
+
     scope_placeholders = ",".join("?" * len(query_scopes))
     params: list[Any] = list(query_scopes)
     conditions: list[str] = [
-        f"scope IN ({scope_placeholders})",
-        "tenant_id = ?",
-        "hlc IS NOT NULL",  # only facts with an HLC are replication-eligible
-        "received_from IS NULL",  # do not re-federate inbound facts (§3.1)
-        "entity NOT LIKE 'stigmem:conflict:%'",  # conflict entities are local (§6.5)
-        "relation NOT LIKE 'stigmem:%'",  # meta-facts (received_from, ttl) are local
-        "re_federation_blocked = 0",  # exclude company-scope relay-blocked facts (§6.8.2)
-        "(derived_from IS NULL OR derived_from = '' OR derived_from = '[]')",
+        # all bare columns qualified with facts. — the membership LEFT JOIN below
+        # introduces fgm.garden_id, so an unqualified column could be ambiguous.
+        f"facts.scope IN ({scope_placeholders})",
+        "facts.tenant_id = ?",
+        "facts.hlc IS NOT NULL",  # only facts with an HLC are replication-eligible
+        "facts.received_from IS NULL",  # do not re-federate inbound facts (§3.1)
+        "facts.entity NOT LIKE 'stigmem:conflict:%'",  # conflict entities are local (§6.5)
+        "facts.relation NOT LIKE 'stigmem:%'",  # meta-facts (received_from, ttl) are local
+        "facts.re_federation_blocked = 0",  # exclude relay-blocked company facts (§6.8.2)
+        "(facts.derived_from IS NULL OR facts.derived_from = ''"
+        " OR facts.derived_from = '[]')",
     ]
-    params.append("default")
+    params.append(pull_tenant)
+    # F-FED-GARDEN T1 (fail-closed, UNCONDITIONAL — not gated on garden_acl_enforced()
+    # and not routed through the identity read chokepoint): the fact's effective
+    # garden is the PROJECTED garden COALESCE(fgm.garden_id, facts.garden_id). A
+    # fact may egress only if it is in no garden, or in a garden explicitly marked
+    # federatable for this pull tenant.
+    conditions.append(
+        "(COALESCE(fgm.garden_id, facts.garden_id) IS NULL"
+        " OR COALESCE(fgm.garden_id, facts.garden_id) IN"
+        "    (SELECT id FROM gardens WHERE federatable = 1 AND tenant_id = ?))"
+    )
+    params.append(pull_tenant)  # binds the federatable-garden subquery to the pull tenant
+    # F-FED-GARDEN T1: quarantined facts never egress.
+    conditions.append("facts.quarantine_garden_id IS NULL")
     if cursor:
-        conditions.append("hlc > ?")
+        conditions.append("facts.hlc > ?")
         params.append(cursor)
 
     where = " AND ".join(conditions)
@@ -83,7 +103,9 @@ def pull_facts(
 
     with db() as conn:
         rows = conn.execute(
-            f"SELECT * FROM facts WHERE {where} ORDER BY hlc ASC LIMIT ?",  # noqa: S608  # nosec B608 — where built from literal fragments; values in params
+            f"SELECT facts.* FROM facts"  # noqa: S608  # nosec B608 — where built from literal fragments; values in params
+            f" LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = facts.id"
+            f" WHERE {where} ORDER BY facts.hlc ASC LIMIT ?",
             params,
         ).fetchall()
 
@@ -99,8 +121,14 @@ def pull_facts(
         row_to_record(r, contradicted=seen[(r["entity"], r["relation"], r["scope"])] > 1)
         for r in rows
     ]
+    # F-FED-GARDEN T2: a federatable-garden fact may egress, but its garden_id is
+    # a local-membership detail that must not leak to the peer. Strip it from the
+    # emitted record (the DB row is untouched). Restricted-garden facts are already
+    # excluded by the query above, so this only affects allowed federatable facts.
+    for record in records:
+        record.garden_id = None
     tenant = TenantContext(
-        tenant_id="default",
+        tenant_id=pull_tenant,
         metadata={"tenant_context_source": "pinned"},
     )
     registry = get_registry()

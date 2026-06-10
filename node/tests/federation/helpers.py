@@ -44,12 +44,16 @@ def insert_active_peer(
     pub_b64: str,
     allowed_scopes: list[str] | None = None,
     ingest_tenant: str | None = None,
+    pull_tenant: str | None = None,
 ) -> str:
     """Directly insert an active peer row into the DB (bypasses HTTP verification).
 
     ``ingest_tenant`` pins the per-peer tenant policy (migration 041); when set,
     inbound facts from this peer are stamped into that tenant by the fail-closed
     resolver.
+
+    ``pull_tenant`` pins the per-peer EGRESS tenant (migration 041); when set,
+    the pull endpoint only serves facts belonging to that tenant to this peer.
     """
     peer_id = str(uuid.uuid4())
     conn = sqlite3.connect(db_path)
@@ -57,8 +61,9 @@ def insert_active_peer(
         conn.execute(
             """INSERT INTO peers
                (id, node_id, node_url, federation_pubkey, allowed_scopes,
-                status, established_at, declaration_sig, signed_at, ingest_tenant)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                status, established_at, declaration_sig, signed_at,
+                ingest_tenant, pull_tenant)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 peer_id,
                 node_id,
@@ -70,6 +75,7 @@ def insert_active_peer(
                 "test_dummy_sig",
                 "2026-05-02T00:00:00Z",
                 ingest_tenant,
+                pull_tenant,
             ),
         )
         conn.commit()
