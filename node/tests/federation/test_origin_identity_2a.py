@@ -132,3 +132,157 @@ def test_resolve_origin_key_unbound_peer_fails_closed(client):
         conn.commit()
     with pytest.raises(OriginIdentityError):
         resolve_origin_key("stigmem:node:o2")  # entity_uri is NULL -> fail closed
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — bind + verify peers.entity_uri at registration (fail-open to NULL)
+# ---------------------------------------------------------------------------
+
+
+def _build_declaration(node_id, node_url, pub_b64, priv_b64, scopes, signed_at):
+    """Build a valid PeerDeclaration body (mirrors test_peer_registration.py)."""
+    from conftest import sign_declaration
+
+    fields_to_sign = {
+        "allowed_scopes": scopes,
+        "federation_pubkey": pub_b64,
+        "node_id": node_id,
+        "node_url": node_url,
+        "signed_at": signed_at,
+    }
+    sig = sign_declaration(priv_b64, fields_to_sign)
+    return {
+        "node_id": node_id,
+        "node_url": node_url,
+        "federation_pubkey": pub_b64,
+        "allowed_scopes": scopes,
+        "declaration_sig": sig,
+        "signed_at": signed_at,
+    }
+
+
+def _mock_well_known(monkeypatch, peer_pub, entity_uri):
+    """Stub the well-known fetch so it returns federation_pubkey + entity_uri offline."""
+    import httpx as _httpx
+
+    class _MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return _httpx.Response(
+                200,
+                json={"federation_pubkey": peer_pub, "entity_uri": entity_uri},
+            )
+
+    monkeypatch.setattr(
+        "stigmem_node.routes._federation_impl.httpx.AsyncClient",
+        lambda **_: _MockAsyncClient(),
+    )
+
+
+def _store_manifest_at(entity_uri, node_id, manifest_pub_b64, manifest_priv_b64):
+    """Pre-store a self-signed manifest at entity_uri so get_peer_manifest resolves offline.
+
+    The manifest is signed with the key matching ``manifest_pub_b64`` (verify_manifest
+    self-checks the signature against the manifest's own public_key). Issued 2026-01-01,
+    expires 2026-12-01 — currently valid (today 2026-06-09) and within the 365-day window.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from stigmem_node.identity.key_rotation import generate_key_id
+    from stigmem_node.identity.manifest import OrgManifest, sign_manifest
+    from stigmem_node.identity.trust_store import store_peer_manifest
+
+    raw = base64.urlsafe_b64decode(manifest_priv_b64 + "=" * (-len(manifest_priv_b64) % 4))
+    priv = Ed25519PrivateKey.from_private_bytes(raw)
+    m = OrgManifest(
+        entity_uri=entity_uri,
+        key_id=generate_key_id(priv.public_key()),
+        public_key=manifest_pub_b64,
+        issued_at="2026-01-01T00:00:00Z",
+        expires_at="2026-12-01T00:00:00Z",
+        entities=[entity_uri, node_id],
+    )
+    sign_manifest(m, priv)
+    store_peer_manifest(entity_uri, m, None, trust_mode="relaxed")
+
+
+def test_registration_binds_entity_uri_when_manifest_consistent(fed_node, monkeypatch):
+    """Manifest at E proves same key controls node_id AND entity_uri -> entity_uri bound."""
+    import uuid
+
+    from conftest import generate_keypair
+
+    from stigmem_node.db import db as node_db
+
+    peer_pub, peer_priv = generate_keypair()
+    node_id = f"stigmem://test-bind-{uuid.uuid4()}"
+    node_url = "http://test-bind"
+    entity_uri = f"https://bind-{uuid.uuid4()}.example"
+
+    # Manifest at E: public_key == peer_pub AND entities includes node_id (consistent).
+    _store_manifest_at(entity_uri, node_id, peer_pub, peer_priv)
+    _mock_well_known(monkeypatch, peer_pub, entity_uri)
+
+    body = _build_declaration(
+        node_id, node_url, peer_pub, peer_priv, ["public"], "2026-05-02T00:00:00Z"
+    )
+    r = fed_node.client.post(
+        "/v1/federation/peers",
+        json=body,
+        headers={"Authorization": f"Bearer {fed_node.federate_key}"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "pending_approval", r.text
+
+    with node_db() as conn:
+        row = conn.execute(
+            "SELECT entity_uri FROM peers WHERE node_id = ?", (node_id,)
+        ).fetchone()
+    assert row is not None
+    assert row["entity_uri"] == entity_uri
+
+
+def test_registration_leaves_entity_uri_null_when_manifest_key_mismatch(fed_node, monkeypatch):
+    """Manifest at E signed by a DIFFERENT key than peer's -> entity_uri stays NULL (fail-open)."""
+    import uuid
+
+    from conftest import generate_keypair
+
+    from stigmem_node.db import db as node_db
+
+    peer_pub, peer_priv = generate_keypair()
+    other_pub, other_priv = generate_keypair()  # distinct key controls the manifest
+    node_id = f"stigmem://test-mismatch-{uuid.uuid4()}"
+    node_url = "http://test-mismatch"
+    entity_uri = f"https://mismatch-{uuid.uuid4()}.example"
+
+    # Manifest at E has public_key=other_pub != peer_pub. (Self-signed by other_priv so
+    # verify_manifest passes; the binding still fails on the public_key != peer_pub check.)
+    _store_manifest_at(entity_uri, node_id, other_pub, other_priv)
+    _mock_well_known(monkeypatch, peer_pub, entity_uri)
+
+    body = _build_declaration(
+        node_id, node_url, peer_pub, peer_priv, ["public"], "2026-05-02T00:00:00Z"
+    )
+    r = fed_node.client.post(
+        "/v1/federation/peers",
+        json=body,
+        headers={"Authorization": f"Bearer {fed_node.federate_key}"},
+    )
+    # Fail-OPEN: registration still succeeds (declaration verified), only binding skipped.
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "pending_approval", r.text
+
+    with node_db() as conn:
+        row = conn.execute(
+            "SELECT entity_uri FROM peers WHERE node_id = ?", (node_id,)
+        ).fetchone()
+    assert row is not None
+    assert row["entity_uri"] is None

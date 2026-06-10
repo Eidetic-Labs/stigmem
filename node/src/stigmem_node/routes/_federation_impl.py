@@ -128,6 +128,9 @@ async def register_peer_impl(
 
     final_status = "rejected"
     verified_at: str | None = None
+    # Phase 2a — verified peer org identity; stays None unless binding succeeds below
+    # (rejected peers + any verification failure → entity_uri remains NULL, fail-open).
+    verified_entity_uri: str | None = None
 
     if fetched_pubkey and fetched_pubkey == req.federation_pubkey:
         # Signed fields = everything except declaration_sig (spec §6.1 struct "above fields")
@@ -141,10 +144,30 @@ async def register_peer_impl(
         if verify_declaration_sig(signed_fields, req.declaration_sig, fetched_pubkey):
             final_status = "pending_approval"
 
+            # Phase 2a — bind verified entity_uri (same key must control node_id AND
+            # entity_uri). The peer's manifest at entity_uri must publish public_key ==
+            # the registered federation_pubkey AND list node_id in its entities.
+            from . import federation as _fed_mod
+
+            try:
+                fetched_entity_uri = wk_resp.json().get("entity_uri")
+                if fetched_entity_uri:
+                    peer_manifest = get_peer_manifest(
+                        fetched_entity_uri, trust_mode=_fed_mod.settings.trust_mode
+                    )
+                    if (
+                        peer_manifest is not None
+                        and peer_manifest.public_key == req.federation_pubkey
+                        and req.node_id in peer_manifest.entities
+                    ):
+                        verified_entity_uri = fetched_entity_uri
+            except Exception as exc:  # nosec B110 — verification failure → entity_uri None
+                logger.debug("peer entity_uri binding failed: %s", exc)
+
     with db() as conn:
         conn.execute(
-            "UPDATE peers SET status = ?, established_at = ? WHERE id = ?",
-            (final_status, verified_at, peer_id),
+            "UPDATE peers SET status = ?, established_at = ?, entity_uri = ? WHERE id = ?",
+            (final_status, verified_at, verified_entity_uri, peer_id),
         )
 
     return PeerRegisterResponse(peer_id=peer_id, status=final_status, verified_at=verified_at)
