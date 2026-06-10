@@ -50,6 +50,37 @@ def resolve_ingest_tenant(
     return pinned
 
 
+def _node_is_multitenant(conn: Any) -> bool:
+    """True when this node hosts at least one non-default API-key tenant.
+
+    A node-capability probe (not an ingest concern, review M3): used to fail
+    closed (PeerPolicyError) when an unpinned peer would otherwise be ambiguous
+    on a multi-tenant node.
+    """
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM api_keys WHERE tenant_id != 'default' LIMIT 1"
+        ).fetchone()
+    )
+
+
+def resolve_ingest_tenant_for_peer(peer: dict[str, Any] | Any, conn: Any) -> str:
+    """Resolve a peer's ingest tenant, wiring the plugin + node-multitenancy probes.
+
+    Single shared call site for all three federation ingest paths (pull loop +
+    both push paths) so the fail-closed policy can only be evaluated against a
+    peer row that actually carries the policy columns. Raises PeerPolicyError
+    (fail-closed). ``peer`` MUST carry the ``ingest_tenant`` column.
+    """
+    from ..multi_tenant_gate import multi_tenant_plugin_registered
+
+    return resolve_ingest_tenant(
+        peer,
+        plugin_active=multi_tenant_plugin_registered(),
+        node_is_multitenant=_node_is_multitenant(conn),
+    )
+
+
 def _get(peer: Any, key: str) -> Any:
     """Read a key from a dict or a sqlite3.Row-like object, returning None if absent."""
     try:

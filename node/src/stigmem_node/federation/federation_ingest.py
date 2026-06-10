@@ -229,19 +229,6 @@ def _audit_valid_until_extension(
     )
 
 
-def node_is_multitenant(conn: Any) -> bool:
-    """True when this node hosts at least one non-default API-key tenant.
-
-    Used by federation ingest callers to fail closed (PeerPolicyError) when an
-    unpinned peer would otherwise be ambiguous on a multi-tenant node.
-    """
-    return bool(
-        conn.execute(
-            "SELECT 1 FROM api_keys WHERE tenant_id != 'default' LIMIT 1"
-        ).fetchone()
-    )
-
-
 def _is_valid_until_extension(stored: str | None, incoming: str | None) -> bool:
     """Return True when incoming would extend locally observed visibility."""
 

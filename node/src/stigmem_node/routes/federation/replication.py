@@ -11,16 +11,14 @@ from ...db import db
 from ...federation.federation_ingest import (
     FederationHlcSkewError,
     FederationIntegrityError,
-    node_is_multitenant,
 )
-from ...federation.peer_policy import PeerPolicyError, resolve_ingest_tenant
+from ...federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
 from ...federation.tls import check_peer_san
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
 from ...metrics import FEDERATION_EGRESS
 from ...models.facts import row_to_record
 from ...models.federation import FederationFactsResponse
-from ...multi_tenant_gate import multi_tenant_plugin_registered
 from ...plugins import Deny, TenantContext, get_registry
 from .common import (
     PeerTokenDep,
@@ -280,15 +278,10 @@ def push_facts(
     # capability-token path has no registered peer, so it is treated as an unpinned
     # peer (default on a single-tenant node, PeerPolicyError -> 409 on a multi-tenant
     # node — an explicit per-peer pin is required to land non-default federated facts).
-    with db() as conn:
-        node_mt = node_is_multitenant(conn)
     policy_peer: dict[str, Any] = peer if peer is not None else {}
     try:
-        tenant_id = resolve_ingest_tenant(
-            policy_peer,
-            plugin_active=multi_tenant_plugin_registered(),
-            node_is_multitenant=node_mt,
-        )
+        with db() as conn:
+            tenant_id = resolve_ingest_tenant_for_peer(policy_peer, conn)
     except PeerPolicyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

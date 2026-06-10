@@ -16,16 +16,14 @@ from typing import Any
 import httpx
 
 from ..db import db
-from ..multi_tenant_gate import multi_tenant_plugin_registered
 from ..observability.metrics import FEDERATION_INGRESS, REPLICATION_LAG
 from ..settings import settings
 from .federation_ingest import (
     FederationIntegrityError,
     ingest_fact,
-    node_is_multitenant,
     write_audit_log,
 )
-from .peer_policy import PeerPolicyError, resolve_ingest_tenant
+from .peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
 from .peer_token import create_peer_token
 from .tls import check_peer_san
 
@@ -127,14 +125,9 @@ async def pull_from_peer_once(
         # (non-default tenant without the multi-tenant plugin, or an unpinned peer
         # on a multi-tenant node) yields a PeerPolicyError — skip this whole page
         # rather than silently land facts in 'default'.
-        with db() as conn:
-            node_mt = node_is_multitenant(conn)
         try:
-            tenant_id = resolve_ingest_tenant(
-                peer,
-                plugin_active=multi_tenant_plugin_registered(),
-                node_is_multitenant=node_mt,
-            )
+            with db() as conn:
+                tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
         except PeerPolicyError as exc:
             logger.warning(
                 "Skipping pull from %s: peer tenant policy unsafe: %s",
@@ -311,7 +304,8 @@ async def pull_all_peers_once() -> None:
     """Pull one batch from every active peer. Called by the loop and by tests."""
     with db() as conn:
         peers = conn.execute(
-            "SELECT id, node_id, node_url, allowed_scopes FROM peers WHERE status = 'active'"
+            "SELECT id, node_id, node_url, allowed_scopes, ingest_tenant, pull_tenant "
+            "FROM peers WHERE status = 'active'"
         ).fetchall()
 
     if not peers:
