@@ -121,6 +121,20 @@ async def put_manifest(
     except ManifestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Phase 2a — key unification: a node may only publish its OWN manifest, signed by its
+    # federation/peer-token key. Reject a manifest whose public_key diverges from this node's
+    # federation pubkey (prevents an independent manifest key, the laundering precondition).
+    from ..federation.peer_token import get_local_pubkey
+
+    if manifest.public_key != get_local_pubkey():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "manifest public_key must equal this node's federation key "
+                "(Phase 2a unification)"
+            ),
+        )
+
     # Attempt transparency-log submission
     tl = make_transparency_log()
     log_entry = None

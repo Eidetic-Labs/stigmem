@@ -17,7 +17,7 @@ from stigmem_node.identity.manifest import (
 )
 from stigmem_node.identity.transparency_log import TransparencyLogUnavailable, _OffLog
 
-from .helpers import gen_keypair, make_manifest
+from .helpers import fed_keypair, gen_keypair, make_manifest
 
 
 def test_manifest_sign_verify_roundtrip():
@@ -193,7 +193,7 @@ def test_tl_off_log_always_raises():
 
 
 def test_manifest_put_strict_mode_tl_unavailable_returns_503(strict_client: TestClient):
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     m = make_manifest(priv, pub_b64, entity_uri="https://strict-test.org", days_valid=30)
     body = manifest_to_dict(m)
     # strict_client has tl_backend="off" → TransparencyLogUnavailable → 503
@@ -202,7 +202,7 @@ def test_manifest_put_strict_mode_tl_unavailable_returns_503(strict_client: Test
 
 
 def test_manifest_put_relaxed_mode_tl_unavailable_warns(identity_client: TestClient):
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     m = make_manifest(priv, pub_b64, entity_uri="https://relaxed-test.org", days_valid=30)
     body = manifest_to_dict(m)
     # identity_client has tl_backend="off" but trust_mode="relaxed" → warn, not 503
