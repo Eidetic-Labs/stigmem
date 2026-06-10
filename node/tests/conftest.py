@@ -136,6 +136,31 @@ def _reset_tombstone_cache() -> Generator[None, None, None]:
     tombstone_cache.invalidate()
 
 
+@pytest.fixture(autouse=True)
+def _drain_subscription_delivery_lock() -> Generator[None, None, None]:
+    """Guarantee the process-global subscription-delivery lock is free per test.
+
+    ``subscription_delivery.deliver_pending()`` acquires ``_DELIVER_PENDING_LOCK``
+    non-blocking and SKIPS (no delivery, no failure recorded) when it is already
+    held — the #47 concurrency guard against double-delivery. A test that runs the
+    background ``sweep_loop`` (``test_subscription_delivery_race`` sets ``sweep_s=0``)
+    can leave an in-flight ``deliver_pending()`` *thread* holding the lock after its
+    asyncio task is cancelled: ``task.cancel()`` cancels the awaiting coroutine, not
+    the OS thread ``asyncio.to_thread`` already launched. If that holder overlaps a
+    later test's explicit ``deliver_pending()`` call, the call silently no-ops —
+    intermittently breaking ``test_circuit_breaker_opens_after_threshold`` (a delivery
+    that should fail is skipped, so ``consecutive_failures`` never reaches the circuit
+    threshold and ``circuit_open`` stays 0). Draining here — wait for any leaked holder
+    to finish, then release — makes every test start with a free lock. Reorg-proof,
+    like the tombstone-cache reset above.
+    """
+    from stigmem_node import subscription_delivery as _sd
+
+    if _sd._DELIVER_PENDING_LOCK.acquire(timeout=10):
+        _sd._DELIVER_PENDING_LOCK.release()
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Key helpers
 # ---------------------------------------------------------------------------

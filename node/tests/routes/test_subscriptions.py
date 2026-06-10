@@ -494,11 +494,12 @@ def test_deliver_pending_webhook_410_cancels_subscription(client: TestClient) ->
 
 def test_circuit_breaker_opens_after_threshold(client: TestClient) -> None:
     original = settings_module.settings
-    test_settings = Settings(
-        db_path=original.db_path,
-        auth_required=original.auth_required,
-        subscription_circuit_threshold=3,
-    )
+    # Derive from the live fixture settings (preserving backend/encryption AND the
+    # test-safe subscription_delivery_sweep_s=86400) and override only the threshold.
+    # A bare ``Settings(...)`` would drop those overrides — notably re-arming the
+    # background sweep at its 30s default — which is exactly the kind of re-enabled
+    # background actor that perturbs this test.
+    test_settings = original.model_copy(update={"subscription_circuit_threshold": 3})
     settings_module.settings = test_settings  # type: ignore[assignment]
 
     try:
@@ -536,6 +537,27 @@ def test_circuit_breaker_opens_after_threshold(client: TestClient) -> None:
 
     finally:
         settings_module.settings = original  # type: ignore[assignment]
+
+
+def test_deliver_pending_skips_when_lock_held() -> None:
+    """``deliver_pending()`` must no-op when the process-global lock is already held.
+
+    This is the #47 concurrency guard (no double-delivery). It is also the root cause
+    of a former flake: a leaked background ``sweep_loop`` thread holding this lock made
+    a later test's explicit ``deliver_pending()`` skip a delivery, so the circuit
+    breaker never reached its threshold. The cross-test leak is prevented by the
+    autouse ``_drain_subscription_delivery_lock`` fixture (conftest); this test pins
+    the skip-while-held behavior so the contract can't silently change.
+    """
+    import stigmem_node.subscription_delivery as sd
+
+    assert sd._DELIVER_PENDING_LOCK.acquire(blocking=False), "lock must start free"
+    try:
+        # Held by us → the call must return immediately without raising and without
+        # attempting any delivery (it cannot acquire the lock).
+        sd.deliver_pending()
+    finally:
+        sd._DELIVER_PENDING_LOCK.release()
 
 
 # ---------------------------------------------------------------------------
