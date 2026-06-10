@@ -229,8 +229,8 @@ def resolve_conflict(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 resolution_fact_id,
                 resolution_entity,
@@ -244,6 +244,7 @@ def resolve_conflict(
                 fact_a["scope"],
                 hlc_res,
                 None,
+                identity.tenant_id,
             ),
         )
 
@@ -252,8 +253,8 @@ def resolve_conflict(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid.uuid4()),
                 resolution_fact_id,
@@ -267,6 +268,7 @@ def resolve_conflict(
                 fact_a["scope"],
                 hlc_meta,
                 None,
+                identity.tenant_id,
             ),
         )
 
@@ -275,8 +277,8 @@ def resolve_conflict(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid.uuid4()),
                 conflict_id,
@@ -290,6 +292,7 @@ def resolve_conflict(
                 fact_a["scope"],
                 hlc_status,
                 None,
+                identity.tenant_id,
             ),
         )
 

@@ -179,6 +179,55 @@ def test_conflict_audit_tenant_b_sees_only_its_own(
     assert a_conflict not in conflict_ids
 
 
+def test_resolution_facts_stamped_with_resolver_tenant(
+    two_tenant_app: tuple[TestClient, str, str, str],
+) -> None:
+    """When a tenant-a admin resolves a tenant-a conflict, every facts row the
+    resolution writes must carry tenant_id='tenant-a' — NOT the schema default
+    'default'. Otherwise the resolution facts cross the tenant boundary and the
+    conflict can still read as unresolved in tenant-a's view.
+    """
+    client, db_path, key_a, _key_b = two_tenant_app
+
+    conflict_id, fact_a_id, fact_b_id = _seed_conflict(db_path, "tenant-a")
+
+    # Snapshot facts already present so we can isolate the rows written by resolve.
+    conn = sqlite3.connect(db_path)
+    try:
+        before = {
+            r[0] for r in conn.execute("SELECT id FROM facts").fetchall()
+        }
+    finally:
+        conn.close()
+
+    r = client.post(
+        f"/v1/conflicts/{conflict_id}/resolve",
+        headers={"Authorization": f"Bearer {key_a}"},
+        json={"winning_fact_id": fact_a_id},
+    )
+    assert r.status_code == 200, r.text
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        new_rows = conn.execute(
+            "SELECT id, entity, relation, tenant_id FROM facts"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    written = [row for row in new_rows if row["id"] not in before]
+    # Sanity: the resolution path writes facts (resolution fact + resolves meta +
+    # status fact). If this is 0 the test is meaningless.
+    assert written, "resolution wrote no facts rows"
+
+    for row in written:
+        assert row["tenant_id"] == "tenant-a", (
+            f"resolution fact {row['entity']}/{row['relation']} landed in "
+            f"tenant {row['tenant_id']!r}, expected 'tenant-a'"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Surface B — inbound tombstone lands in the peer's ingest tenant, not 'default'
 # ---------------------------------------------------------------------------
