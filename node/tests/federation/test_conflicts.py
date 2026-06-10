@@ -43,8 +43,8 @@ class TestConflictDetection:
             "valid_until": None,
         }
 
-        ingest_fact(fact_a, "stigmem://node-a")
-        ingest_fact(fact_b, "stigmem://node-b")
+        ingest_fact(fact_a, "stigmem://node-a", tenant_id="default")
+        ingest_fact(fact_b, "stigmem://node-b", tenant_id="default")
 
         with _db_ctx() as conn:
             conflict = conn.execute(
@@ -98,7 +98,7 @@ class TestSplitBrain:
             "scope": "public",
             "valid_until": None,
         }
-        ingest_fact(fact_b, "stigmem://node-b")
+        ingest_fact(fact_b, "stigmem://node-b", tenant_id="default")
 
         # Both facts must be stored
         with _db_ctx() as conn:
@@ -137,7 +137,7 @@ class TestSplitBrain:
                 "scope": "public",
                 "valid_until": None,
             },
-            "stigmem://node-b",
+            "stigmem://node-b", tenant_id="default",
         )
 
         r = fed_node.client.get("/v1/conflicts?status=unresolved")
@@ -186,7 +186,7 @@ class TestSplitBrain:
                 "scope": "public",
                 "valid_until": None,
             },
-            "stigmem://node-b",
+            "stigmem://node-b", tenant_id="default",
         )
 
         r = fed_node.client.get(
@@ -216,7 +216,7 @@ class TestSplitBrain:
                 "scope": "public",
                 "valid_until": None,
             }
-            ingest_fact(fact, f"stigmem://node-{i}")
+            ingest_fact(fact, f"stigmem://node-{i}", tenant_id="default")
             ids.append(fact["id"])
 
         with _db_ctx() as conn:
@@ -269,7 +269,7 @@ class TestConflictResolution:
             "scope": "public",
             "valid_until": None,
         }
-        ingest_fact(fact_b, "stigmem://node-b")
+        ingest_fact(fact_b, "stigmem://node-b", tenant_id="default")
         fact_b_id = fact_b["id"]
 
         with _db_ctx() as conn:
@@ -383,7 +383,7 @@ class TestConflictResolution:
                 "scope": resolution_fact["scope"],
                 "valid_until": resolution_fact.get("valid_until"),
             },
-            "stigmem://peer-node",
+            "stigmem://peer-node", tenant_id="default",
         )
 
         # No new unresolved conflicts must have appeared
@@ -426,7 +426,7 @@ class TestConflictResolution:
             "scope": "public",
             "valid_until": None,
         }
-        ingest_fact(resolved_status_fact, "stigmem://peer-node")
+        ingest_fact(resolved_status_fact, "stigmem://peer-node", tenant_id="default")
 
         with _db_ctx() as conn:
             after = conn.execute(

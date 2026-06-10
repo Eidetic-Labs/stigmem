@@ -229,6 +229,19 @@ def _audit_valid_until_extension(
     )
 
 
+def node_is_multitenant(conn: Any) -> bool:
+    """True when this node hosts at least one non-default API-key tenant.
+
+    Used by federation ingest callers to fail closed (PeerPolicyError) when an
+    unpinned peer would otherwise be ambiguous on a multi-tenant node.
+    """
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM api_keys WHERE tenant_id != 'default' LIMIT 1"
+        ).fetchone()
+    )
+
+
 def _is_valid_until_extension(stored: str | None, incoming: str | None) -> bool:
     """Return True when incoming would extend locally observed visibility."""
 
@@ -252,6 +265,7 @@ def ingest_fact(
     origin_node_id: str | None = None,
     origin_allowed_scopes: list[str] | None = None,
     *,
+    tenant_id: str,
     identity_strength_boost: float | None = None,
 ) -> bool:
     """Idempotently ingest a federated fact.
@@ -380,8 +394,8 @@ def ingest_fact(
                 valid_until, confidence, scope, hlc, received_from,
                 origin_node_id, origin_allowed_scopes, re_federation_blocked,
                 source_trust, quarantine_garden_id, quarantine_status,
-                quarantine_reason, interpret_as, cid)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                quarantine_reason, interpret_as, cid, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 fact["entity"],
@@ -404,6 +418,7 @@ def ingest_fact(
                 quarantine_reason,
                 interpret_as,
                 inbound_cid,
+                tenant_id,
             ),
         )
 
@@ -457,8 +472,8 @@ def ingest_fact(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 meta_id,
                 fact_id,  # entity = the ingested fact's ID
@@ -472,12 +487,13 @@ def ingest_fact(
                 "local",  # meta-facts are local; MUST NOT be re-replicated (spec §3.1)
                 meta_hlc,
                 None,
+                tenant_id,
             ),
         )
 
         # Contradiction detection — skip for quarantined facts (§19.5.2)
         if quarantine_status is None:
-            _detect_and_record_contradiction(conn, fact, fact_id)
+            _detect_and_record_contradiction(conn, fact, fact_id, tenant_id)
 
     return True
 
@@ -496,6 +512,7 @@ def _detect_and_record_contradiction(
     conn: Any,
     fact: dict[str, Any],
     fact_id: str,
+    tenant_id: str,
 ) -> None:
     """If a contradiction exists, assert conflict entities and write conflicts table."""
     # Reserved stigmem: facts are system state (status transitions, meta-facts), not
@@ -508,8 +525,8 @@ def _detect_and_record_contradiction(
     siblings = conn.execute(
         """SELECT id FROM facts
            WHERE entity = ? AND relation = ? AND scope = ?
-             AND id != ? AND confidence > 0.0""",
-        (fact["entity"], fact["relation"], fact["scope"], fact_id),
+             AND id != ? AND confidence > 0.0 AND tenant_id = ?""",
+        (fact["entity"], fact["relation"], fact["scope"], fact_id, tenant_id),
     ).fetchall()
 
     if not siblings:
@@ -536,8 +553,8 @@ def _detect_and_record_contradiction(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid.uuid4()),
                 conflict_id,
@@ -551,6 +568,7 @@ def _detect_and_record_contradiction(
                 fact["scope"],
                 hlc_between,
                 None,
+                tenant_id,
             ),
         )
 
@@ -558,8 +576,8 @@ def _detect_and_record_contradiction(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid.uuid4()),
                 conflict_id,
@@ -573,6 +591,7 @@ def _detect_and_record_contradiction(
                 fact["scope"],
                 hlc_status,
                 None,
+                tenant_id,
             ),
         )
 

@@ -8,13 +8,19 @@ from typing import Annotated, Any
 from fastapi import Header, HTTPException, Query, Request
 
 from ...db import db
-from ...federation.federation_ingest import FederationHlcSkewError, FederationIntegrityError
+from ...federation.federation_ingest import (
+    FederationHlcSkewError,
+    FederationIntegrityError,
+    node_is_multitenant,
+)
+from ...federation.peer_policy import PeerPolicyError, resolve_ingest_tenant
 from ...federation.tls import check_peer_san
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
 from ...metrics import FEDERATION_EGRESS
 from ...models.facts import row_to_record
 from ...models.federation import FederationFactsResponse
+from ...multi_tenant_gate import multi_tenant_plugin_registered
 from ...plugins import Deny, TenantContext, get_registry
 from .common import (
     PeerTokenDep,
@@ -269,6 +275,23 @@ def push_facts(
             detail="peer token or X-Stigmem-Capability header required",
         )
 
+    # F-FED-INGEST-TENANT: resolve the local tenant for this push connection once,
+    # fail-closed. The peer-token path uses the registered peer's pinned policy; the
+    # capability-token path has no registered peer, so it is treated as an unpinned
+    # peer (default on a single-tenant node, PeerPolicyError -> 409 on a multi-tenant
+    # node — an explicit per-peer pin is required to land non-default federated facts).
+    with db() as conn:
+        node_mt = node_is_multitenant(conn)
+    policy_peer: dict[str, Any] = peer if peer is not None else {}
+    try:
+        tenant_id = resolve_ingest_tenant(
+            policy_peer,
+            plugin_active=multi_tenant_plugin_registered(),
+            node_is_multitenant=node_mt,
+        )
+    except PeerPolicyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     facts = body.get("facts", [])
     accepted = 0
     rejected = 0
@@ -279,10 +302,12 @@ def push_facts(
 
         if using_cap_token:
             assert cap_token is not None
-            ok, err = _push_fact_with_cap_token(fact, fact_scope, cap_token)
+            ok, err = _push_fact_with_cap_token(fact, fact_scope, cap_token, tenant_id)
         else:
             assert peer is not None and token_payload is not None
-            ok, err = _push_fact_with_peer_token(fact, fact_scope, peer, token_payload)
+            ok, err = _push_fact_with_peer_token(
+                fact, fact_scope, peer, token_payload, tenant_id
+            )
 
         if ok:
             accepted += 1
@@ -298,6 +323,7 @@ def _push_fact_with_cap_token(
     fact: dict[str, Any],
     fact_scope: str,
     cap_token: dict[str, Any],
+    tenant_id: str,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single fact under capability-token auth.
 
@@ -343,6 +369,7 @@ def _push_fact_with_cap_token(
         _public_module().ingest_fact(
             filtered_fact,
             sender_node_id,
+            tenant_id=tenant_id,
             identity_strength_boost=0.5,  # §19.4.2 boost for valid capability token
         )
         return True, None
@@ -359,6 +386,7 @@ def _push_fact_with_peer_token(
     fact_scope: str,
     peer: dict[str, Any],
     token_payload: dict[str, Any],
+    tenant_id: str,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single fact under peer-JWT auth.
 
@@ -418,6 +446,7 @@ def _push_fact_with_peer_token(
             filtered_fact,
             peer["node_id"],
             origin_allowed_scopes=json.loads(peer["allowed_scopes"]),
+            tenant_id=tenant_id,
         )
         return True, None
     except FederationHlcSkewError:

@@ -80,7 +80,7 @@ class TestScopePropagationColumnsUnit:
         # override source to match our sender
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public"])
+        ingest_fact(fact, sender_id, origin_allowed_scopes=["public"], tenant_id="default")
 
         row = _db_fetch_fact(fed_node.db_path, fact["id"])
         assert row is not None, "fact not found in DB after ingest"
@@ -95,7 +95,7 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="public")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=declared_scopes)
+        ingest_fact(fact, sender_id, origin_allowed_scopes=declared_scopes, tenant_id="default")
 
         row = _db_fetch_fact(fed_node.db_path, fact["id"])
         assert row is not None
@@ -113,7 +113,7 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="public")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public"])
+        ingest_fact(fact, sender_id, origin_allowed_scopes=["public"], tenant_id="default")
 
         row = _db_fetch_fact(fed_node.db_path, fact["id"])
         assert row is not None
@@ -132,7 +132,7 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="company")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "company"])
+        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "company"], tenant_id="default")
 
         row = _db_fetch_fact(fed_node.db_path, fact["id"])
         assert row is not None
@@ -150,7 +150,7 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="team")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "team"])
+        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "team"], tenant_id="default")
 
         row = _db_fetch_fact(fed_node.db_path, fact["id"])
         assert row is not None
@@ -170,7 +170,7 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="company")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "company"])
+        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "company"], tenant_id="default")
 
         # Confirm re_federation_blocked=1 in DB
         row = _db_fetch_fact(fed_node.db_path, fact["id"])

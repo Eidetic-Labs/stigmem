@@ -16,9 +16,16 @@ from typing import Any
 import httpx
 
 from ..db import db
+from ..multi_tenant_gate import multi_tenant_plugin_registered
 from ..observability.metrics import FEDERATION_INGRESS, REPLICATION_LAG
 from ..settings import settings
-from .federation_ingest import FederationIntegrityError, ingest_fact, write_audit_log
+from .federation_ingest import (
+    FederationIntegrityError,
+    ingest_fact,
+    node_is_multitenant,
+    write_audit_log,
+)
+from .peer_policy import PeerPolicyError, resolve_ingest_tenant
 from .peer_token import create_peer_token
 from .tls import check_peer_san
 
@@ -114,6 +121,33 @@ async def pull_from_peer_once(
                 )
 
         data = resp.json()
+
+        # F-FED-INGEST-TENANT: resolve the local tenant this peer's inbound facts
+        # are stamped into (fail-closed per peer policy). A misconfigured peer
+        # (non-default tenant without the multi-tenant plugin, or an unpinned peer
+        # on a multi-tenant node) yields a PeerPolicyError — skip this whole page
+        # rather than silently land facts in 'default'.
+        with db() as conn:
+            node_mt = node_is_multitenant(conn)
+        try:
+            tenant_id = resolve_ingest_tenant(
+                peer,
+                plugin_active=multi_tenant_plugin_registered(),
+                node_is_multitenant=node_mt,
+            )
+        except PeerPolicyError as exc:
+            logger.warning(
+                "Skipping pull from %s: peer tenant policy unsafe: %s",
+                peer["node_id"],
+                exc,
+            )
+            write_audit_log(
+                peer["node_id"],
+                "federation_tenant_policy_rejected",
+                {"reason": str(exc)},
+            )
+            return cursor  # fail-closed: ingest nothing from a mis-pinned peer
+
         # origin_allowed_scopes = peer's registered declaration scope (spec §6.8.1).
         # These fields are internal and MUST NOT be re-replicated (§3.1), so we
         # derive them from the peer registry rather than reading from the fact payload.
@@ -124,6 +158,7 @@ async def pull_from_peer_once(
                     fact,
                     peer["node_id"],
                     origin_allowed_scopes=allowed_scopes,
+                    tenant_id=tenant_id,
                 )
             except FederationIntegrityError as exc:
                 logger.warning(
