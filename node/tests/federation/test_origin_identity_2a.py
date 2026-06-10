@@ -161,18 +161,33 @@ def _build_declaration(node_id, node_url, pub_b64, priv_b64, scopes, signed_at):
     }
 
 
-def _mock_well_known(monkeypatch, peer_pub, entity_uri):
-    """Stub the well-known fetch so it returns federation_pubkey + entity_uri offline."""
+def _mock_well_known(monkeypatch, peer_pub, entity_uri, manifest_json=None):
+    """Stub BOTH well-known fetches offline.
+
+    Registration hits ``{node_url}/.well-known/stigmem`` → {federation_pubkey, entity_uri}.
+    Approval (``_check_tl_inclusion_for_peer``) hits
+    ``{node_url}/.well-known/stigmem-manifest.json`` → the peer's manifest JSON. Both
+    fetches go through ``_federation_impl.httpx.AsyncClient``, so one mock handles both;
+    the response is selected by the requested URL. When *manifest_json* is None the
+    manifest path 404s (mirrors a peer that never published its manifest).
+    """
     import httpx as _httpx
 
     class _MockAsyncClient:
+        def __init__(self, **_):
+            pass
+
         async def __aenter__(self):
             return self
 
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url):
+        async def get(self, url, *args, **kwargs):
+            if url.endswith("/.well-known/stigmem-manifest.json"):
+                if manifest_json is None:
+                    return _httpx.Response(404)
+                return _httpx.Response(200, json=manifest_json)
             return _httpx.Response(
                 200,
                 json={"federation_pubkey": peer_pub, "entity_uri": entity_uri},
@@ -180,24 +195,26 @@ def _mock_well_known(monkeypatch, peer_pub, entity_uri):
 
     monkeypatch.setattr(
         "stigmem_node.routes._federation_impl.httpx.AsyncClient",
-        lambda **_: _MockAsyncClient(),
+        _MockAsyncClient,
+    )
+    # The approval-time fetch guards the URL with assert_safe_url (SSRF defence), which
+    # does a real DNS lookup of the synthetic test hostname and would raise before the
+    # mocked client is reached. No-op it so the binding path under test actually runs;
+    # the SSRF guard itself is covered by tests/utility/test_net_util.py.
+    monkeypatch.setattr(
+        "stigmem_node.routes._federation_impl.assert_safe_url",
+        lambda *a, **kw: None,
     )
 
 
-def _store_manifest_at(entity_uri, node_id, manifest_pub_b64, manifest_priv_b64):
-    """Pre-store a self-signed manifest at entity_uri so get_peer_manifest resolves offline.
-
-    The manifest is signed with the key matching ``manifest_pub_b64`` (verify_manifest
-    self-checks the signature against the manifest's own public_key). Issued 2026-01-01,
-    expires 2026-12-01 — currently valid (today 2026-06-09) and within the 365-day window.
-    """
+def _build_peer_manifest_json(entity_uri, node_id, manifest_pub_b64, manifest_priv_b64):
+    """Build a self-signed peer manifest dict (what the peer serves at its well-known path)."""
     import base64
 
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     from stigmem_node.identity.key_rotation import generate_key_id
-    from stigmem_node.identity.manifest import OrgManifest, sign_manifest
-    from stigmem_node.identity.trust_store import store_peer_manifest
+    from stigmem_node.identity.manifest import OrgManifest, manifest_to_dict, sign_manifest
 
     raw = base64.urlsafe_b64decode(manifest_priv_b64 + "=" * (-len(manifest_priv_b64) % 4))
     priv = Ed25519PrivateKey.from_private_bytes(raw)
@@ -210,25 +227,17 @@ def _store_manifest_at(entity_uri, node_id, manifest_pub_b64, manifest_priv_b64)
         entities=[entity_uri, node_id],
     )
     sign_manifest(m, priv)
-    store_peer_manifest(entity_uri, m, None, trust_mode="relaxed")
+    return manifest_to_dict(m)
 
 
-def test_registration_binds_entity_uri_when_manifest_consistent(fed_node, monkeypatch):
-    """Manifest at E proves same key controls node_id AND entity_uri -> entity_uri bound."""
-    import uuid
+def _register_and_approve(fed_node, node_id, node_url, peer_pub, peer_priv):
+    """Register a peer then approve it (the approval triggers _check_tl_inclusion_for_peer).
 
-    from conftest import generate_keypair
-
-    from stigmem_node.db import db as node_db
-
-    peer_pub, peer_priv = generate_keypair()
-    node_id = f"stigmem://test-bind-{uuid.uuid4()}"
-    node_url = "http://test-bind"
-    entity_uri = f"https://bind-{uuid.uuid4()}.example"
-
-    # Manifest at E: public_key == peer_pub AND entities includes node_id (consistent).
-    _store_manifest_at(entity_uri, node_id, peer_pub, peer_priv)
-    _mock_well_known(monkeypatch, peer_pub, entity_uri)
+    TestClient runs the approval background task synchronously before returning, so the
+    entity_uri binding has executed by the time the approve POST returns.
+    """
+    from stigmem_node.auth import create_api_key
+    from stigmem_node.routes._federation_impl import peer_pubkey_fingerprint
 
     body = _build_declaration(
         node_id, node_url, peer_pub, peer_priv, ["public"], "2026-05-02T00:00:00Z"
@@ -240,6 +249,43 @@ def test_registration_binds_entity_uri_when_manifest_consistent(fed_node, monkey
     )
     assert r.status_code == 201, r.text
     assert r.json()["status"] == "pending_approval", r.text
+    peer_id = r.json()["peer_id"]
+
+    admin_key = create_api_key("agent:federation-admin", ["admin:federation"])
+    approve = fed_node.client.post(
+        f"/v1/federation/peers/{peer_id}/approve",
+        json={"pubkey_fingerprint": peer_pubkey_fingerprint(peer_pub)},
+        headers={"Authorization": f"Bearer {admin_key}"},
+    )
+    assert approve.status_code == 200, approve.text
+    assert approve.json()["status"] == "active"
+    return peer_id
+
+
+def test_approval_binds_entity_uri_when_manifest_consistent(fed_node, monkeypatch):
+    """Manifest fetched at approval proves same key controls node_id AND entity_uri -> bound.
+
+    Phase 2a Task 8: binding moved from registration to approval, where the peer manifest is
+    actually fetched + verified + stored (_check_tl_inclusion_for_peer). No manifest is
+    pre-stored — the approval-time fetch supplies it.
+    """
+    import uuid
+
+    from conftest import generate_keypair
+
+    from stigmem_node.db import db as node_db
+
+    peer_pub, peer_priv = generate_keypair()
+    node_id = f"stigmem://test-bind-{uuid.uuid4()}"
+    node_url = "http://test-bind"
+    entity_uri = f"https://bind-{uuid.uuid4()}.example"
+
+    # Manifest served at the peer's well-known path: public_key == peer_pub AND entities
+    # includes node_id (consistent). Signed by peer_priv so verify_manifest passes.
+    manifest_json = _build_peer_manifest_json(entity_uri, node_id, peer_pub, peer_priv)
+    _mock_well_known(monkeypatch, peer_pub, entity_uri, manifest_json=manifest_json)
+
+    _register_and_approve(fed_node, node_id, node_url, peer_pub, peer_priv)
 
     with node_db() as conn:
         row = conn.execute(
@@ -249,8 +295,8 @@ def test_registration_binds_entity_uri_when_manifest_consistent(fed_node, monkey
     assert row["entity_uri"] == entity_uri
 
 
-def test_registration_leaves_entity_uri_null_when_manifest_key_mismatch(fed_node, monkeypatch):
-    """Manifest at E signed by a DIFFERENT key than peer's -> entity_uri stays NULL (fail-open)."""
+def test_approval_leaves_entity_uri_null_when_manifest_key_mismatch(fed_node, monkeypatch):
+    """Manifest signed by a DIFFERENT key than the peer's -> entity_uri stays NULL (fail-open)."""
     import uuid
 
     from conftest import generate_keypair
@@ -263,22 +309,12 @@ def test_registration_leaves_entity_uri_null_when_manifest_key_mismatch(fed_node
     node_url = "http://test-mismatch"
     entity_uri = f"https://mismatch-{uuid.uuid4()}.example"
 
-    # Manifest at E has public_key=other_pub != peer_pub. (Self-signed by other_priv so
+    # Manifest has public_key=other_pub != peer_pub. (Self-signed by other_priv so
     # verify_manifest passes; the binding still fails on the public_key != peer_pub check.)
-    _store_manifest_at(entity_uri, node_id, other_pub, other_priv)
-    _mock_well_known(monkeypatch, peer_pub, entity_uri)
+    manifest_json = _build_peer_manifest_json(entity_uri, node_id, other_pub, other_priv)
+    _mock_well_known(monkeypatch, peer_pub, entity_uri, manifest_json=manifest_json)
 
-    body = _build_declaration(
-        node_id, node_url, peer_pub, peer_priv, ["public"], "2026-05-02T00:00:00Z"
-    )
-    r = fed_node.client.post(
-        "/v1/federation/peers",
-        json=body,
-        headers={"Authorization": f"Bearer {fed_node.federate_key}"},
-    )
-    # Fail-OPEN: registration still succeeds (declaration verified), only binding skipped.
-    assert r.status_code == 201, r.text
-    assert r.json()["status"] == "pending_approval", r.text
+    _register_and_approve(fed_node, node_id, node_url, peer_pub, peer_priv)
 
     with node_db() as conn:
         row = conn.execute(
@@ -286,6 +322,54 @@ def test_registration_leaves_entity_uri_null_when_manifest_key_mismatch(fed_node
         ).fetchone()
     assert row is not None
     assert row["entity_uri"] is None
+
+
+def test_fresh_peer_binds_entity_uri_end_to_end_without_prestored_manifest(fed_node, monkeypatch):
+    """Regression guard for the whole bug: a fresh peer binds entity_uri with NO pre-stored
+    manifest, the manifest gets STORED at approval, and resolve_origin_key resolves the chain.
+
+    This exercises the production flow end-to-end: register -> approve ->
+    _check_tl_inclusion_for_peer fetches the peer manifest from
+    /.well-known/stigmem-manifest.json, verifies + stores it, then binds peers.entity_uri.
+    """
+    import uuid
+
+    from conftest import generate_keypair
+
+    from stigmem_node.db import db as node_db
+    from stigmem_node.federation.origin_identity import resolve_origin_key
+    from stigmem_node.identity.trust_store import get_peer_manifest
+
+    peer_pub, peer_priv = generate_keypair()
+    node_id = f"stigmem://test-e2e-{uuid.uuid4()}"
+    node_url = "http://test-e2e"
+    entity_uri = f"https://e2e-{uuid.uuid4()}.example"
+
+    # NO pre-stored manifest. The approval-time fetch is the only source.
+    manifest_json = _build_peer_manifest_json(entity_uri, node_id, peer_pub, peer_priv)
+    _mock_well_known(monkeypatch, peer_pub, entity_uri, manifest_json=manifest_json)
+
+    # Sanity: manifest is genuinely absent before approval.
+    assert get_peer_manifest(entity_uri, trust_mode="relaxed") is None
+
+    _register_and_approve(fed_node, node_id, node_url, peer_pub, peer_priv)
+
+    # (1) the manifest got STORED during approval
+    stored = get_peer_manifest(entity_uri, trust_mode="relaxed")
+    assert stored is not None
+    assert stored.public_key == peer_pub
+
+    # (2) peers.entity_uri bound to the manifest entity_uri
+    with node_db() as conn:
+        row = conn.execute(
+            "SELECT entity_uri FROM peers WHERE node_id = ?", (node_id,)
+        ).fetchone()
+    assert row is not None
+    assert row["entity_uri"] == entity_uri
+
+    # (3) the full origin-identity chain now resolves for the fresh peer
+    keys = resolve_origin_key(node_id)
+    assert peer_pub in keys
 
 
 def _fed_admin_key() -> str:

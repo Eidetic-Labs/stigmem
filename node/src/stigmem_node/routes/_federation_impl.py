@@ -128,9 +128,6 @@ async def register_peer_impl(
 
     final_status = "rejected"
     verified_at: str | None = None
-    # Phase 2a — verified peer org identity; stays None unless binding succeeds below
-    # (rejected peers + any verification failure → entity_uri remains NULL, fail-open).
-    verified_entity_uri: str | None = None
 
     if fetched_pubkey and fetched_pubkey == req.federation_pubkey:
         # Signed fields = everything except declaration_sig (spec §6.1 struct "above fields")
@@ -144,30 +141,14 @@ async def register_peer_impl(
         if verify_declaration_sig(signed_fields, req.declaration_sig, fetched_pubkey):
             final_status = "pending_approval"
 
-            # Phase 2a — bind verified entity_uri (same key must control node_id AND
-            # entity_uri). The peer's manifest at entity_uri must publish public_key ==
-            # the registered federation_pubkey AND list node_id in its entities.
-            from . import federation as _fed_mod
-
-            try:
-                fetched_entity_uri = wk_resp.json().get("entity_uri")
-                if fetched_entity_uri:
-                    peer_manifest = get_peer_manifest(
-                        fetched_entity_uri, trust_mode=_fed_mod.settings.trust_mode
-                    )
-                    if (
-                        peer_manifest is not None
-                        and peer_manifest.public_key == req.federation_pubkey
-                        and req.node_id in peer_manifest.entities
-                    ):
-                        verified_entity_uri = fetched_entity_uri
-            except Exception as exc:  # nosec B110 — verification failure → entity_uri None
-                logger.debug("peer entity_uri binding failed: %s", exc)
-
+    # Phase 2a — entity_uri is NOT bound here. A fresh peer's manifest is not stored at
+    # registration time; the only flow that fetches+stores it is _check_tl_inclusion_for_peer,
+    # which runs at approval. The binding lives there (where the manifest exists and where the
+    # peer is 'active', matching resolve_origin_key's status filter). See Task 8.
     with db() as conn:
         conn.execute(
-            "UPDATE peers SET status = ?, established_at = ?, entity_uri = ? WHERE id = ?",
-            (final_status, verified_at, verified_entity_uri, peer_id),
+            "UPDATE peers SET status = ?, established_at = ? WHERE id = ?",
+            (final_status, verified_at, peer_id),
         )
 
     return PeerRegisterResponse(peer_id=peer_id, status=final_status, verified_at=verified_at)
@@ -286,6 +267,31 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
         if existing is None:
             with contextlib.suppress(ManifestError):
                 store_peer_manifest(manifest_obj.entity_uri, manifest_obj, trust_mode=trust_mode)
+
+        # Phase 2a — bind the verified entity_uri now that the manifest is fetched + stored
+        # (same key must control node_id AND entity_uri). The peer's manifest must publish
+        # public_key == the peer's registered federation_pubkey AND list node_id in its
+        # entities. Fail-OPEN: any mismatch/exception leaves entity_uri NULL and approval
+        # still completes. The peer is already 'active' here, matching resolve_origin_key.
+        try:
+            from ..db import db as _bind_db
+
+            with _bind_db() as conn:
+                peer_row = conn.execute(
+                    "SELECT federation_pubkey FROM peers WHERE id = ?", (peer_id,)
+                ).fetchone()
+            if (
+                peer_row is not None
+                and manifest_obj.public_key == peer_row["federation_pubkey"]
+                and node_id in manifest_obj.entities
+            ):
+                with _bind_db() as conn:
+                    conn.execute(
+                        "UPDATE peers SET entity_uri = ? WHERE id = ?",
+                        (manifest_obj.entity_uri, peer_id),
+                    )
+        except Exception as exc:  # nosec B110 — binding failure → entity_uri stays NULL
+            logger.debug("peer entity_uri binding at approval failed: %s", exc)
 
         # Try to verify TL inclusion
         try:
