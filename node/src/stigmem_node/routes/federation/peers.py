@@ -98,6 +98,18 @@ def patch_peer_policy(
         params.append(req.trust_tier)
     if not sets:
         raise HTTPException(status_code=400, detail="no policy fields provided")
+    if req.trust_tier == "same_domain":
+        with db() as conn:
+            prow = conn.execute(
+                "SELECT entity_uri FROM peers WHERE id = ?", (peer_id,)
+            ).fetchone()
+        if prow is None:
+            raise HTTPException(status_code=404, detail="peer not found")
+        if not prow["entity_uri"]:
+            raise HTTPException(
+                status_code=422,
+                detail="trust_tier=same_domain requires a verified entity_uri (Phase 2a)",
+            )
     params.append(peer_id)
     with db() as conn:
         cur = conn.execute(

@@ -286,3 +286,78 @@ def test_registration_leaves_entity_uri_null_when_manifest_key_mismatch(fed_node
         ).fetchone()
     assert row is not None
     assert row["entity_uri"] is None
+
+
+def _fed_admin_key() -> str:
+    """Mint an admin:federation key so the PATCH route's permission check is satisfied.
+
+    The ``client`` fixture runs with ``auth_required=False`` (its default identity is
+    ``_ANON`` with read/write/federate only), but ``patch_peer_policy`` gates on
+    ``can_admin_federation()``. ``resolve_identity`` still resolves a real key from the
+    Authorization header even in non-required mode, so we pass this key to authorize —
+    matching the pattern in test_peer_policy_patch.py. The route's permission check is
+    NOT weakened.
+    """
+    from stigmem_node.auth import create_api_key
+
+    return create_api_key("agent:federation-admin", ["admin:federation", "federate"])
+
+
+def test_same_domain_rejected_without_verified_entity_uri(client):
+    """Binding trust_tier=same_domain to a peer with NULL entity_uri is rejected (422)."""
+    from stigmem_node.db import db
+
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO peers (id, node_id, node_url, federation_pubkey, allowed_scopes, "
+            "status, declaration_sig, signed_at) VALUES (?,?,?,?,?,?,?,?)",
+            ("pNT", "stigmem:node:nt", "http://x", "PUB", "[]", "active", "SIG",
+             "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/pNT",
+        json={"trust_tier": "same_domain"},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 422
+    assert "entity_uri" in resp.json()["detail"].lower()
+
+
+def test_same_domain_allowed_with_verified_entity_uri(client):
+    from stigmem_node.db import db
+
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO peers (id, node_id, node_url, federation_pubkey, allowed_scopes, "
+            "status, entity_uri, declaration_sig, signed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("pV", "stigmem:node:v", "http://x", "PUB", "[]", "active", "https://v.example",
+             "SIG", "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/pV",
+        json={"trust_tier": "same_domain"},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 200
+
+
+def test_cross_org_tier_allowed_without_entity_uri(client):
+    """cross_org (the default tier) must NOT require entity_uri — only same_domain is gated."""
+    from stigmem_node.db import db
+
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO peers (id, node_id, node_url, federation_pubkey, allowed_scopes, "
+            "status, declaration_sig, signed_at) VALUES (?,?,?,?,?,?,?,?)",
+            ("pCO", "stigmem:node:co", "http://x", "PUB", "[]", "active", "SIG",
+             "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/pCO",
+        json={"trust_tier": "cross_org"},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 200
