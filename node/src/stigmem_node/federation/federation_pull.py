@@ -258,6 +258,29 @@ async def pull_tombstones_from_peer_once(
             },
         )
 
+    # F-FED-TOMBSTONE-TENANT: resolve the local tenant this peer's inbound data
+    # lands in (fail-closed per peer policy — same helper as fact ingest in
+    # Task 3). The recall-time suppression filter keys on (entity_uri, tenant_id),
+    # so an inbound tombstone MUST be stamped with the peer's tenant rather than
+    # the hardcoded 'default'; otherwise a peer's RTBF tombstone could suppress a
+    # different tenant's facts. A mis-pinned peer yields PeerPolicyError — skip the
+    # whole page rather than land tombstones in the wrong tenant.
+    try:
+        with db() as conn:
+            tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+    except PeerPolicyError as exc:
+        logger.warning(
+            "Skipping tombstone pull from %s: peer tenant policy unsafe: %s",
+            peer["node_id"],
+            exc,
+        )
+        write_audit_log(
+            peer["node_id"],
+            "federation_tenant_policy_rejected",
+            {"reason": str(exc), "surface": "tombstones"},
+        )
+        return cursor  # fail-closed: apply nothing from a mis-pinned peer
+
     # Ingest tombstones and revocations
     from ..lifecycle.tombstones import apply_inbound_revocation, apply_inbound_tombstone
     from ..models.tombstones import TombstoneRecord, TombstoneRevocationRecord
@@ -265,7 +288,7 @@ async def pull_tombstones_from_peer_once(
     for t in tombstones:
         try:
             record = TombstoneRecord(**t)
-            apply_inbound_tombstone(record)
+            apply_inbound_tombstone(record, tenant_id=tenant_id)
         except Exception as exc:
             logger.warning("Tombstone ingest from %s failed: %s", peer["node_id"], exc)
 
