@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Any
 
-from ..db import get_or_create_node_id
+from fastapi import APIRouter, HTTPException
+
+from ..db import get_node_entity_uri, get_or_create_node_id
 from ..settings import settings as settings
 
 router = APIRouter(tags=["discovery"])
@@ -61,3 +63,26 @@ def node_metadata() -> dict[str, object]:
         }
 
     return result
+
+
+@router.get("/.well-known/stigmem-manifest.json")
+def node_manifest() -> dict[str, Any]:
+    """Serve this node's own published OrgManifest (Phase 2a).
+
+    A federation peer fetches this path at approval time (see
+    ``_check_tl_inclusion_for_peer``) to retrieve, verify, and store the peer's
+    manifest — the step that binds ``peers.entity_uri``. Returns the manifest keyed
+    on this node's own ``entity_uri`` (``get_node_entity_uri()``), serialized via
+    ``manifest_to_dict`` so it round-trips with ``manifest_from_dict``. HTTP 404 if
+    the node has not yet published its manifest (PUT /v1/federation/manifest).
+    """
+    from ..identity.manifest import manifest_to_dict
+    from ..identity.trust_store import get_peer_manifest
+
+    entity_uri = get_node_entity_uri()
+    manifest = get_peer_manifest(
+        entity_uri, refresh_if_expired=True, trust_mode=settings.trust_mode
+    )
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="node manifest not published")
+    return manifest_to_dict(manifest)
