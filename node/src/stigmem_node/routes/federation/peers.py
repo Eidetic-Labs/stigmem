@@ -16,6 +16,7 @@ from ...models.federation import (
     PeerRegisterRequest,
     PeerRegisterResponse,
 )
+from ...tenant import TenantIdError, validate_tenant_id
 from .._federation_impl import approve_peer_impl, register_peer_impl
 from .common import _public_module, router
 
@@ -65,6 +66,7 @@ class PeerPolicyPatch(BaseModel):
     ingest_tenant: str | None = None
     allowed_tenants: list[str] | None = None
     trust_tier: str | None = None
+    tenant_map: dict[str, str] | None = None
 
     @field_validator("trust_tier")
     @classmethod
@@ -72,6 +74,23 @@ class PeerPolicyPatch(BaseModel):
         if v is not None and v not in ("cross_org", "same_domain"):
             raise ValueError("trust_tier must be 'cross_org' or 'same_domain'")
         return v
+
+    @field_validator("tenant_map")
+    @classmethod
+    def _tenant_map(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return None
+        # Store the NORMALIZED tenant ids (validate_tenant_id NFKC/strip/lowercases) so the
+        # persisted map keys/values are canonical and match the canonical origin_tenant the
+        # ingest path looks up — a raw mixed-case/unicode entry would otherwise silently miss
+        # and fail-closed-deny.
+        normalized: dict[str, str] = {}
+        for origin_tenant, local_tenant in v.items():
+            try:
+                normalized[validate_tenant_id(origin_tenant)] = validate_tenant_id(local_tenant)
+            except TenantIdError as exc:
+                raise ValueError(f"invalid tenant_map entry: {exc}") from exc
+        return normalized
 
 
 @router.patch("/v1/federation/peers/{peer_id}")
@@ -96,7 +115,7 @@ def patch_peer_policy(
     if req.trust_tier is not None:
         sets.append("trust_tier = ?")
         params.append(req.trust_tier)
-    if not sets:
+    if not sets and req.tenant_map is None:
         raise HTTPException(status_code=400, detail="no policy fields provided")
     params.append(peer_id)
     with db() as conn:
@@ -111,14 +130,33 @@ def patch_peer_policy(
                     status_code=422,
                     detail="trust_tier=same_domain requires a verified entity_uri (Phase 2a)",
                 )
-        cur = conn.execute(
-            f"UPDATE peers SET {', '.join(sets)} WHERE id = ?",  # noqa: S608  # nosec B608 — set clauses are literal column fragments; values in params
-            params,
-        )
-        if cur.rowcount == 0:
+        if sets:
+            cur = conn.execute(
+                f"UPDATE peers SET {', '.join(sets)} WHERE id = ?",  # noqa: S608  # nosec B608 — set clauses are literal column fragments; values in params
+                params,
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="peer not found")
+        elif (
+            conn.execute("SELECT 1 FROM peers WHERE id = ?", (peer_id,)).fetchone()
+            is None
+        ):
+            # tenant_map-only PATCH still requires the peer to exist.
             raise HTTPException(status_code=404, detail="peer not found")
+        if req.tenant_map is not None:
+            # Full-replace semantics: clear then re-insert ({} clears).
+            conn.execute(
+                "DELETE FROM peer_tenant_map WHERE peer_id = ?", (peer_id,)
+            )
+            conn.executemany(
+                "INSERT INTO peer_tenant_map (peer_id, origin_tenant, local_tenant) "
+                "VALUES (?, ?, ?)",
+                [(peer_id, ot, lt) for ot, lt in req.tenant_map.items()],
+            )
         conn.commit()
     updated = [s.split(" =")[0] for s in sets]
+    if req.tenant_map is not None:
+        updated.append("tenant_map")
     _public_module().write_audit_log(
         peer_id,
         "peer_policy_updated",

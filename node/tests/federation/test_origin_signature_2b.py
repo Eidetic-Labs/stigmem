@@ -276,6 +276,152 @@ def test_ingest_fact_persists_origin_block(client):
     assert row["origin_sig"] == "SIGB64"
 
 
+def _fed_admin_key() -> str:
+    """Mint an admin:federation key so the PATCH route's permission check is satisfied.
+
+    Mirrors test_origin_identity_2a.py / test_peer_policy_patch.py: the ``client``
+    fixture's default anon identity has no ``admin:federation`` capability and would 403.
+    """
+    from stigmem_node.auth import create_api_key
+
+    return create_api_key("agent:federation-admin", ["admin:federation", "federate"])
+
+
+def test_patch_tenant_map_sets_rows(client):
+    with db() as conn:
+        _insert_peer(conn, "ptm1", "stigmem:node:tm1")
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/ptm1",
+        json={"tenant_map": {"acme": "tenant-acme", "beta": "tenant-beta"}},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 200, resp.text
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT origin_tenant, local_tenant FROM peer_tenant_map "
+            "WHERE peer_id='ptm1' ORDER BY origin_tenant"
+        ).fetchall()
+    mapping = {r["origin_tenant"]: r["local_tenant"] for r in rows}
+    assert mapping == {"acme": "tenant-acme", "beta": "tenant-beta"}
+
+
+def test_patch_tenant_map_full_replace_and_clear(client):
+    with db() as conn:
+        _insert_peer(conn, "ptm2", "stigmem:node:tm2")
+        conn.commit()
+    admin = {"Authorization": f"Bearer {_fed_admin_key()}"}
+    r1 = client.patch(
+        "/v1/federation/peers/ptm2",
+        json={"tenant_map": {"acme": "tenant-acme"}},
+        headers=admin,
+    )
+    assert r1.status_code == 200, r1.text
+    r2 = client.patch(
+        "/v1/federation/peers/ptm2",
+        json={"tenant_map": {}},
+        headers=admin,
+    )
+    assert r2.status_code == 200, r2.text
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT 1 FROM peer_tenant_map WHERE peer_id='ptm2'"
+        ).fetchall()
+    assert rows == []
+
+
+def test_patch_tenant_map_only_not_rejected_by_no_fields_guard(client):
+    with db() as conn:
+        _insert_peer(conn, "ptm3", "stigmem:node:tm3")
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/ptm3",
+        json={"tenant_map": {"acme": "tenant-acme"}},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_patch_tenant_map_invalid_tenant_id_422(client):
+    with db() as conn:
+        _insert_peer(conn, "ptm4", "stigmem:node:tm4")
+        conn.commit()
+    admin = {"Authorization": f"Bearer {_fed_admin_key()}"}
+    bad_key = client.patch(
+        "/v1/federation/peers/ptm4",
+        json={"tenant_map": {"ACME!": "tenant-acme"}},
+        headers=admin,
+    )
+    assert bad_key.status_code == 422, bad_key.text
+    bad_val = client.patch(
+        "/v1/federation/peers/ptm4",
+        json={"tenant_map": {"acme": "Not A Tenant"}},
+        headers=admin,
+    )
+    assert bad_val.status_code == 422, bad_val.text
+
+
+def test_patch_tenant_map_audited(client):
+    import json as _json
+
+    with db() as conn:
+        _insert_peer(conn, "ptm5", "stigmem:node:tm5")
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/ptm5",
+        json={"tenant_map": {"acme": "tenant-acme"}},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 200, resp.text
+    with db() as conn:
+        audit = conn.execute(
+            "SELECT detail FROM federation_audit "
+            "WHERE peer_id='ptm5' AND event_type='peer_policy_updated'"
+        ).fetchone()
+    assert audit is not None, "peer_policy_updated audit entry must be written"
+    detail = _json.loads(audit["detail"])
+    assert "tenant_map" in detail["updated"]
+
+
+def test_patch_tenant_map_stores_normalized_ids(client):
+    """A mixed-case tenant id validates (NFKC/lowercase) and is stored in canonical
+    form, so the canonical wire origin_tenant the ingest path looks up actually matches."""
+    with db() as conn:
+        _insert_peer(conn, "ptm6", "stigmem:node:tm6")
+        conn.commit()
+    resp = client.patch(
+        "/v1/federation/peers/ptm6",
+        json={"tenant_map": {"ACME": "Tenant-ACME"}},
+        headers={"Authorization": f"Bearer {_fed_admin_key()}"},
+    )
+    assert resp.status_code == 200, resp.text
+    with db() as conn:
+        row = conn.execute(
+            "SELECT origin_tenant, local_tenant FROM peer_tenant_map WHERE peer_id='ptm6'"
+        ).fetchone()
+    assert row["origin_tenant"] == "acme"
+    assert row["local_tenant"] == "tenant-acme"
+
+
+def test_patch_tenant_map_replaces_with_new_nonempty_set(client):
+    """Full-replace: a second non-empty map drops the old rows and stores only the new."""
+    with db() as conn:
+        _insert_peer(conn, "ptm7", "stigmem:node:tm7")
+        conn.commit()
+    admin = {"Authorization": f"Bearer {_fed_admin_key()}"}
+    client.patch("/v1/federation/peers/ptm7",
+                 json={"tenant_map": {"acme": "tenant-acme"}}, headers=admin)
+    resp = client.patch("/v1/federation/peers/ptm7",
+                        json={"tenant_map": {"beta": "tenant-beta"}}, headers=admin)
+    assert resp.status_code == 200, resp.text
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT origin_tenant, local_tenant FROM peer_tenant_map WHERE peer_id='ptm7'"
+        ).fetchall()
+    mapping = {r["origin_tenant"]: r["local_tenant"] for r in rows}
+    assert mapping == {"beta": "tenant-beta"}  # old 'acme' row gone
+
+
 def test_bound_peer_envelope_verifies_end_to_end(client):
     import base64
 

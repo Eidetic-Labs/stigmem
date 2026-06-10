@@ -2191,6 +2191,10 @@ export interface components {
             ingest_tenant?: string | null;
             /** Pull Tenant */
             pull_tenant?: string | null;
+            /** Tenant Map */
+            tenant_map?: {
+                [key: string]: string;
+            } | null;
             /** Trust Tier */
             trust_tier?: string | null;
         };
