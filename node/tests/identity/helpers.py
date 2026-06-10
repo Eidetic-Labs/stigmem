@@ -65,9 +65,9 @@ def fed_keypair() -> tuple[Ed25519PrivateKey, str, str]:
     build their manifest with this keypair (representing the node publishing its own manifest)
     rather than a random one from gen_keypair().
     """
-    from stigmem_node.federation.peer_token import init_federation_keys
+    import stigmem_node.federation.peer_token as token_mod
 
-    pub_b64, priv_b64 = init_federation_keys()
+    pub_b64, priv_b64 = token_mod.init_federation_keys()
     raw = base64.urlsafe_b64decode(priv_b64 + "=" * (-len(priv_b64) % 4))
     priv = Ed25519PrivateKey.from_private_bytes(raw)
     return priv, pub_b64, priv_b64
