@@ -77,8 +77,7 @@ def pull_facts(
         "facts.entity NOT LIKE 'stigmem:conflict:%'",  # conflict entities are local (§6.5)
         "facts.relation NOT LIKE 'stigmem:%'",  # meta-facts (received_from, ttl) are local
         "facts.re_federation_blocked = 0",  # exclude relay-blocked company facts (§6.8.2)
-        "(facts.derived_from IS NULL OR facts.derived_from = ''"
-        " OR facts.derived_from = '[]')",
+        "(facts.derived_from IS NULL OR facts.derived_from = '' OR facts.derived_from = '[]')",
     ]
     params.append(pull_tenant)
     # F-FED-GARDEN T1 (fail-closed, UNCONDITIONAL — not gated on garden_acl_enforced()
