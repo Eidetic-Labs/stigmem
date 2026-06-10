@@ -1844,14 +1844,26 @@ export interface components {
             /** V */
             v?: unknown;
         };
+        /** FederationEnvelopeEntry */
+        FederationEnvelopeEntry: {
+            fact: components["schemas"]["FactRecord"];
+            origin: components["schemas"]["OriginBlock"];
+            /** Origin Sig */
+            origin_sig: string;
+        };
         /** FederationFactsResponse */
         FederationFactsResponse: {
             /** Cursor */
             cursor: string | null;
             /** Facts */
-            facts: components["schemas"]["FactRecord"][];
+            facts: components["schemas"]["FederationEnvelopeEntry"][];
             /** Has More */
             has_more: boolean;
+            /**
+             * V
+             * @default 2
+             */
+            v: number;
         };
         /** FederationTombstonesResponse */
         FederationTombstonesResponse: {
@@ -2140,6 +2152,17 @@ export interface components {
             next_cursor?: string | null;
             /** Total Hint */
             total_hint: number;
+        };
+        /** OriginBlock */
+        OriginBlock: {
+            /** Allowed Scopes */
+            allowed_scopes: string[];
+            /** Allowed Tenants */
+            allowed_tenants: string[];
+            /** Node Id */
+            node_id: string;
+            /** Tenant */
+            tenant: string;
         };
         /** PeerApprovalRequest */
         PeerApprovalRequest: {
@@ -2751,6 +2774,7 @@ export type SchemaFactChainCheckpointProof = components['schemas']['FactChainChe
 export type SchemaFactChainProof = components['schemas']['FactChainProof'];
 export type SchemaFactRecord = components['schemas']['FactRecord'];
 export type SchemaFactValue = components['schemas']['FactValue'];
+export type SchemaFederationEnvelopeEntry = components['schemas']['FederationEnvelopeEntry'];
 export type SchemaFederationFactsResponse = components['schemas']['FederationFactsResponse'];
 export type SchemaFederationTombstonesResponse = components['schemas']['FederationTombstonesResponse'];
 export type SchemaGardenCreateRequest = components['schemas']['GardenCreateRequest'];
@@ -2768,6 +2792,7 @@ export type SchemaLintRequest = components['schemas']['LintRequest'];
 export type SchemaMemoryCardResponse = components['schemas']['MemoryCardResponse'];
 export type SchemaNeighborItem = components['schemas']['NeighborItem'];
 export type SchemaNeighborsResponse = components['schemas']['NeighborsResponse'];
+export type SchemaOriginBlock = components['schemas']['OriginBlock'];
 export type SchemaPeerApprovalRequest = components['schemas']['PeerApprovalRequest'];
 export type SchemaPeerApprovalResponse = components['schemas']['PeerApprovalResponse'];
 export type SchemaPeerPolicyPatch = components['schemas']['PeerPolicyPatch'];

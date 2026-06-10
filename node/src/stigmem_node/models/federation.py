@@ -51,8 +51,22 @@ class PeerApprovalResponse(BaseModel):
     approved_at: str
 
 
+class OriginBlock(BaseModel):
+    tenant: str
+    node_id: str
+    allowed_scopes: list[str]
+    allowed_tenants: list[str]
+
+
+class FederationEnvelopeEntry(BaseModel):
+    fact: FactRecord
+    origin: OriginBlock
+    origin_sig: str
+
+
 class FederationFactsResponse(BaseModel):
-    facts: list[FactRecord]
+    v: int = 2
+    facts: list[FederationEnvelopeEntry]
     cursor: str | None
     has_more: bool
 

@@ -80,8 +80,8 @@ class TestPullEndpoint:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert r.status_code == 200
-        # The facts endpoint returns locally-stored public facts with HLC
-        returned = r.json()["facts"]
+        # The facts endpoint returns locally-stored public facts with HLC (v2 envelope)
+        returned = [e["fact"] for e in r.json()["facts"]]
         hlcs = [f["hlc"] for f in returned if f.get("hlc")]
         assert hlcs == sorted(hlcs)
 
@@ -136,7 +136,7 @@ class TestPullEndpoint:
         )
 
         assert r.status_code == 200
-        returned_ids = {fact["id"] for fact in r.json()["facts"]}
+        returned_ids = {e["fact"]["id"] for e in r.json()["facts"]}
         assert default_id in returned_ids
         assert non_default_id not in returned_ids
 
@@ -291,8 +291,8 @@ class TestFederationFactsPagination:
         assert len(page2["facts"]) == 5
 
         # No overlap between pages
-        ids1 = {f["id"] for f in page1["facts"]}
-        ids2 = {f["id"] for f in page2["facts"]}
+        ids1 = {e["fact"]["id"] for e in page1["facts"]}
+        ids2 = {e["fact"]["id"] for e in page2["facts"]}
         assert ids1.isdisjoint(ids2), "Overlapping fact IDs between pages"
 
 

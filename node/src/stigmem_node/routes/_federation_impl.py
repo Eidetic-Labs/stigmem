@@ -240,7 +240,21 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
     # Try to fetch the peer's manifest from their well-known endpoint
     manifest_obj = None
     try:
-        assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
+        # The SSRF guard blocks loopback/private addresses. In the explicit local/dev
+        # insecure mode (federation_insecure), a loopback peer is expected and the
+        # registration well-known fetch above already reaches it; mirror that here so
+        # the Phase 2a entity_uri binding can fire on a loopback cluster. Without this,
+        # resolve_origin_key fails and no v2 fact federates between loopback nodes.
+        from urllib.parse import urlparse as _urlparse
+
+        _host = (_urlparse(node_url).hostname or "").lower()
+        _loopback_dev = _fed.settings.federation_insecure and _host in {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        }
+        if not _loopback_dev:
+            assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{node_url}/.well-known/stigmem-manifest.json",

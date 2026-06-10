@@ -1255,6 +1255,27 @@
         "title": "FactValue",
         "type": "object"
       },
+      "FederationEnvelopeEntry": {
+        "properties": {
+          "fact": {
+            "$ref": "#/components/schemas/FactRecord"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/OriginBlock"
+          },
+          "origin_sig": {
+            "title": "Origin Sig",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact",
+          "origin",
+          "origin_sig"
+        ],
+        "title": "FederationEnvelopeEntry",
+        "type": "object"
+      },
       "FederationFactsResponse": {
         "properties": {
           "cursor": {
@@ -1270,7 +1291,7 @@
           },
           "facts": {
             "items": {
-              "$ref": "#/components/schemas/FactRecord"
+              "$ref": "#/components/schemas/FederationEnvelopeEntry"
             },
             "title": "Facts",
             "type": "array"
@@ -1278,6 +1299,11 @@
           "has_more": {
             "title": "Has More",
             "type": "boolean"
+          },
+          "v": {
+            "default": 2,
+            "title": "V",
+            "type": "integer"
           }
         },
         "required": [
@@ -2059,6 +2085,40 @@
           "total_hint"
         ],
         "title": "NeighborsResponse",
+        "type": "object"
+      },
+      "OriginBlock": {
+        "properties": {
+          "allowed_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Scopes",
+            "type": "array"
+          },
+          "allowed_tenants": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tenants",
+            "type": "array"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "tenant": {
+            "title": "Tenant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant",
+          "node_id",
+          "allowed_scopes",
+          "allowed_tenants"
+        ],
+        "title": "OriginBlock",
         "type": "object"
       },
       "PeerApprovalRequest": {

@@ -220,7 +220,7 @@ class TestScopePropagationColumnsUnit:
         )
         assert pull_resp.status_code == 200, f"pull failed: {pull_resp.text}"
 
-        returned_ids = {f["id"] for f in pull_resp.json().get("facts", [])}
+        returned_ids = {e["fact"]["id"] for e in pull_resp.json().get("facts", [])}
         assert fact["id"] not in returned_ids, (
             f"company fact {fact['id']} (re_federation_blocked=1) appeared in pull response — "
             "spec §6.8.2 violation: company-scope facts MUST NOT re-federate to third nodes"
@@ -292,6 +292,6 @@ class TestScopePropagationColumnsUnit:
         )
         assert pull_resp.status_code == 200, pull_resp.text
 
-        returned_ids = {f["id"] for f in pull_resp.json().get("facts", [])}
+        returned_ids = {e["fact"]["id"] for e in pull_resp.json().get("facts", [])}
         assert source_id in returned_ids
         assert derived_id not in returned_ids

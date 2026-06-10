@@ -27,7 +27,13 @@ from stigmem_node.federation.peer_policy import (
 )
 from stigmem_node.storage import make_backend
 
-from .helpers import generate_ed25519_b64, insert_active_peer, make_federated_fact
+from .helpers import (
+    generate_ed25519_b64,
+    insert_active_peer,
+    make_bound_peer,
+    make_federated_fact,
+    make_v2_envelope,
+)
 
 # ---------------------------------------------------------------------------
 # C1: the pull-path peer SELECT must project the tenant-policy columns, else the
@@ -136,8 +142,8 @@ class _StubClient:
     tombstones, so a full pull cycle runs without real network.
     """
 
-    def __init__(self, facts: list[dict[str, Any]]) -> None:
-        self._facts = facts
+    def __init__(self, envelope: dict[str, Any]) -> None:
+        self._envelope = envelope
         self._served = False
 
     async def __aenter__(self) -> _StubClient:
@@ -150,39 +156,66 @@ class _StubClient:
         if "/tombstones" in url:
             return _StubResponse({"tombstones": [], "revocations": [], "cursor": None})
         if self._served:
-            return _StubResponse({"facts": [], "cursor": None})
+            return _StubResponse({"v": 2, "facts": [], "cursor": None, "has_more": False})
         self._served = True
-        return _StubResponse({"facts": self._facts, "cursor": None})
+        return _StubResponse(self._envelope)
 
 
 def test_pull_pinned_peer_stamps_tenant_on_pulled_facts(
     fed_node: FedNode, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """C1 regression: a peer pinned to 'tenant-a' lands its pulled facts in
-    'tenant-a' (NOT 'default'). With the policy plugin active and the peer row
-    carrying the pin, the resolver stamps tenant-a end-to-end.
+    """C1 regression (Phase 2b): a peer whose origin tenant 'tenant-a' maps to local
+    'tenant-a' lands its pulled facts in 'tenant-a' (NOT 'default'). The peer is an
+    entity_uri-bound peer (so resolve_origin_key succeeds), the page is a signed v2
+    envelope, and a peer_tenant_map row resolves origin_tenant='tenant-a'->'tenant-a'.
     """
     import asyncio
+    import base64
 
-    pub_b64, _priv = generate_ed25519_b64()
-    peer_node_id = f"stigmem://peer-{uuid.uuid4()}"
-    insert_active_peer(
-        fed_node.db_path,
-        peer_node_id,
-        "http://peer-a",
-        pub_b64,
-        ingest_tenant="tenant-a",
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from stigmem_node.db import db as _global_db
+
+    pub_b64, priv_b64 = generate_ed25519_b64()
+    priv = Ed25519PrivateKey.from_private_bytes(
+        base64.urlsafe_b64decode(priv_b64 + "=" * (-len(priv_b64) % 4))
     )
+    peer_node_id = f"stigmem://peer-{uuid.uuid4()}"
+    entity_uri = f"stigmem://entity-{uuid.uuid4()}"
+
+    with _global_db() as conn:
+        peer_id = make_bound_peer(
+            conn,
+            node_id=peer_node_id,
+            entity_uri=entity_uri,
+            pub_b64=pub_b64,
+            priv=priv,
+        )
+        # Map the wire origin tenant 'tenant-a' to local tenant 'tenant-a'.
+        conn.execute(
+            "INSERT INTO peer_tenant_map (peer_id, origin_tenant, local_tenant) "
+            "VALUES (?,?,?)",
+            (peer_id, "tenant-a", "tenant-a"),
+        )
+        conn.commit()
 
     fact = make_federated_fact(
         entity=f"pull:tenant:{uuid.uuid4()}", value="from-tenant-a", scope="public"
     )
     fact["source"] = peer_node_id
 
-    # The pin is non-default, so it requires the multi-tenant plugin to be honored.
+    origin = {
+        "tenant": "tenant-a",
+        "node_id": peer_node_id,
+        "allowed_scopes": ["public"],
+        "allowed_tenants": ["tenant-a"],
+    }
+    envelope = make_v2_envelope(priv, facts=[fact], origin=origin)
+
+    # The map is non-default, so it requires the multi-tenant plugin to be honored.
     monkeypatch.setattr(mtg, "multi_tenant_plugin_registered", lambda: True)
     monkeypatch.setattr(
-        federation_pull, "_make_pull_client", lambda: _StubClient([fact])
+        federation_pull, "_make_pull_client", lambda: _StubClient(envelope)
     )
 
     asyncio.run(federation_pull.pull_all_peers_once())
