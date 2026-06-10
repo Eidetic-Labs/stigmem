@@ -26,6 +26,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/.well-known/stigmem-manifest.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Node Manifest
+         * @description Serve this node's own published OrgManifest (Phase 2a).
+         *
+         *     A federation peer fetches this path at approval time (see
+         *     ``_check_tl_inclusion_for_peer``) to retrieve, verify, and store the peer's
+         *     manifest — the step that binds ``peers.entity_uri``. Returns the manifest keyed
+         *     on this node's own ``entity_uri`` (``get_node_entity_uri()``), serialized via
+         *     ``manifest_to_dict`` so it round-trips with ``manifest_from_dict``. HTTP 404 if
+         *     the node has not yet published its manifest (PUT /v1/federation/manifest).
+         */
+        get: operations["node_manifest__well_known_stigmem_manifest_json_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -2777,6 +2804,28 @@ export type SchemaCidVerifyResponse = components['schemas']['_CidVerifyResponse'
 export type $defs = Record<string, never>;
 export interface operations {
     node_metadata__well_known_stigmem_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    node_manifest__well_known_stigmem_manifest_json_get: {
         parameters: {
             query?: never;
             header?: never;
