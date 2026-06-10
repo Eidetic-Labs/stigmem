@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # When unset, the node creates and persists a stigmem:node:<uuid> identity.
     node_id: str = ""
     node_url: str = "http://localhost:8765"
+    # The node's own org identity URI (Phase 2a). Empty → derived from node_url.
+    entity_uri: str = ""
     log_level: str = "info"
     cors_allowed_origins: Annotated[list[str], NoDecode] = []
     cors_allowed_origin_regex: str | None = None

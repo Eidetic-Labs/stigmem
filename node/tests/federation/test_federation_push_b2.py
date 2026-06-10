@@ -117,6 +117,10 @@ def push_setup(
     identity_routes._manifest_submit_log.clear()
 
     original = settings_module.settings
+    # Fed Phase 2a key unification: PUT /v1/federation/manifest only accepts a manifest
+    # whose public_key equals this node's federation key. Make the node's federation key
+    # equal this fixture's keypair (also the token-signing node_private_key) so the
+    # self-published manifest is accepted.
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
@@ -126,8 +130,15 @@ def push_setup(
         node_private_key=priv_b64,
         federation_push_enabled=True,
         federation_insecure=True,
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
     extra = _patch_settings(test_settings)
+
+    import stigmem_node.federation.peer_token as _token_mod
+
+    _token_mod._cached_pub = pub_b64
+    _token_mod._cached_priv = priv_b64
     monkeypatch.setenv("STIGMEM_TOMBSTONES_ENABLED", "true")
     monkeypatch.setenv("STIGMEM_TOMBSTONES_ALLOW_FEDERATION_ROUTES", "true")
     manifest = _tombstone_plugin_manifest()
@@ -160,6 +171,8 @@ def push_setup(
             yield client, issuer, token, db_file
     finally:
         _restore_settings(original, extra)
+        _token_mod._cached_pub = None
+        _token_mod._cached_priv = None
 
 
 def _fact(

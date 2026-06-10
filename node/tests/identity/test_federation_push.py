@@ -17,6 +17,7 @@ from .helpers import (
     gen_keypair,
     make_manifest,
     patched_test_settings,
+    seed_fed_keypair,
 )
 
 
@@ -33,6 +34,7 @@ def push_client(tmp_path: Path) -> Generator[tuple[TestClient, str, str], None, 
     priv, pub_b64, priv_b64 = gen_keypair()
     issuer = "anon:trusted"  # matches auth_required=False entity_uri
 
+    # Fed Phase 2a: published manifest public_key must equal this node's federation key.
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
@@ -42,9 +44,11 @@ def push_client(tmp_path: Path) -> Generator[tuple[TestClient, str, str], None, 
         node_private_key=priv_b64,
         federation_push_enabled=True,
         federation_insecure=True,
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
 
-    with patched_test_settings(test_settings):
+    with patched_test_settings(test_settings), seed_fed_keypair(pub_b64, priv_b64):
         app = create_app()
         with TestClient(app, raise_server_exceptions=True) as client:
             # Register manifest so verify_token can resolve issuer

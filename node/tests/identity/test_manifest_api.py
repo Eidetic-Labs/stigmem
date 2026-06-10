@@ -4,11 +4,11 @@ from fastapi.testclient import TestClient
 
 from stigmem_node.identity.manifest import manifest_to_dict
 
-from .helpers import gen_keypair, make_manifest
+from .helpers import fed_keypair, make_manifest
 
 
 def test_manifest_resolve_roundtrip(identity_client: TestClient):
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     entity_uri = "https://resolve-test.org"
     m = make_manifest(priv, pub_b64, entity_uri=entity_uri)
 
@@ -42,7 +42,7 @@ def test_manifest_put_rate_limit(identity_client: TestClient):
     """More than 10 manifest PUTs per entity_uri per hour must be rejected with 429."""
     import stigmem_node.routes.identity as identity_mod
 
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     entity_uri = "https://rate-limit-test.org"
 
     # Clear any prior state for this entity

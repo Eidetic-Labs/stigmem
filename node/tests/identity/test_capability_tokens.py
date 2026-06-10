@@ -18,9 +18,11 @@ from stigmem_node.main import create_app
 from .helpers import (
     Settings,
     apply_migrations,
+    fed_keypair,
     gen_keypair,
     make_manifest,
     patched_test_settings,
+    seed_fed_keypair,
 )
 
 
@@ -102,7 +104,7 @@ def test_expired_manifest_rejects_token_issuance(tmp_path: Path):
 
 def test_external_entity_subject_rejected(identity_client: TestClient):
     """Token subject not in issuer's entities list must be rejected (C1)."""
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     issuer = "https://issuer.org"
     # Entity list does NOT include the subject we'll request
     m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer])
@@ -131,7 +133,7 @@ def test_external_entity_subject_rejected(identity_client: TestClient):
 
 def test_subject_in_entities_succeeds(identity_client: TestClient):
     """Token issuance succeeds when subject is in the issuer's entities list."""
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     issuer = "https://myorg.org"
     subject = "https://myorg.org/agent-1"
     m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer, subject])
@@ -229,7 +231,7 @@ def test_nonce_check_constraint_rejects_wrong_format(tmp_path: Path):
 
 def test_revoke_token_by_issuer_succeeds(identity_client: TestClient):
     """Issuer can revoke their own token."""
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     issuer = "https://issuer-revoke.org"
     subject = "https://issuer-revoke.org/agent"
     m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer, subject])
@@ -266,7 +268,7 @@ def test_revoke_token_unknown_returns_404(identity_client: TestClient):
 
 def test_revoke_token_unauthorized_third_party_blocked(identity_client: TestClient):
     """A third-party (not issuer or subject) cannot revoke the token (H-SEC-3)."""
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     issuer = "https://org-a.org"
     subject = "https://org-a.org/agent"
     m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer, subject])
@@ -344,6 +346,9 @@ def signed_identity_client(tmp_path: Path) -> Generator[tuple[TestClient, str, s
     priv, pub_b64, priv_b64 = gen_keypair()
     issuer = "anon:trusted"  # matches auth_required=False entity_uri
 
+    # Fed Phase 2a: the published manifest's public_key must equal this node's federation
+    # key. Make the node's federation key == this fixture's keypair (also used as the
+    # token-signing node_private_key, i.e. a coherent single-key node).
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
@@ -351,9 +356,11 @@ def signed_identity_client(tmp_path: Path) -> Generator[tuple[TestClient, str, s
         trust_mode="relaxed",
         tl_backend="off",
         node_private_key=priv_b64,
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
 
-    with patched_test_settings(test_settings):
+    with patched_test_settings(test_settings), seed_fed_keypair(pub_b64, priv_b64):
         app = create_app()
         with TestClient(app, raise_server_exceptions=True) as client:
             # Register issuer manifest under 'anon:trusted' so the route's H-SEC-1 guard passes
@@ -467,7 +474,7 @@ def test_verify_token_rejects_wrong_token_version() -> None:
 
 def test_ttl_over_90_days_rejected(identity_client: TestClient) -> None:
     """ttl_seconds > 7,776,000 (90 days) must be rejected with 422 (M-SEC-1)."""
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     issuer = "https://ttl-cap-test.org"
     m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer])
 
@@ -494,7 +501,7 @@ def test_ttl_over_90_days_rejected(identity_client: TestClient) -> None:
 
 def test_ttl_exactly_90_days_accepted(identity_client: TestClient) -> None:
     """ttl_seconds == 7,776,000 (exactly 90 days) must be accepted."""
-    priv, pub_b64, _ = gen_keypair()
+    priv, pub_b64, _ = fed_keypair()
     issuer = "https://ttl-cap-exact.org"
     m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer])
 
@@ -527,18 +534,22 @@ def test_capability_issuance_writes_audit_log(tmp_path: Path) -> None:
     db_file = str(tmp_path / "audit_issue.db")
     apply_migrations(db_path=db_file)
 
+    # Fed Phase 2a: published manifest public_key must equal this node's federation key.
+    priv, pub_b64, priv_b64 = gen_keypair()
+
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
         node_url="http://testnode",
         trust_mode="relaxed",
         tl_backend="off",
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
 
-    with patched_test_settings(test_settings):
+    with patched_test_settings(test_settings), seed_fed_keypair(pub_b64, priv_b64):
         app = create_app()
         with TestClient(app, raise_server_exceptions=True) as client:
-            priv, pub_b64, _ = gen_keypair()
             issuer = "https://audit-issue.org"
             m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer])
             client.put("/v1/federation/manifest", json=manifest_to_dict(m))
@@ -579,18 +590,22 @@ def test_capability_revocation_writes_audit_log(tmp_path: Path) -> None:
     db_file = str(tmp_path / "audit_revoke.db")
     apply_migrations(db_path=db_file)
 
+    # Fed Phase 2a: published manifest public_key must equal this node's federation key.
+    priv, pub_b64, priv_b64 = gen_keypair()
+
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
         node_url="http://testnode",
         trust_mode="relaxed",
         tl_backend="off",
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
 
-    with patched_test_settings(test_settings):
+    with patched_test_settings(test_settings), seed_fed_keypair(pub_b64, priv_b64):
         app = create_app()
         with TestClient(app, raise_server_exceptions=True) as client:
-            priv, pub_b64, _ = gen_keypair()
             issuer = "https://audit-revoke.org"
             m = make_manifest(priv, pub_b64, entity_uri=issuer, entities=[issuer])
             client.put("/v1/federation/manifest", json=manifest_to_dict(m))
@@ -663,6 +678,7 @@ def test_verify_endpoint_valid_signed_token(tmp_path: Path) -> None:
     db_file = str(tmp_path / "verify_ep_test.db")
     apply_migrations(db_path=db_file)
 
+    # Fed Phase 2a: published manifest public_key must equal this node's federation key.
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
@@ -670,9 +686,11 @@ def test_verify_endpoint_valid_signed_token(tmp_path: Path) -> None:
         trust_mode="relaxed",
         tl_backend="off",
         node_private_key=priv_b64,
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
 
-    with patched_test_settings(test_settings):
+    with patched_test_settings(test_settings), seed_fed_keypair(pub_b64, priv_b64):
         # auth_required=False → identity.entity_uri = "anon:trusted"; BOLA guard
         # requires issuer == entity_uri so we use that as both issuer and subject.
         issuer = "anon:trusted"
@@ -736,6 +754,7 @@ def test_verify_endpoint_revoked_token_invalid(tmp_path: Path) -> None:
     db_file = str(tmp_path / "verify_rev_test.db")
     apply_migrations(db_path=db_file)
 
+    # Fed Phase 2a: published manifest public_key must equal this node's federation key.
     test_settings = Settings(
         db_path=db_file,
         auth_required=False,
@@ -743,9 +762,11 @@ def test_verify_endpoint_revoked_token_invalid(tmp_path: Path) -> None:
         trust_mode="relaxed",
         tl_backend="off",
         node_private_key=priv_b64,
+        federation_pubkey=pub_b64,
+        federation_privkey=priv_b64,
     )
 
-    with patched_test_settings(test_settings):
+    with patched_test_settings(test_settings), seed_fed_keypair(pub_b64, priv_b64):
         # auth_required=False → identity.entity_uri = "anon:trusted"; BOLA guard
         # requires issuer == entity_uri so we use that as both issuer and subject.
         issuer = "anon:trusted"

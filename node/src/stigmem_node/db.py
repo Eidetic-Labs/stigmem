@@ -164,3 +164,10 @@ def get_or_create_node_id(db_path: str | None = None) -> str:
         conn.execute("INSERT INTO node_meta (key, value) VALUES ('node_id', ?)", (node_id,))
 
     return node_id
+
+
+def get_node_entity_uri() -> str:
+    """The node's own org entity_uri (Phase 2a). Settings override, else node_url."""
+    from .settings import settings
+
+    return settings.entity_uri or settings.node_url

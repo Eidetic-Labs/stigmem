@@ -3538,6 +3538,30 @@
         ]
       }
     },
+    "/.well-known/stigmem-manifest.json": {
+      "get": {
+        "description": "Serve this node's own published OrgManifest (Phase 2a).\n\nA federation peer fetches this path at approval time (see\n``_check_tl_inclusion_for_peer``) to retrieve, verify, and store the peer's\nmanifest \u2014 the step that binds ``peers.entity_uri``. Returns the manifest keyed\non this node's own ``entity_uri`` (``get_node_entity_uri()``), serialized via\n``manifest_to_dict`` so it round-trips with ``manifest_from_dict``. HTTP 404 if\nthe node has not yet published its manifest (PUT /v1/federation/manifest).",
+        "operationId": "node_manifest__well_known_stigmem_manifest_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Node Manifest  Well Known Stigmem Manifest Json Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Node Manifest",
+        "tags": [
+          "discovery"
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "health_healthz_get",
