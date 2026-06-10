@@ -409,6 +409,7 @@ def test_fan_out_circuit_open_skipped(client: TestClient) -> None:
 def test_deliver_pending_webhook_success(client: TestClient) -> None:
     sub = _create_subscription(client)
     _assert_fact(client)
+    event_id = _subscription_event_id(sub["id"])
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -420,15 +421,14 @@ def test_deliver_pending_webhook_success(client: TestClient) -> None:
         mock_client_instance.post.return_value = mock_resp
         mock_client_cls.return_value = mock_client_instance
 
-        delivery_mod.deliver_pending()
+        # Drive production delivery to the terminal state instead of asserting on a
+        # single bare deliver_pending() snapshot — a concurrent sweep under CI load
+        # can transiently hold the claim ('delivering') or the delivery lock (#693).
+        event = _wait_for_subscription_event(
+            event_id,
+            lambda row: row["delivery_status"] == "delivered",
+        )
 
-    import stigmem_node.db as db_mod
-
-    with db_mod.db() as conn:
-        event = conn.execute(
-            "SELECT * FROM subscription_events WHERE subscription_id=?", (sub["id"],)
-        ).fetchone()
-    assert event["delivery_status"] == "delivered"
     assert event["delivered_at"] is not None
 
     # Verify request body
@@ -481,7 +481,15 @@ def test_deliver_pending_webhook_410_cancels_subscription(client: TestClient) ->
         mock_client_instance.post.return_value = mock_resp
         mock_client_cls.return_value = mock_client_instance
 
-        delivery_mod.deliver_pending()
+        # The 410 path deletes the subscription, which CASCADE-deletes the event
+        # row — so drive delivery until the subscription disappears rather than
+        # polling the (vanishing) event row (#693 convention, adapted).
+        deadline = time.monotonic() + 5.0
+        while client.get(f"/v1/subscriptions/{sub['id']}").status_code != 404:
+            assert time.monotonic() < deadline, "subscription was not cancelled after 410"
+            _wait_for_delivery_lock_idle(timeout_s=max(0.1, deadline - time.monotonic()))
+            delivery_mod.deliver_pending()
+            time.sleep(0.01)
 
     resp = client.get(f"/v1/subscriptions/{sub['id']}")
     assert resp.status_code == 404
@@ -494,11 +502,12 @@ def test_deliver_pending_webhook_410_cancels_subscription(client: TestClient) ->
 
 def test_circuit_breaker_opens_after_threshold(client: TestClient) -> None:
     original = settings_module.settings
-    test_settings = Settings(
-        db_path=original.db_path,
-        auth_required=original.auth_required,
-        subscription_circuit_threshold=3,
-    )
+    # Derive from the live fixture settings (preserving backend/encryption AND the
+    # test-safe subscription_delivery_sweep_s=86400) and override only the threshold.
+    # A bare ``Settings(...)`` would drop those overrides — notably re-arming the
+    # background sweep at its 30s default — which is exactly the kind of re-enabled
+    # background actor that perturbs this test.
+    test_settings = original.model_copy(update={"subscription_circuit_threshold": 3})
     settings_module.settings = test_settings  # type: ignore[assignment]
 
     try:
@@ -508,34 +517,63 @@ def test_circuit_breaker_opens_after_threshold(client: TestClient) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 503
 
-        for _ in range(3):
-            with patch("stigmem_node.subscription_delivery.httpx.Client") as mock_client_cls:
-                mock_client_instance = MagicMock()
-                mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
-                mock_client_instance.__exit__ = MagicMock(return_value=False)
-                mock_client_instance.post.return_value = mock_resp
-                mock_client_cls.return_value = mock_client_instance
+        import stigmem_node.db as db_mod
 
-                # Reset next_retry_at so the event stays due
-                import stigmem_node.db as db_mod
+        with patch("stigmem_node.subscription_delivery.httpx.Client") as mock_client_cls:
+            mock_client_instance = MagicMock()
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_instance.post.return_value = mock_resp
+            mock_client_cls.return_value = mock_client_instance
 
+            # Drive failing deliveries until the breaker opens (threshold=3), rather
+            # than assuming exactly 3 bare deliver_pending() calls each record a
+            # failure — a raced/skipped sweep under CI load undercounts (#693 style).
+            deadline = time.monotonic() + 5.0
+            while True:
+                with db_mod.db() as conn:
+                    row = conn.execute(
+                        "SELECT circuit_open, consecutive_failures FROM subscriptions WHERE id=?",
+                        (sub["id"],),
+                    ).fetchone()
+                if row["circuit_open"] == 1:
+                    break
+                assert time.monotonic() < deadline, f"circuit did not open: {dict(row)}"
+                # Reset next_retry_at so the event stays due for the next drive.
                 with db_mod.db() as conn:
                     conn.execute(
                         "UPDATE subscription_events SET next_retry_at=NULL WHERE subscription_id=?",
                         (sub["id"],),
                     )
+                _wait_for_delivery_lock_idle(timeout_s=max(0.1, deadline - time.monotonic()))
                 delivery_mod.deliver_pending()
+                time.sleep(0.01)
 
-        import stigmem_node.db as db_mod
-
-        with db_mod.db() as conn:
-            row = conn.execute(
-                "SELECT circuit_open FROM subscriptions WHERE id=?", (sub["id"],)
-            ).fetchone()
         assert row["circuit_open"] == 1
 
     finally:
         settings_module.settings = original  # type: ignore[assignment]
+
+
+def test_deliver_pending_skips_when_lock_held() -> None:
+    """``deliver_pending()`` must no-op when the process-global lock is already held.
+
+    This is the #47 concurrency guard (no double-delivery). It is also the root cause
+    of a former flake: a leaked background ``sweep_loop`` thread holding this lock made
+    a later test's explicit ``deliver_pending()`` skip a delivery, so the circuit
+    breaker never reached its threshold. The cross-test leak is prevented by the
+    autouse ``_drain_subscription_delivery_lock`` fixture (conftest); this test pins
+    the skip-while-held behavior so the contract can't silently change.
+    """
+    import stigmem_node.subscription_delivery as sd
+
+    assert sd._DELIVER_PENDING_LOCK.acquire(blocking=False), "lock must start free"
+    try:
+        # Held by us → the call must return immediately without raising and without
+        # attempting any delivery (it cannot acquire the lock).
+        sd.deliver_pending()
+    finally:
+        sd._DELIVER_PENDING_LOCK.release()
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +586,15 @@ def test_deliver_pending_wake(client: TestClient, capsys: pytest.CaptureFixture)
         client, on_change="wake", delivery_address="stigmem://test/agent/alice"
     )
     _assert_fact(client)
-    delivery_mod.deliver_pending()
+    event_id = _subscription_event_id(sub["id"])
+
+    # Drive to the terminal state (#693 convention) — the wake print happens before
+    # the status flips to 'delivered', so once the predicate holds the stderr line
+    # is already captured. A delivered event is never re-claimed, so exactly one line.
+    event = _wait_for_subscription_event(
+        event_id, lambda row: row["delivery_status"] == "delivered"
+    )
+    assert event["delivery_status"] == "delivered"
 
     captured = capsys.readouterr()
     wake_lines = [line for line in captured.err.splitlines() if "stigmem_wake" in line]
@@ -556,14 +602,6 @@ def test_deliver_pending_wake(client: TestClient, capsys: pytest.CaptureFixture)
     wake_data = json.loads(wake_lines[0])
     assert wake_data["stigmem_wake"]["subscription_id"] == sub["id"]
     assert wake_data["stigmem_wake"]["subscriber_identity"] == "anon:trusted"
-
-    import stigmem_node.db as db_mod
-
-    with db_mod.db() as conn:
-        event = conn.execute(
-            "SELECT delivery_status FROM subscription_events WHERE subscription_id=?", (sub["id"],)
-        ).fetchone()
-    assert event["delivery_status"] == "delivered"
 
 
 # ---------------------------------------------------------------------------

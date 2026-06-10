@@ -277,6 +277,13 @@ def test_sweep_loop_and_deliver_pending_no_duplicate(client: TestClient) -> None
             await asyncio.gather(task, return_exceptions=True)
         finally:
             settings_mod.settings.subscription_delivery_sweep_s = original_interval
+            # task.cancel() cancels the awaiting coroutine, not the OS thread that
+            # asyncio.to_thread already launched into deliver_pending(). Drain the
+            # process-global delivery lock so no in-flight sweep thread outlives this
+            # test still holding it — otherwise a later test's explicit
+            # deliver_pending() would silently skip (the #47 non-blocking guard).
+            if delivery_mod._DELIVER_PENDING_LOCK.acquire(timeout=5):
+                delivery_mod._DELIVER_PENDING_LOCK.release()
 
     with patch("stigmem_node.subscription_delivery.httpx.Client", mock_cls):
         asyncio.run(driver())
