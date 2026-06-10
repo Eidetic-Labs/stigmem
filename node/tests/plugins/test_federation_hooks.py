@@ -31,7 +31,9 @@ def test_federation_inbound_validate_deny_blocks_peer_push() -> None:
     )
 
     with stigmem_plugins([manifest]):
-        ok, err = federation._push_fact_with_peer_token(fact, "company", peer, token_payload)
+        ok, err = federation._push_fact_with_peer_token(
+            fact, "company", peer, token_payload, "default"
+        )
 
     assert ok is False
     assert err == {"fact_id": "fact-1", "error": "plugin_rejected"}
@@ -68,7 +70,7 @@ def test_federation_inbound_filter_transforms_cap_token_fact(
     )
 
     with stigmem_plugins([manifest]):
-        ok, err = federation._push_fact_with_cap_token(fact, "team", cap_token)
+        ok, err = federation._push_fact_with_cap_token(fact, "team", cap_token, "default")
 
     assert ok is True
     assert err is None

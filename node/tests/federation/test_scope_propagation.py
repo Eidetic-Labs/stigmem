@@ -132,7 +132,9 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="company")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "company"], tenant_id="default")
+        ingest_fact(
+            fact, sender_id, origin_allowed_scopes=["public", "company"], tenant_id="default"
+        )
 
         row = _db_fetch_fact(fed_node.db_path, fact["id"])
         assert row is not None
@@ -170,7 +172,9 @@ class TestScopePropagationColumnsUnit:
         fact = _make_fact(scope="company")
         fact["source"] = sender_id
 
-        ingest_fact(fact, sender_id, origin_allowed_scopes=["public", "company"], tenant_id="default")
+        ingest_fact(
+            fact, sender_id, origin_allowed_scopes=["public", "company"], tenant_id="default"
+        )
 
         # Confirm re_federation_blocked=1 in DB
         row = _db_fetch_fact(fed_node.db_path, fact["id"])

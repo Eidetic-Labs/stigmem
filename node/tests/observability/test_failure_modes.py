@@ -206,7 +206,8 @@ class TestPartialFailure:
         from stigmem_node.federation_ingest import ingest_fact
 
         with pytest.raises(KeyError):
-            ingest_fact({"id": "bad"}, "stigmem://broken", tenant_id="default")  # missing required fields
+            # missing required fields
+            ingest_fact({"id": "bad"}, "stigmem://broken", tenant_id="default")
 
         # Local read still works
         r2 = fed_node.client.get("/v1/facts?entity=test:local")

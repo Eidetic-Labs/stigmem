@@ -135,7 +135,9 @@ def test_incoming_unbounded_visibility_rejects_when_local_has_expiry(fed_node) -
     _seed_fact(fact_id=fact_id, valid_until="2027-01-01T00:00:00+00:00")
 
     with pytest.raises(FederationValidUntilExtensionError):
-        ingest_fact(_fact(fact_id=fact_id, valid_until=None), sender_node_id=SENDER, tenant_id="default")
+        ingest_fact(
+            _fact(fact_id=fact_id, valid_until=None), sender_node_id=SENDER, tenant_id="default"
+        )
 
     assert _stored_valid_until(fact_id) == "2027-01-01T00:00:00+00:00"
     assert _rejection_audit(fact_id) is not None

@@ -127,9 +127,13 @@ def pull_facts(
     # excluded by the query above, so this only affects allowed federatable facts.
     for record in records:
         record.garden_id = None
+    # The egress tenant is RESOLVED from the peer's per-peer pull policy
+    # (``pull_tenant = peer["pull_tenant"] or "default"``); it is not a hardcoded
+    # default pin, so the tenant_context_source is "resolved" (a "pinned" source
+    # must be the literal default tenant — see check_tenant_resolution_consistency).
     tenant = TenantContext(
         tenant_id=pull_tenant,
-        metadata={"tenant_context_source": "pinned"},
+        metadata={"tenant_context_source": "resolved"},
     )
     registry = get_registry()
     records = registry.fire_filter_chain(
