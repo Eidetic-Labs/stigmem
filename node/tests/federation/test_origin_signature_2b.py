@@ -274,3 +274,43 @@ def test_ingest_fact_persists_origin_block(client):
     # F-8: stored byte-identical to the signed canonical form == json.dumps(sorted(...))
     assert row["origin_allowed_tenants"] == _json.dumps(["acme", "beta"])
     assert row["origin_sig"] == "SIGB64"
+
+
+def test_bound_peer_envelope_verifies_end_to_end(client):
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from stigmem_node.db import db
+    from stigmem_node.federation.origin_identity import resolve_origin_key
+    from stigmem_node.federation.origin_signature import verify_origin_signature
+
+    from .helpers import make_bound_peer, make_v2_envelope
+
+    priv = Ed25519PrivateKey.generate()
+    pub = base64.urlsafe_b64encode(
+        priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode().rstrip("=")
+    with db() as conn:
+        make_bound_peer(conn, node_id="stigmem:node:b1",
+                        entity_uri="https://b1.example", pub_b64=pub, priv=priv)
+        conn.commit()
+    keys = resolve_origin_key("stigmem:node:b1")
+    assert pub in keys
+    env = make_v2_envelope(
+        priv,
+        facts=[{"id": "33333333-3333-3333-3333-333333333333",
+                "entity": "stigmem://t/a", "relation": "r",
+                "value": {"type": "string", "v": "x"}, "source": "stigmem:node:b1",
+                "scope": "public", "timestamp": "2026-06-01T00:00:00Z", "confidence": 1.0}],
+        origin={"tenant": "default", "node_id": "stigmem:node:b1",
+                "allowed_scopes": ["public"], "allowed_tenants": ["default"]},
+    )
+    assert env["v"] == 2
+    entry = env["facts"][0]
+    assert entry["fact"]["cid"]  # envelope builder populated the cid
+    verify_origin_signature(
+        entry["origin_sig"], fact_id=entry["fact"]["id"], cid=entry["fact"]["cid"],
+        origin=entry["origin"], valid_until=entry["fact"].get("valid_until"), allowed_pubkeys=keys,
+    )  # no raise = the test infra is sound
