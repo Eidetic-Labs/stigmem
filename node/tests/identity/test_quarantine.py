@@ -136,7 +136,7 @@ def test_quarantine_ingest_writes_audit_log_entry(tmp_path: Path):
                 "valid_until": None,
             }
 
-            result = ingest_fact(fact, sender_node_id=sender_node_id)
+            result = ingest_fact(fact, sender_node_id=sender_node_id, tenant_id="default")
             assert result is True, "ingest_fact should return True for a new fact"
 
             # Verify quarantine_ingest audit entry was written.

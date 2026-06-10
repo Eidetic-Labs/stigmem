@@ -8,7 +8,11 @@ from typing import Annotated, Any
 from fastapi import Header, HTTPException, Query, Request
 
 from ...db import db
-from ...federation.federation_ingest import FederationHlcSkewError, FederationIntegrityError
+from ...federation.federation_ingest import (
+    FederationHlcSkewError,
+    FederationIntegrityError,
+)
+from ...federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
 from ...federation.tls import check_peer_san
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
@@ -57,21 +61,40 @@ def pull_facts(
     else:
         query_scopes = permitted
 
+    # F-FED-GARDEN T1: egress is a PEER concern. Pin to the peer's explicit
+    # pull_tenant; only an explicit pin overrides the default tenant.
+    pull_tenant = peer["pull_tenant"] or "default"
+
     scope_placeholders = ",".join("?" * len(query_scopes))
     params: list[Any] = list(query_scopes)
     conditions: list[str] = [
-        f"scope IN ({scope_placeholders})",
-        "tenant_id = ?",
-        "hlc IS NOT NULL",  # only facts with an HLC are replication-eligible
-        "received_from IS NULL",  # do not re-federate inbound facts (§3.1)
-        "entity NOT LIKE 'stigmem:conflict:%'",  # conflict entities are local (§6.5)
-        "relation NOT LIKE 'stigmem:%'",  # meta-facts (received_from, ttl) are local
-        "re_federation_blocked = 0",  # exclude company-scope relay-blocked facts (§6.8.2)
-        "(derived_from IS NULL OR derived_from = '' OR derived_from = '[]')",
+        # all bare columns qualified with facts. — the membership LEFT JOIN below
+        # introduces fgm.garden_id, so an unqualified column could be ambiguous.
+        f"facts.scope IN ({scope_placeholders})",
+        "facts.tenant_id = ?",
+        "facts.hlc IS NOT NULL",  # only facts with an HLC are replication-eligible
+        "facts.received_from IS NULL",  # do not re-federate inbound facts (§3.1)
+        "facts.entity NOT LIKE 'stigmem:conflict:%'",  # conflict entities are local (§6.5)
+        "facts.relation NOT LIKE 'stigmem:%'",  # meta-facts (received_from, ttl) are local
+        "facts.re_federation_blocked = 0",  # exclude relay-blocked company facts (§6.8.2)
+        "(facts.derived_from IS NULL OR facts.derived_from = '' OR facts.derived_from = '[]')",
     ]
-    params.append("default")
+    params.append(pull_tenant)
+    # F-FED-GARDEN T1 (fail-closed, UNCONDITIONAL — not gated on garden_acl_enforced()
+    # and not routed through the identity read chokepoint): the fact's effective
+    # garden is the PROJECTED garden COALESCE(fgm.garden_id, facts.garden_id). A
+    # fact may egress only if it is in no garden, or in a garden explicitly marked
+    # federatable for this pull tenant.
+    conditions.append(
+        "(COALESCE(fgm.garden_id, facts.garden_id) IS NULL"
+        " OR COALESCE(fgm.garden_id, facts.garden_id) IN"
+        "    (SELECT id FROM gardens WHERE federatable = 1 AND tenant_id = ?))"
+    )
+    params.append(pull_tenant)  # binds the federatable-garden subquery to the pull tenant
+    # F-FED-GARDEN T1: quarantined facts never egress.
+    conditions.append("facts.quarantine_garden_id IS NULL")
     if cursor:
-        conditions.append("hlc > ?")
+        conditions.append("facts.hlc > ?")
         params.append(cursor)
 
     where = " AND ".join(conditions)
@@ -79,7 +102,9 @@ def pull_facts(
 
     with db() as conn:
         rows = conn.execute(
-            f"SELECT * FROM facts WHERE {where} ORDER BY hlc ASC LIMIT ?",  # noqa: S608  # nosec B608 — where built from literal fragments; values in params
+            f"SELECT facts.* FROM facts"  # noqa: S608  # nosec B608 — where built from literal fragments; values in params
+            f" LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = facts.id"
+            f" WHERE {where} ORDER BY facts.hlc ASC LIMIT ?",
             params,
         ).fetchall()
 
@@ -95,9 +120,19 @@ def pull_facts(
         row_to_record(r, contradicted=seen[(r["entity"], r["relation"], r["scope"])] > 1)
         for r in rows
     ]
+    # F-FED-GARDEN T2: a federatable-garden fact may egress, but its garden_id is
+    # a local-membership detail that must not leak to the peer. Strip it from the
+    # emitted record (the DB row is untouched). Restricted-garden facts are already
+    # excluded by the query above, so this only affects allowed federatable facts.
+    for record in records:
+        record.garden_id = None
+    # The egress tenant is RESOLVED from the peer's per-peer pull policy
+    # (``pull_tenant = peer["pull_tenant"] or "default"``); it is not a hardcoded
+    # default pin, so the tenant_context_source is "resolved" (a "pinned" source
+    # must be the literal default tenant — see check_tenant_resolution_consistency).
     tenant = TenantContext(
-        tenant_id="default",
-        metadata={"tenant_context_source": "pinned"},
+        tenant_id=pull_tenant,
+        metadata={"tenant_context_source": "resolved"},
     )
     registry = get_registry()
     records = registry.fire_filter_chain(
@@ -269,6 +304,18 @@ def push_facts(
             detail="peer token or X-Stigmem-Capability header required",
         )
 
+    # F-FED-INGEST-TENANT: resolve the local tenant for this push connection once,
+    # fail-closed. The peer-token path uses the registered peer's pinned policy; the
+    # capability-token path has no registered peer, so it is treated as an unpinned
+    # peer (default on a single-tenant node, PeerPolicyError -> 409 on a multi-tenant
+    # node — an explicit per-peer pin is required to land non-default federated facts).
+    policy_peer: dict[str, Any] = peer if peer is not None else {}
+    try:
+        with db() as conn:
+            tenant_id = resolve_ingest_tenant_for_peer(policy_peer, conn)
+    except PeerPolicyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     facts = body.get("facts", [])
     accepted = 0
     rejected = 0
@@ -279,10 +326,12 @@ def push_facts(
 
         if using_cap_token:
             assert cap_token is not None
-            ok, err = _push_fact_with_cap_token(fact, fact_scope, cap_token)
+            ok, err = _push_fact_with_cap_token(fact, fact_scope, cap_token, tenant_id)
         else:
             assert peer is not None and token_payload is not None
-            ok, err = _push_fact_with_peer_token(fact, fact_scope, peer, token_payload)
+            ok, err = _push_fact_with_peer_token(
+                fact, fact_scope, peer, token_payload, tenant_id
+            )
 
         if ok:
             accepted += 1
@@ -298,6 +347,7 @@ def _push_fact_with_cap_token(
     fact: dict[str, Any],
     fact_scope: str,
     cap_token: dict[str, Any],
+    tenant_id: str,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single fact under capability-token auth.
 
@@ -343,6 +393,7 @@ def _push_fact_with_cap_token(
         _public_module().ingest_fact(
             filtered_fact,
             sender_node_id,
+            tenant_id=tenant_id,
             identity_strength_boost=0.5,  # §19.4.2 boost for valid capability token
         )
         return True, None
@@ -359,6 +410,7 @@ def _push_fact_with_peer_token(
     fact_scope: str,
     peer: dict[str, Any],
     token_payload: dict[str, Any],
+    tenant_id: str,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single fact under peer-JWT auth.
 
@@ -418,6 +470,7 @@ def _push_fact_with_peer_token(
             filtered_fact,
             peer["node_id"],
             origin_allowed_scopes=json.loads(peer["allowed_scopes"]),
+            tenant_id=tenant_id,
         )
         return True, None
     except FederationHlcSkewError:

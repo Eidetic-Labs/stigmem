@@ -72,7 +72,7 @@ class TestPullEndpoint:
         sender = "stigmem://node-b-order"
         facts = [make_federated_fact(entity=f"order:e{i}", hlc_offset_ms=i * 10) for i in range(5)]
         for f in facts:
-            ingest_fact(f, sender)
+            ingest_fact(f, sender, tenant_id="default")
 
         token = make_peer_token(node_b_priv, node_b_id, fed_node.node_id, ["public"])
         r = fed_node.client.get(

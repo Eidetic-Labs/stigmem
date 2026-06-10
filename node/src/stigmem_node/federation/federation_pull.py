@@ -18,7 +18,12 @@ import httpx
 from ..db import db
 from ..observability.metrics import FEDERATION_INGRESS, REPLICATION_LAG
 from ..settings import settings
-from .federation_ingest import FederationIntegrityError, ingest_fact, write_audit_log
+from .federation_ingest import (
+    FederationIntegrityError,
+    ingest_fact,
+    write_audit_log,
+)
+from .peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
 from .peer_token import create_peer_token
 from .tls import check_peer_san
 
@@ -114,6 +119,28 @@ async def pull_from_peer_once(
                 )
 
         data = resp.json()
+
+        # F-FED-INGEST-TENANT: resolve the local tenant this peer's inbound facts
+        # are stamped into (fail-closed per peer policy). A misconfigured peer
+        # (non-default tenant without the multi-tenant plugin, or an unpinned peer
+        # on a multi-tenant node) yields a PeerPolicyError — skip this whole page
+        # rather than silently land facts in 'default'.
+        try:
+            with db() as conn:
+                tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+        except PeerPolicyError as exc:
+            logger.warning(
+                "Skipping pull from %s: peer tenant policy unsafe: %s",
+                peer["node_id"],
+                exc,
+            )
+            write_audit_log(
+                peer["node_id"],
+                "federation_tenant_policy_rejected",
+                {"reason": str(exc)},
+            )
+            return cursor  # fail-closed: ingest nothing from a mis-pinned peer
+
         # origin_allowed_scopes = peer's registered declaration scope (spec §6.8.1).
         # These fields are internal and MUST NOT be re-replicated (§3.1), so we
         # derive them from the peer registry rather than reading from the fact payload.
@@ -124,6 +151,7 @@ async def pull_from_peer_once(
                     fact,
                     peer["node_id"],
                     origin_allowed_scopes=allowed_scopes,
+                    tenant_id=tenant_id,
                 )
             except FederationIntegrityError as exc:
                 logger.warning(
@@ -230,6 +258,29 @@ async def pull_tombstones_from_peer_once(
             },
         )
 
+    # F-FED-TOMBSTONE-TENANT: resolve the local tenant this peer's inbound data
+    # lands in (fail-closed per peer policy — same helper as fact ingest in
+    # Task 3). The recall-time suppression filter keys on (entity_uri, tenant_id),
+    # so an inbound tombstone MUST be stamped with the peer's tenant rather than
+    # the hardcoded 'default'; otherwise a peer's RTBF tombstone could suppress a
+    # different tenant's facts. A mis-pinned peer yields PeerPolicyError — skip the
+    # whole page rather than land tombstones in the wrong tenant.
+    try:
+        with db() as conn:
+            tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+    except PeerPolicyError as exc:
+        logger.warning(
+            "Skipping tombstone pull from %s: peer tenant policy unsafe: %s",
+            peer["node_id"],
+            exc,
+        )
+        write_audit_log(
+            peer["node_id"],
+            "federation_tenant_policy_rejected",
+            {"reason": str(exc), "surface": "tombstones"},
+        )
+        return cursor  # fail-closed: apply nothing from a mis-pinned peer
+
     # Ingest tombstones and revocations
     from ..lifecycle.tombstones import apply_inbound_revocation, apply_inbound_tombstone
     from ..models.tombstones import TombstoneRecord, TombstoneRevocationRecord
@@ -237,7 +288,7 @@ async def pull_tombstones_from_peer_once(
     for t in tombstones:
         try:
             record = TombstoneRecord(**t)
-            apply_inbound_tombstone(record)
+            apply_inbound_tombstone(record, tenant_id=tenant_id)
         except Exception as exc:
             logger.warning("Tombstone ingest from %s failed: %s", peer["node_id"], exc)
 
@@ -276,7 +327,8 @@ async def pull_all_peers_once() -> None:
     """Pull one batch from every active peer. Called by the loop and by tests."""
     with db() as conn:
         peers = conn.execute(
-            "SELECT id, node_id, node_url, allowed_scopes FROM peers WHERE status = 'active'"
+            "SELECT id, node_id, node_url, allowed_scopes, ingest_tenant, pull_tenant "
+            "FROM peers WHERE status = 'active'"
         ).fetchall()
 
     if not peers:

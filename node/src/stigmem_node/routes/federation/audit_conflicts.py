@@ -84,8 +84,15 @@ def list_conflicts(
     if not identity.can_read():
         raise HTTPException(status_code=403, detail="read permission required")
 
-    conditions: list[str] = []
-    params: list[Any] = []
+    # F-FED-CONFLICT-TENANT: the conflicts table carries no tenant_id, but the
+    # facts it references do (ingest stamps tenant on both the facts and the
+    # conflict facts). Scope the operator view to the caller's tenant by requiring
+    # the conflict's fact_a to live in identity.tenant_id — otherwise an admin
+    # scoped to tenant A could enumerate a conflict (and its facts) from tenant B.
+    conditions: list[str] = [
+        "EXISTS (SELECT 1 FROM facts f WHERE f.id = c.fact_a_id AND f.tenant_id = ?)"
+    ]
+    params: list[Any] = [identity.tenant_id]
     if conflict_status:
         conditions.append("c.status = ?")
         params.append(conflict_status)
@@ -93,7 +100,7 @@ def list_conflicts(
         conditions.append("c.id > ?")
         params.append(cursor)
 
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where = f"WHERE {' AND '.join(conditions)}"
     params.append(limit + 1)
 
     with db() as conn:
@@ -109,8 +116,14 @@ def list_conflicts(
 
         conflicts: list[dict[str, Any]] = []
         for r in rows[:limit]:
-            fa = conn.execute("SELECT * FROM facts WHERE id = ?", (r["fact_a_id"],)).fetchone()
-            fb = conn.execute("SELECT * FROM facts WHERE id = ?", (r["fact_b_id"],)).fetchone()
+            fa = conn.execute(
+                "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
+                (r["fact_a_id"], identity.tenant_id),
+            ).fetchone()
+            fb = conn.execute(
+                "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
+                (r["fact_b_id"], identity.tenant_id),
+            ).fetchone()
             conflicts.append(
                 {
                     "conflict_id": r["id"],
@@ -155,16 +168,30 @@ def resolve_conflict(
     with db() as conn:
         conflict = conn.execute("SELECT * FROM conflicts WHERE id = ?", (conflict_id,)).fetchone()
 
+        # F-FED-CONFLICT-TENANT: a conflict is only visible/resolvable to a caller
+        # whose tenant owns the conflicting facts. Treat a cross-tenant conflict as
+        # not found (don't leak its existence) by requiring fact_a to live in the
+        # caller's tenant.
+        if conflict is not None:
+            owns = conn.execute(
+                "SELECT 1 FROM facts WHERE id = ? AND tenant_id = ?",
+                (conflict["fact_a_id"], identity.tenant_id),
+            ).fetchone()
+            if owns is None:
+                conflict = None
+
         if conflict is None:
             raise HTTPException(status_code=404, detail="conflict not found")
         if conflict["status"] == "resolved":
             raise HTTPException(status_code=409, detail="conflict already resolved")
 
         fact_a = conn.execute(
-            "SELECT * FROM facts WHERE id = ?", (conflict["fact_a_id"],)
+            "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
+            (conflict["fact_a_id"], identity.tenant_id),
         ).fetchone()
         fact_b = conn.execute(
-            "SELECT * FROM facts WHERE id = ?", (conflict["fact_b_id"],)
+            "SELECT * FROM facts WHERE id = ? AND tenant_id = ?",
+            (conflict["fact_b_id"], identity.tenant_id),
         ).fetchone()
 
         if fact_a is None or fact_b is None:
@@ -202,8 +229,8 @@ def resolve_conflict(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 resolution_fact_id,
                 resolution_entity,
@@ -217,6 +244,7 @@ def resolve_conflict(
                 fact_a["scope"],
                 hlc_res,
                 None,
+                identity.tenant_id,
             ),
         )
 
@@ -225,8 +253,8 @@ def resolve_conflict(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid.uuid4()),
                 resolution_fact_id,
@@ -240,6 +268,7 @@ def resolve_conflict(
                 fact_a["scope"],
                 hlc_meta,
                 None,
+                identity.tenant_id,
             ),
         )
 
@@ -248,8 +277,8 @@ def resolve_conflict(
         conn.execute(
             """INSERT INTO facts
                (id, entity, relation, value_type, value_v, source, timestamp,
-                valid_until, confidence, scope, hlc, received_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                valid_until, confidence, scope, hlc, received_from, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid.uuid4()),
                 conflict_id,
@@ -263,6 +292,7 @@ def resolve_conflict(
                 fact_a["scope"],
                 hlc_status,
                 None,
+                identity.tenant_id,
             ),
         )
 

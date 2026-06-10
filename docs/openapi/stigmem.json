@@ -2103,6 +2103,60 @@
         "title": "PeerApprovalResponse",
         "type": "object"
       },
+      "PeerPolicyPatch": {
+        "description": "Operator-settable per-peer tenant policy (migration 041).",
+        "properties": {
+          "allowed_tenants": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tenants"
+          },
+          "ingest_tenant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ingest Tenant"
+          },
+          "pull_tenant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Tenant"
+          },
+          "trust_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust Tier"
+          }
+        },
+        "title": "PeerPolicyPatch",
+        "type": "object"
+      },
       "PeerRegisterRequest": {
         "properties": {
           "allowed_scopes": {
@@ -6098,6 +6152,65 @@
           }
         ],
         "summary": "Register Peer",
+        "tags": [
+          "federation"
+        ]
+      }
+    },
+    "/v1/federation/peers/{peer_id}": {
+      "patch": {
+        "operationId": "patch_peer_policy_v1_federation_peers__peer_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "peer_id",
+            "required": true,
+            "schema": {
+              "title": "Peer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeerPolicyPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Peer Policy V1 Federation Peers  Peer Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Peer Policy",
         "tags": [
           "federation"
         ]

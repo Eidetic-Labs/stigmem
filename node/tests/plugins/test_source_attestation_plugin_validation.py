@@ -213,6 +213,7 @@ def test_default_install_ignores_federation_environment_gates(monkeypatch) -> No
         "public",
         peer,
         {"scopes": ["public"]},
+        "default",
     )
 
     assert ok is True
@@ -245,6 +246,7 @@ def test_plugin_loaded_preserves_federated_fact_attestation_boundary(monkeypatch
             "public",
             peer,
             {"scopes": ["public"]},
+            "default",
         )
 
     assert ok is True
@@ -278,6 +280,7 @@ def test_plugin_loaded_preserves_baseline_federation_inbound_match(monkeypatch) 
             "public",
             peer,
             {"scopes": ["public"]},
+            "default",
         )
 
     assert ok is True

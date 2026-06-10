@@ -70,9 +70,9 @@ class TestPartialFailure:
             "valid_until": None,
         }
 
-        r1 = ingest_fact(fact, "stigmem://remote")
-        r2 = ingest_fact(fact, "stigmem://remote")  # replay
-        r3 = ingest_fact(fact, "stigmem://remote")  # triple replay
+        r1 = ingest_fact(fact, "stigmem://remote", tenant_id="default")
+        r2 = ingest_fact(fact, "stigmem://remote", tenant_id="default")  # replay
+        r3 = ingest_fact(fact, "stigmem://remote", tenant_id="default")  # triple replay
 
         assert r1 is True
         assert r2 is False  # already exists — no-op
@@ -159,18 +159,18 @@ class TestPartialFailure:
 
         # Batch 1: ingest facts 0–9, save cursor
         for f in facts[:10]:
-            ingest_fact(f, sender)
+            ingest_fact(f, sender, tenant_id="default")
         save_cursor(peer_id, facts[9]["hlc"])
 
         # Simulate partial batch: ingest 10–14 but do NOT save cursor
         for f in facts[10:15]:
-            ingest_fact(f, sender)
+            ingest_fact(f, sender, tenant_id="default")
         # cursor still points to facts[9]["hlc"]
         assert load_cursor(peer_id) == facts[9]["hlc"]
 
         # Resume: re-ingest facts 10–14 (idempotent no-ops) + ingest 15–19
         for f in facts[10:]:  # 10–19; 10–14 are re-plays
-            ingest_fact(f, sender)
+            ingest_fact(f, sender, tenant_id="default")
         save_cursor(peer_id, facts[19]["hlc"])
 
         # Verify final state: exactly 20 unique user facts (+ meta-facts)
@@ -206,7 +206,8 @@ class TestPartialFailure:
         from stigmem_node.federation_ingest import ingest_fact
 
         with pytest.raises(KeyError):
-            ingest_fact({"id": "bad"}, "stigmem://broken")  # missing required fields
+            # missing required fields
+            ingest_fact({"id": "bad"}, "stigmem://broken", tenant_id="default")
 
         # Local read still works
         r2 = fed_node.client.get("/v1/facts?entity=test:local")
@@ -233,7 +234,7 @@ class TestPartialFailure:
         }
 
         with pytest.raises(FederationHlcSkewError) as caught:
-            ingest_fact(fact, "stigmem://remote-future")
+            ingest_fact(fact, "stigmem://remote-future", tenant_id="default")
 
         assert caught.value.direction == "future"
 
@@ -273,7 +274,7 @@ class TestPartialFailure:
         }
 
         with pytest.raises(FederationHlcSkewError) as caught:
-            ingest_fact(fact, "stigmem://remote-past")
+            ingest_fact(fact, "stigmem://remote-past", tenant_id="default")
 
         assert caught.value.direction == "past"
 

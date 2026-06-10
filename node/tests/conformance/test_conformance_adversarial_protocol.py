@@ -90,7 +90,7 @@ def _run_instruction_federation_inbound_quarantine(
     )
     fact["value"]["interpret_as"] = "instruction"
     fact["confidence"] = 0.4
-    assert ingest_fact(fact, "stigmem://protocol-peer") is True
+    assert ingest_fact(fact, "stigmem://protocol-peer", tenant_id="default") is True
 
     with _db_ctx() as conn:
         row = conn.execute(
@@ -148,7 +148,7 @@ def _run_far_future_hlc_rejected(vector: dict[str, Any], fed_node: FedNode) -> N
     fact["hlc"] = f"{future_ms}.000"
 
     with pytest.raises(FederationHlcSkewError) as exc_info:
-        ingest_fact(fact, "stigmem://protocol-peer-hlc")
+        ingest_fact(fact, "stigmem://protocol-peer-hlc", tenant_id="default")
 
     assert vector["expected_error"] == "hlc_skew"
     assert exc_info.value.direction == vector["expected_direction"]

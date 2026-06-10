@@ -70,8 +70,8 @@ def _rejection_audit(fact_id: str) -> dict | None:
 def test_first_observation_accepts_and_idempotent_replay_noops(fed_node) -> None:
     fact = _fact(valid_until="2027-01-01T00:00:00+00:00")
 
-    assert ingest_fact(fact, sender_node_id=SENDER) is True
-    assert ingest_fact(fact, sender_node_id=SENDER) is False
+    assert ingest_fact(fact, sender_node_id=SENDER, tenant_id="default") is True
+    assert ingest_fact(fact, sender_node_id=SENDER, tenant_id="default") is False
 
     assert _stored_valid_until(fact["id"]) == "2027-01-01T00:00:00+00:00"
     assert _rejection_audit(fact["id"]) is None
@@ -84,7 +84,7 @@ def test_valid_until_extension_rejects_and_audits(fed_node) -> None:
     with pytest.raises(FederationValidUntilExtensionError):
         ingest_fact(
             _fact(fact_id=fact_id, valid_until="2027-06-01T00:00:00+00:00"),
-            sender_node_id=SENDER,
+            sender_node_id=SENDER, tenant_id="default",
         )
 
     assert _stored_valid_until(fact_id) == "2027-01-01T00:00:00+00:00"
@@ -105,7 +105,7 @@ def test_valid_until_shrinkage_noops_without_mutating_local_value(fed_node) -> N
     assert (
         ingest_fact(
             _fact(fact_id=fact_id, valid_until="2027-01-01T00:00:00+00:00"),
-            sender_node_id=SENDER,
+            sender_node_id=SENDER, tenant_id="default",
         )
         is False
     )
@@ -121,7 +121,7 @@ def test_local_unbounded_visibility_wins_over_incoming_finite_expiry(fed_node) -
     assert (
         ingest_fact(
             _fact(fact_id=fact_id, valid_until="2027-01-01T00:00:00+00:00"),
-            sender_node_id=SENDER,
+            sender_node_id=SENDER, tenant_id="default",
         )
         is False
     )
@@ -135,7 +135,9 @@ def test_incoming_unbounded_visibility_rejects_when_local_has_expiry(fed_node) -
     _seed_fact(fact_id=fact_id, valid_until="2027-01-01T00:00:00+00:00")
 
     with pytest.raises(FederationValidUntilExtensionError):
-        ingest_fact(_fact(fact_id=fact_id, valid_until=None), sender_node_id=SENDER)
+        ingest_fact(
+            _fact(fact_id=fact_id, valid_until=None), sender_node_id=SENDER, tenant_id="default"
+        )
 
     assert _stored_valid_until(fact_id) == "2027-01-01T00:00:00+00:00"
     assert _rejection_audit(fact_id) is not None
@@ -148,7 +150,7 @@ def test_same_instant_different_timezone_noops(fed_node) -> None:
     assert (
         ingest_fact(
             _fact(fact_id=fact_id, valid_until="2027-01-01T04:00:00+04:00"),
-            sender_node_id=SENDER,
+            sender_node_id=SENDER, tenant_id="default",
         )
         is False
     )

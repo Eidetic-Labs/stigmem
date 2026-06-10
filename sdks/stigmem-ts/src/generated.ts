@@ -774,6 +774,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/federation/peers/{peer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Peer Policy */
+        patch: operations["patch_peer_policy_v1_federation_peers__peer_id__patch"];
+        trace?: never;
+    };
     "/v1/federation/peers/{peer_id}/approve": {
         parameters: {
             query?: never;
@@ -2113,6 +2130,20 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * PeerPolicyPatch
+         * @description Operator-settable per-peer tenant policy (migration 041).
+         */
+        PeerPolicyPatch: {
+            /** Allowed Tenants */
+            allowed_tenants?: string[] | null;
+            /** Ingest Tenant */
+            ingest_tenant?: string | null;
+            /** Pull Tenant */
+            pull_tenant?: string | null;
+            /** Trust Tier */
+            trust_tier?: string | null;
+        };
         /** PeerRegisterRequest */
         PeerRegisterRequest: {
             /** Allowed Scopes */
@@ -2712,6 +2743,7 @@ export type SchemaNeighborItem = components['schemas']['NeighborItem'];
 export type SchemaNeighborsResponse = components['schemas']['NeighborsResponse'];
 export type SchemaPeerApprovalRequest = components['schemas']['PeerApprovalRequest'];
 export type SchemaPeerApprovalResponse = components['schemas']['PeerApprovalResponse'];
+export type SchemaPeerPolicyPatch = components['schemas']['PeerPolicyPatch'];
 export type SchemaPeerRegisterRequest = components['schemas']['PeerRegisterRequest'];
 export type SchemaPeerRegisterResponse = components['schemas']['PeerRegisterResponse'];
 export type SchemaPreference = components['schemas']['Preference'];
@@ -4043,6 +4075,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PeerRegisterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_peer_policy_v1_federation_peers__peer_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                peer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerPolicyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

@@ -299,8 +299,16 @@ def list_revocations(since: str | None = None) -> list[TombstoneRevocationRecord
     return [_row_to_revocation(r) for r in rows]
 
 
-def apply_inbound_tombstone(record: TombstoneRecord) -> bool:
+def apply_inbound_tombstone(record: TombstoneRecord, tenant_id: str = "default") -> bool:
     """Apply an inbound tombstone from federation (§23.4.2). Idempotent on id.
+
+    ``tenant_id`` is the local tenant this peer's inbound data is stamped into
+    (resolved fail-closed by ``resolve_ingest_tenant_for_peer``). The wire
+    ``TombstoneRecord`` carries no tenant in Phase 1, so the receiving node's
+    per-peer policy decides it. The recall-time suppression filter keys on
+    ``(entity_uri, tenant_id)`` — landing every inbound tombstone in ``default``
+    would let a peer's RTBF tombstone suppress a *different* tenant's facts (and
+    fail to suppress its own tenant's facts), so the tenant MUST be threaded here.
 
     Returns True if written, False if already existed.
     Caller MUST verify signature before calling this.
@@ -334,11 +342,16 @@ def apply_inbound_tombstone(record: TombstoneRecord) -> bool:
                 record.signature,
                 record.created_at,
                 int(record.legal_hold),
-                "default",
+                tenant_id,
             ),
         )
     invalidate_tombstone_cache()
-    logger.info("Inbound tombstone applied: %s for %s", record.id, record.entity_uri)
+    logger.info(
+        "Inbound tombstone applied: %s for %s (tenant=%s)",
+        record.id,
+        record.entity_uri,
+        tenant_id,
+    )
     return True
 
 

@@ -38,8 +38,8 @@ class TestPartialFailure:
     def test_ingest_fact_is_idempotent(self, fed_node: FedNode) -> None:
         """Re-ingesting a fact with the same ID is a silent no-op."""
         fact = make_federated_fact()
-        result1 = ingest_fact(fact, "stigmem://node-b")
-        result2 = ingest_fact(fact, "stigmem://node-b")
+        result1 = ingest_fact(fact, "stigmem://node-b", tenant_id="default")
+        result2 = ingest_fact(fact, "stigmem://node-b", tenant_id="default")
 
         assert result1 is True
         assert result2 is False  # no-op
@@ -53,8 +53,8 @@ class TestPartialFailure:
     def test_received_from_meta_fact_written_once(self, fed_node: FedNode) -> None:
         """stigmem:received_from meta-fact is written exactly once per federated fact."""
         fact = make_federated_fact()
-        ingest_fact(fact, "stigmem://node-b-meta")
-        ingest_fact(fact, "stigmem://node-b-meta")  # second ingest is no-op
+        ingest_fact(fact, "stigmem://node-b-meta", tenant_id="default")
+        ingest_fact(fact, "stigmem://node-b-meta", tenant_id="default")  # second ingest is no-op
 
         with _db_ctx() as conn:
             meta_count = conn.execute(
@@ -67,7 +67,7 @@ class TestPartialFailure:
     def test_ingest_fact_verifies_and_stores_inbound_cid(self, fed_node: FedNode) -> None:
         fact = _with_cid(make_federated_fact())
 
-        assert ingest_fact(fact, "stigmem://node-b") is True
+        assert ingest_fact(fact, "stigmem://node-b", tenant_id="default") is True
 
         with _db_ctx() as conn:
             row = conn.execute("SELECT cid FROM facts WHERE id = ?", (fact["id"],)).fetchone()
@@ -79,7 +79,7 @@ class TestPartialFailure:
         fact["cid"] = "sha256:" + ("0" * 64)
 
         with pytest.raises(FederationIntegrityError) as exc_info:
-            ingest_fact(fact, "stigmem://node-b")
+            ingest_fact(fact, "stigmem://node-b", tenant_id="default")
 
         assert exc_info.value.reason == "cid_mismatch"
         with _db_ctx() as conn:
@@ -134,7 +134,7 @@ class TestPartialFailure:
 
         # Step 2: ingest first 10
         for f in facts[:10]:
-            ingest_fact(f, sender)
+            ingest_fact(f, sender, tenant_id="default")
 
         with _db_ctx() as conn:
             first_count = conn.execute(
@@ -144,7 +144,7 @@ class TestPartialFailure:
 
         # Step 3: simulate cursor rollback — re-ingest from index 5 (facts 5–19)
         for f in facts[5:]:
-            ingest_fact(f, sender)
+            ingest_fact(f, sender, tenant_id="default")
 
         with _db_ctx() as conn:
             final_count = conn.execute(
@@ -194,7 +194,7 @@ class TestInstructionInboundQuarantine:
         fact["value"]["interpret_as"] = "instruction"
 
         with pytest.raises(HTTPException) as exc_info:
-            ingest_fact(fact, "stigmem://node-b-instruction")
+            ingest_fact(fact, "stigmem://node-b-instruction", tenant_id="default")
 
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == "quarantine_garden_required"
@@ -219,7 +219,7 @@ class TestInstructionInboundQuarantine:
         fact["confidence"] = 0.4
         sender = "stigmem://node-b-instruction"
 
-        assert ingest_fact(fact, sender) is True
+        assert ingest_fact(fact, sender, tenant_id="default") is True
 
         with _db_ctx() as conn:
             row = conn.execute(
