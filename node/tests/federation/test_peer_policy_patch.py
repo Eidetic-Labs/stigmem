@@ -11,6 +11,7 @@ import uuid
 from conftest import FedNode
 
 from stigmem_node.auth import create_api_key
+from stigmem_node.db import db as _db_ctx
 
 from .helpers import generate_ed25519_b64, insert_active_peer
 
@@ -60,6 +61,15 @@ class TestPeerPolicyPatch:
         assert row["pull_tenant"] == "tenant-a"
         assert row["trust_tier"] == "cross_org"
         assert row["allowed_tenants"] == []
+
+        # A security-relevant policy mutation must leave a federation_audit trail.
+        with _db_ctx() as conn:
+            audit = conn.execute(
+                "SELECT * FROM federation_audit "
+                "WHERE peer_id = ? AND event_type = 'peer_policy_updated'",
+                (peer_id,),
+            ).fetchone()
+        assert audit is not None, "peer_policy_updated audit entry must be written"
 
     def test_admin_patch_allowed_tenants_list(self, fed_node: FedNode) -> None:
         peer_id = _seed_peer(fed_node)

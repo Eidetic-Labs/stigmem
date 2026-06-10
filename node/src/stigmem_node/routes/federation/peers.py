@@ -17,7 +17,7 @@ from ...models.federation import (
     PeerRegisterResponse,
 )
 from .._federation_impl import approve_peer_impl, register_peer_impl
-from .common import router
+from .common import _public_module, router
 
 
 @router.post(
@@ -107,7 +107,13 @@ def patch_peer_policy(
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="peer not found")
         conn.commit()
-    return {"peer_id": peer_id, "updated": [s.split(" =")[0] for s in sets]}
+    updated = [s.split(" =")[0] for s in sets]
+    _public_module().write_audit_log(
+        peer_id,
+        "peer_policy_updated",
+        {"updated": updated, "by": identity.entity_uri},
+    )
+    return {"peer_id": peer_id, "updated": updated}
 
 
 # ---------------------------------------------------------------------------
