@@ -69,6 +69,8 @@ data/*.db-wal
 stigmem.db
 stigmem.db-shm
 stigmem.db-wal
+# Transparency-log local backend file (settings.tl_local_path default; written into CWD by tests)
+stigmem_tl.jsonl
 logs/
 # Eval results (CI-generated artifacts)
 eval/results/
