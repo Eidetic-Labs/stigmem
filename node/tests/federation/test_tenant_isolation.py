@@ -3,6 +3,12 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+from stigmem_node.federation.peer_policy import (
+    PeerPolicyError,
+    resolve_ingest_tenant,
+)
 from stigmem_node.storage import make_backend
 
 
@@ -23,3 +29,30 @@ def test_migration_041_adds_policy_columns(tmp_path: Path) -> None:
         str(db_path), "peers"
     )
     assert "federatable" in _cols(str(db_path), "gardens")
+
+
+def test_resolve_ingest_tenant_pinned() -> None:
+    assert resolve_ingest_tenant({"ingest_tenant": "tenant-a"}, plugin_active=True) == "tenant-a"
+
+
+def test_resolve_ingest_tenant_explicit_default_ok_without_plugin() -> None:
+    assert resolve_ingest_tenant({"ingest_tenant": "default"}, plugin_active=False) == "default"
+
+
+def test_resolve_ingest_tenant_nondefault_without_plugin_fails_closed() -> None:
+    with pytest.raises(PeerPolicyError):
+        resolve_ingest_tenant({"ingest_tenant": "tenant-a"}, plugin_active=False)
+
+
+def test_resolve_ingest_tenant_unpinned_on_multitenant_node_fails_closed() -> None:
+    with pytest.raises(PeerPolicyError):
+        resolve_ingest_tenant({"ingest_tenant": None}, plugin_active=True, node_is_multitenant=True)
+
+
+def test_resolve_ingest_tenant_unpinned_single_tenant_node_defaults() -> None:
+    assert (
+        resolve_ingest_tenant(
+            {"ingest_tenant": None}, plugin_active=False, node_is_multitenant=False
+        )
+        == "default"
+    )
