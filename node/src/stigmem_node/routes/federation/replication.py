@@ -491,11 +491,12 @@ def _push_fact_with_cap_token(
             return False, err
         assert local_tenant is not None
 
+        # The cap-token push tenant is RESOLVED per-fact from the origin's
+        # per-peer tenant map (``resolve_origin_tenant_for_peer``), not a
+        # hardcoded default pin, so the tenant_context_source is "resolved".
         tenant = TenantContext(
             tenant_id=local_tenant,
-            metadata={
-                "tenant_context_source": "pinned" if local_tenant == "default" else "resolved"
-            },
+            metadata={"tenant_context_source": "resolved"},
         )
         registry = get_registry()
         decision = registry.fire_voting(
@@ -585,11 +586,12 @@ def _push_fact_with_peer_token(
             return False, err
         assert local_tenant is not None
 
+        # The peer-token push tenant is RESOLVED per-fact from the origin's
+        # per-peer tenant map (``resolve_origin_tenant_for_peer``), not a
+        # hardcoded default pin, so the tenant_context_source is "resolved".
         tenant = TenantContext(
             tenant_id=local_tenant,
-            metadata={
-                "tenant_context_source": "pinned" if local_tenant == "default" else "resolved"
-            },
+            metadata={"tenant_context_source": "resolved"},
         )
         registry = get_registry()
         decision = registry.fire_voting(
