@@ -39,11 +39,23 @@ def test_wellknown_publishes_entity_uri(fed_node):
     assert body["entity_uri"]  # non-empty (defaults to node_url when unset)
 
 
-def test_get_node_entity_uri_defaults_to_node_url():
+def test_get_node_entity_uri_defaults_to_node_url(monkeypatch):
+    """Contract: falls back to node_url when entity_uri is empty, else returns entity_uri.
+
+    Pins the actual field returned (non-tautological): the assertion fails if the
+    helper returned the wrong setting.
+    """
     from stigmem_node.db import get_node_entity_uri
     from stigmem_node.settings import settings
 
-    assert get_node_entity_uri() in (settings.entity_uri or settings.node_url, settings.node_url)
+    # Empty entity_uri -> node_url
+    monkeypatch.setattr(settings, "entity_uri", "")
+    monkeypatch.setattr(settings, "node_url", "http://fallback-node")
+    assert get_node_entity_uri() == "http://fallback-node"
+
+    # Explicit entity_uri -> that value (distinct from node_url so it can't pass by accident)
+    monkeypatch.setattr(settings, "entity_uri", "https://explicit.example")
+    assert get_node_entity_uri() == "https://explicit.example"
 
 
 def _store_peer_with_manifest(node_id, entity_uri, pub_b64, priv):
@@ -103,6 +115,101 @@ def test_resolve_origin_key_returns_manifest_pubkey(client):
 
     keys = resolve_origin_key("stigmem:node:o1")
     assert pub_b64 in keys
+
+
+def _store_peer_with_manifest_obj(node_id, entity_uri, manifest):
+    """Insert an active peer bound to entity_uri and store a pre-built manifest.
+
+    Variant of _store_peer_with_manifest that takes an already-signed OrgManifest
+    (e.g. one carrying rotation_events) instead of building a fresh single-key one.
+    The peers.federation_pubkey is set to the manifest's current public_key so the
+    row is internally consistent.
+    """
+    from stigmem_node.db import db
+    from stigmem_node.identity.trust_store import store_peer_manifest
+
+    store_peer_manifest(entity_uri, manifest, None, trust_mode="relaxed")
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO peers (id, node_id, node_url, federation_pubkey, allowed_scopes, "
+            "status, entity_uri, declaration_sig, signed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                node_id,
+                node_id,
+                "http://x",
+                manifest.public_key,
+                "[]",
+                "active",
+                entity_uri,
+                "SIG",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        conn.commit()
+
+
+def test_resolve_origin_key_returns_current_and_rotation_window_prior_key(client):
+    """Dual-trust: resolve_origin_key returns BOTH the current key AND the prior key
+    inside the most-recent rotation window (§22.2).
+
+    Builds a real, valid rotation chain via rotate_key(dry_run=True): the resulting
+    manifest is self-signed by the NEW key and its last rotation_event carries
+    previous_public_key = the OLD key. The manifest must still pass verify_manifest.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from stigmem_node.federation.origin_identity import resolve_origin_key
+    from stigmem_node.identity.key_rotation import generate_key_id, rotate_key
+    from stigmem_node.identity.manifest import OrgManifest, sign_manifest, verify_manifest
+
+    node_id = "stigmem:node:rot"
+    entity_uri = "https://rot.example"
+
+    # --- old (retiring) keypair + its signed manifest ---
+    old_priv = Ed25519PrivateKey.generate()
+    old_pub_b64 = (
+        base64.urlsafe_b64encode(
+            old_priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        )
+        .decode()
+        .rstrip("=")
+    )
+    old_manifest = OrgManifest(
+        entity_uri=entity_uri,
+        key_id=generate_key_id(old_priv.public_key()),
+        public_key=old_pub_b64,
+        issued_at="2026-01-01T00:00:00Z",
+        expires_at="2026-12-01T00:00:00Z",
+        entities=[entity_uri, node_id],
+    )
+    sign_manifest(old_manifest, old_priv)
+
+    # --- rotate to a new key (dry_run: no TL writes); produces a valid chained manifest ---
+    result = rotate_key(
+        entity_uri,
+        old_manifest,
+        old_priv,
+        manifest_validity_days=300,  # well within strict 365-day window
+        dry_run=True,
+    )
+    new_manifest = result.new_manifest
+
+    # Sanity: the chain is well-formed — last event carries the retiring key as
+    # previous_public_key, and the manifest self-verifies.
+    assert new_manifest.rotation_events, "rotate_key must append a rotation event"
+    assert new_manifest.rotation_events[-1].previous_public_key == old_pub_b64
+    assert verify_manifest(new_manifest, trust_mode="relaxed") is True
+
+    _store_peer_with_manifest_obj(node_id, entity_uri, new_manifest)
+
+    keys = resolve_origin_key(node_id)
+    # BOTH the current key and the rotation-window prior key are accepted.
+    assert new_manifest.public_key in keys
+    assert old_pub_b64 in keys
+    assert keys == {new_manifest.public_key, old_pub_b64}
 
 
 def test_resolve_origin_key_unbound_peer_fails_closed(client):
@@ -198,12 +305,28 @@ def _mock_well_known(monkeypatch, peer_pub, entity_uri, manifest_json=None):
         _MockAsyncClient,
     )
     # The approval-time fetch guards the URL with assert_safe_url (SSRF defence), which
-    # does a real DNS lookup of the synthetic test hostname and would raise before the
-    # mocked client is reached. No-op it so the binding path under test actually runs;
-    # the SSRF guard itself is covered by tests/utility/test_net_util.py.
+    # does a real DNS lookup (socket.getaddrinfo) of the synthetic test hostname and would
+    # raise before the mocked client is reached. We can't let the real guard run, but a bare
+    # no-op would silently let ANY URL through and stop proving the guard is even invoked.
+    # Instead, install a stub that ASSERTS the guard was called on the peer's node_url with
+    # the expected scheme allowlist — so the test still verifies the SSRF check runs on the
+    # right input. The guard's own block/allow logic stays covered by
+    # tests/utility/test_net_util.py.
+    from urllib.parse import urlparse as _urlparse
+
+    def _asserting_safe_url(url, *, allow_schemes=frozenset({"https"})):
+        parsed = _urlparse(url)
+        # _check_tl_inclusion_for_peer must call this on the peer's node_url, and the
+        # production call passes http+https as the allowed schemes.
+        assert parsed.scheme in allow_schemes, f"unexpected scheme {parsed.scheme!r} for {url!r}"
+        assert allow_schemes == frozenset({"https", "http"}), (
+            f"SSRF guard invoked with unexpected allow_schemes {allow_schemes!r}"
+        )
+        assert parsed.hostname, f"SSRF guard invoked on URL with no host: {url!r}"
+
     monkeypatch.setattr(
         "stigmem_node.routes._federation_impl.assert_safe_url",
-        lambda *a, **kw: None,
+        _asserting_safe_url,
     )
 
 

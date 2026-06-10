@@ -116,14 +116,13 @@ def make_manifest(
 
 @pytest.fixture()
 def identity_client(tmp_path: Path) -> Generator[TestClient, None, None]:
-    import stigmem_node.federation.peer_token as token_mod
-
     db_file = str(tmp_path / "identity_test.db")
     apply_migrations(db_path=db_file)
 
     # Seed this node's federation keypair so the peer_token cache is deterministic for
     # the whole fixture lifetime (Fed Phase 2a: PUT /manifest requires the manifest
     # public_key to equal this node's federation key, read via get_local_pubkey()).
+    # seed_fed_keypair() encapsulates the cache seed/reset (try/finally).
     fed_pub, fed_priv = generate_keypair()
 
     test_settings = Settings(
@@ -136,22 +135,14 @@ def identity_client(tmp_path: Path) -> Generator[TestClient, None, None]:
         federation_privkey=fed_priv,
     )
 
-    token_mod._cached_pub = fed_pub
-    token_mod._cached_priv = fed_priv
-    try:
-        with patched_test_settings(test_settings):
-            app = create_app()
-            with TestClient(app, raise_server_exceptions=True) as client:
-                yield client
-    finally:
-        token_mod._cached_pub = None
-        token_mod._cached_priv = None
+    with seed_fed_keypair(fed_pub, fed_priv), patched_test_settings(test_settings):
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as client:
+            yield client
 
 
 @pytest.fixture()
 def strict_client(tmp_path: Path) -> Generator[TestClient, None, None]:
-    import stigmem_node.federation.peer_token as token_mod
-
     db_file = str(tmp_path / "strict_test.db")
     apply_migrations(db_path=db_file)
 
@@ -167,13 +158,7 @@ def strict_client(tmp_path: Path) -> Generator[TestClient, None, None]:
         federation_privkey=fed_priv,
     )
 
-    token_mod._cached_pub = fed_pub
-    token_mod._cached_priv = fed_priv
-    try:
-        with patched_test_settings(test_settings):
-            app = create_app()
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
-    finally:
-        token_mod._cached_pub = None
-        token_mod._cached_priv = None
+    with seed_fed_keypair(fed_pub, fed_priv), patched_test_settings(test_settings):
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
