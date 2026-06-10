@@ -239,3 +239,38 @@ def test_origin_tenant_default_denied_on_multitenant_node(client, monkeypatch):
         peer = conn.execute("SELECT * FROM peers WHERE id='pt5'").fetchone()
         with pytest.raises(PeerPolicyError):
             resolve_origin_tenant_for_peer(peer, "default", conn)
+
+
+def test_ingest_fact_persists_origin_block(client):
+    import json as _json
+
+    from stigmem_node.cid import compute_cid
+    from stigmem_node.db import db
+    from stigmem_node.federation.federation_ingest import ingest_fact
+
+    fact = {
+        "id": "44444444-4444-4444-4444-444444444444",
+        "entity": "stigmem://test/agent/o", "relation": "test:name",
+        "value": {"type": "string", "v": "x"}, "source": "stigmem:node:o1",
+        "timestamp": "2026-06-01T00:00:00Z", "scope": "public",
+        "confidence": 1.0,
+    }
+    fact["cid"] = compute_cid(
+        entity=fact["entity"], relation=fact["relation"], value_type="string",
+        value_v="x", source=fact["source"], scope="public",
+        confidence=1.0, interpret_as="content",
+    )
+    ingest_fact(
+        fact, "stigmem:node:o1", tenant_id="default",
+        origin_node_id="stigmem:node:o1", origin_allowed_scopes=["public"],
+        origin_tenant="acme", origin_allowed_tenants=["beta", "acme"], origin_sig="SIGB64",
+    )
+    with db() as conn:
+        row = conn.execute(
+            "SELECT origin_tenant, origin_allowed_tenants, origin_sig FROM facts WHERE id=?",
+            (fact["id"],),
+        ).fetchone()
+    assert row["origin_tenant"] == "acme"
+    # F-8: stored byte-identical to the signed canonical form == json.dumps(sorted(...))
+    assert row["origin_allowed_tenants"] == _json.dumps(["acme", "beta"])
+    assert row["origin_sig"] == "SIGB64"
