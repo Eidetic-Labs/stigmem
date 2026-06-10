@@ -21,6 +21,20 @@ _BLOCKED_NETS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
 )
 
 
+def node_url_is_loopback(node_url: str) -> bool:
+    """Return True iff *node_url*'s host is a literal loopback host.
+
+    Shared by the startup bind-safety check and the federation approval-time
+    SSRF-skip gate so the loopback host set lives in exactly one place.
+    """
+    try:
+        parsed = urlparse(node_url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
 def assert_safe_url(
     url: str,
     *,

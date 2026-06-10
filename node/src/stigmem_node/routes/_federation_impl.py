@@ -40,7 +40,7 @@ from ..models.tombstones import (
     TombstoneRecord,
     TombstoneRevocationRecord,
 )
-from ..net_util import assert_safe_url
+from ..net_util import assert_safe_url, node_url_is_loopback
 from ..plugins import Deny, TenantContext, get_registry
 
 logger = logging.getLogger("stigmem.federation")
@@ -240,19 +240,18 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
     # Try to fetch the peer's manifest from their well-known endpoint
     manifest_obj = None
     try:
-        # The SSRF guard blocks loopback/private addresses. In the explicit local/dev
-        # insecure mode (federation_insecure), a loopback peer is expected and the
-        # registration well-known fetch above already reaches it; mirror that here so
-        # the Phase 2a entity_uri binding can fire on a loopback cluster. Without this,
-        # resolve_origin_key fails and no v2 fact federates between loopback nodes.
-        from urllib.parse import urlparse as _urlparse
-
-        _host = (_urlparse(node_url).hostname or "").lower()
-        _loopback_dev = _fed.settings.federation_insecure and _host in {
-            "localhost",
-            "127.0.0.1",
-            "::1",
-        }
+        # The SSRF guard normally blocks loopback/private addresses. We skip
+        # assert_safe_url for this approval-time manifest fetch ONLY under the
+        # conjunction (federation_insecure dev mode AND a literal loopback host),
+        # so a loopback dev cluster can bind the peer's entity_uri (Phase 2a) —
+        # without the skip, assert_safe_url rejects the loopback URL, the binding
+        # never fires, resolve_origin_key fails, and no v2 fact federates between
+        # loopback nodes. In production (federation_insecure off) the guard is
+        # always enforced. Note: the registration-time well-known fetch in
+        # _make_federation_client is unguarded (no assert_safe_url at all) — it is
+        # NOT flag+loopback-gated like this fetch, so do not treat the two as the
+        # same mechanism.
+        _loopback_dev = _fed.settings.federation_insecure and node_url_is_loopback(node_url)
         if not _loopback_dev:
             assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
         async with httpx.AsyncClient(timeout=10.0) as client:

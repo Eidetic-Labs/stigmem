@@ -10,7 +10,6 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Any, cast
-from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Depends, FastAPI, Request, Response
@@ -20,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from .auth import Identity, resolve_identity
 from .body_limit import BodySizeLimitMiddleware
 from .db import apply_migrations
+from .net_util import node_url_is_loopback
 from .rate_limit import RateLimitMiddleware
 from .routes.admin_audit import router as admin_audit_router
 from .routes.agent_keys import router as agent_keys_router
@@ -180,12 +180,7 @@ def _warn_if_legacy_sha256_acceptance_unbounded() -> None:
 
 def _node_url_is_loopback(node_url: str) -> bool:
     """Return True iff node_url's host is a loopback address."""
-    try:
-        parsed = urlparse(node_url)
-        host = (parsed.hostname or "").lower()
-    except ValueError:
-        return False
-    return host in {"localhost", "127.0.0.1", "::1"}
+    return node_url_is_loopback(node_url)
 
 
 def create_app() -> FastAPI:

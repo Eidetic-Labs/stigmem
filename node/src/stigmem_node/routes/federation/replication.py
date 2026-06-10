@@ -412,6 +412,9 @@ def _verify_origin_and_resolve_tenant(
     (PeerPolicyError) — the push handler turns that into a 409 response.
     """
     fact_id = fact.get("id")
+    # 0. fact id present (later steps sign over / index by it)
+    if not fact_id:
+        return None, {"fact_id": None, "error": "id_required"}
     # 1. cid present
     if not fact.get("cid"):
         return None, {"fact_id": fact_id, "error": "cid_required"}
@@ -427,7 +430,7 @@ def _verify_origin_and_resolve_tenant(
     try:
         verify_origin_signature(
             origin_sig,
-            fact_id=fact["id"],
+            fact_id=fact_id,
             cid=fact["cid"],
             origin=origin,
             valid_until=fact.get("valid_until"),

@@ -50,6 +50,17 @@ class TestFederationPeerRegistration:
         if r.status_code == 200:
             body = r.json()
             assert "facts" in body or isinstance(body, list)
+            if isinstance(body, dict):
+                # F-FED-2b clean break: the pull endpoint serves the v2 signed-origin
+                # envelope only. Pin the wire version and, when facts are present, the
+                # per-entry shape (fact + signed origin block + origin_sig).
+                assert body.get("v") == 2
+                for entry in body.get("facts", []):
+                    for key in ("fact", "origin", "origin_sig"):
+                        assert key in entry, f"v2 pull entry missing {key!r}"
+                    origin = entry["origin"]
+                    for key in ("tenant", "node_id", "allowed_scopes", "allowed_tenants"):
+                        assert key in origin, f"v2 origin block missing {key!r}"
 
 
 class TestFederationConflictAPI:

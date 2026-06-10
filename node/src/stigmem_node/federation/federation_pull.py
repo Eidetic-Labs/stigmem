@@ -159,6 +159,10 @@ async def pull_from_peer_once(
                 continue
             fact_scope = fact.get("scope", "")
 
+            # 0. fact id present (later steps sign over / index by it)
+            if not fact.get("id"):
+                logger.warning("Pull from %s: skip fact (id_required)", sender_node_id)
+                continue
             # 1. cid present
             if not fact.get("cid"):
                 logger.warning("Pull from %s: skip fact (cid_required)", sender_node_id)

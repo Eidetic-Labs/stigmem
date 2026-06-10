@@ -374,6 +374,51 @@ class TestCapTokenFactBranches:
         assert r.status_code == 202
         # accepted OR rejected — both paths exercise scoring code
 
+    def test_cap_token_v2_entry_missing_fact_id_rejected(
+        self, push_setup: tuple[TestClient, str, str, str]
+    ) -> None:
+        """NF-3: a v2 entry whose inner ``fact`` omits ``id`` is rejected with
+        ``id_required`` and ingests nothing — no uncaught KeyError / HTTP 500.
+
+        The entry is hand-built (not via make_v2_entry, which signs over fact["id"])
+        so the missing-id guard is the first per-fact check to fire. We do NOT need a
+        valid origin_sig: the id guard runs before signature verification.
+        """
+        client, issuer, token, db_file = push_setup
+        _bind_issuer_as_peer(db_file, issuer)
+
+        fact_no_id = {
+            "entity": "test:e",
+            "relation": "test:value",
+            "value": {"type": "string", "v": "v"},
+            "source": issuer,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "hlc": None,
+            "confidence": 1.0,
+            "scope": "public",
+            "valid_until": None,
+            "cid": "sha256:" + "a" * 64,
+        }
+        origin = {
+            "tenant": "default",
+            "node_id": issuer,
+            "allowed_scopes": ["public"],
+            "allowed_tenants": ["default"],
+        }
+        entry = {"fact": fact_no_id, "origin": origin, "origin_sig": "x"}
+
+        r = client.post(
+            "/v1/federation/facts/push",
+            json={"v": 2, "facts": [entry]},
+            headers={"X-Stigmem-Capability": token},
+        )
+        # Must NOT 500 — the missing id is a clean per-fact rejection.
+        assert r.status_code == 202, r.text
+        body = r.json()
+        assert body["accepted"] == 0
+        assert body["rejected"] == 1
+        assert body["errors"][0]["error"] == "id_required"
+
     def test_cap_token_ingest_exception_handled(
         self,
         push_setup: tuple[TestClient, str, str, str],
