@@ -126,3 +126,30 @@ def test_guard_does_not_bleed_from_a_later_statement(tmp_path: Path) -> None:
     )
     violations = guard.find_violations([d], tmp_path)
     assert any("bleed.py:1:" in v for v in violations)  # first query still flagged
+
+
+def test_guard_scans_federation_dir() -> None:
+    assert any("federation" in str(p) for p in guard.SCAN_DIRS)
+
+
+def test_write_path_guard_flags_insert_without_tenant(tmp_path) -> None:
+    d = tmp_path / "federation"
+    d.mkdir()
+    (d / "ing.py").write_text(
+        'conn.execute("INSERT INTO facts (id, entity, scope) VALUES (?,?,?)", v)\n'
+    )
+    violations = guard.find_insert_violations([d], tmp_path)
+    assert len(violations) == 1 and "ing.py" in violations[0]
+
+
+def test_write_path_guard_accepts_insert_with_tenant(tmp_path) -> None:
+    d = tmp_path / "federation"
+    d.mkdir()
+    (d / "ok.py").write_text(
+        'conn.execute("INSERT INTO facts (id, entity, scope, tenant_id) VALUES (?,?,?,?)", v)\n'
+    )
+    assert guard.find_insert_violations([d], tmp_path) == []
+
+
+def test_real_tree_has_no_insert_violations() -> None:
+    assert guard.find_insert_violations(guard.SCAN_DIRS, guard.ROOT) == []

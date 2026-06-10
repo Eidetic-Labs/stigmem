@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "node" / "src" / "stigmem_node"
-SCAN_DIRS = [ROOT / "routes", ROOT / "recall"]
+# routes/ + recall/ cover the API read surface; federation/ is the cross-node
+# ingest/pull path, where the tenant gap was on the WRITE side (INSERT INTO facts
+# without tenant_id) — see find_insert_violations. Including it here also covers
+# any `FROM facts` SELECT in the top-level federation package via the read-guard.
+SCAN_DIRS = [ROOT / "routes", ROOT / "recall", ROOT / "federation"]
 
 # Tenant-bearing tables this guard defends. All carry a `tenant_id` column (facts
 # from the start; entity_aliases/instruction_manifests/boot_stubs/instruction_audit
@@ -128,6 +132,51 @@ def find_violations(scan_dirs: list[Path], root: Path) -> list[str]:
     return violations
 
 
+# --- Write dimension --------------------------------------------------------
+# The read-guard above defends `FROM facts` SELECTs. The federation ingest gap
+# (audit) was on the WRITE side: an `INSERT INTO facts (...)` that omits the
+# tenant_id column writes a row that defaults/nulls its tenant, so it later reads
+# as cross-tenant. Every fact-producing INSERT must name tenant_id in its column
+# list (or be allowlisted with a reason if legitimately tenant-agnostic — there
+# are none today; conflict/meta inserts all carry tenant_id after Tasks 3/6).
+INSERT_FACTS = re.compile(r"INSERT\s+INTO\s+facts\s*\(([^)]*)\)", re.IGNORECASE | re.DOTALL)
+INSERT_TENANT_COL = re.compile(r"\btenant_id\b", re.IGNORECASE)
+
+# Allowlist: {relative_path: [(anchor, reason), ...]}. The anchor must appear in
+# the captured column list for the insert to be exempt. Keep reasons specific.
+INSERT_ALLOWLIST: dict[str, list[tuple[str, str]]] = {}
+
+
+def _insert_exempt(rel: str, columns: str) -> bool:
+    return any(anchor in columns for anchor, _reason in INSERT_ALLOWLIST.get(rel, []))
+
+
+def find_insert_violations(scan_dirs: list[Path], root: Path) -> list[str]:
+    """Return `relpath:line: …` for every `INSERT INTO facts (...)` whose column
+    list omits tenant_id (and is not allowlisted)."""
+    violations: list[str] = []
+    for base in scan_dirs:
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            rel = str(path.relative_to(root))
+            for m in INSERT_FACTS.finditer(text):
+                columns = m.group(1)
+                if INSERT_TENANT_COL.search(columns):
+                    continue
+                if _insert_exempt(rel, columns):
+                    continue
+                line = text.count("\n", 0, m.start()) + 1
+                cols = " ".join(columns.split())[:70]
+                violations.append(
+                    f"{rel}:{line}: INSERT INTO facts without tenant_id column — ({cols}…)"
+                )
+    return violations
+
+
 # --- Garden dimension -------------------------------------------------------
 # A fact-by-id read route returning content must also enforce the garden ACL,
 # not just the tenant. provenance/cid leaked restricted-garden facts (F-A1/F-A2)
@@ -176,6 +225,7 @@ def find_garden_violations(garden_dir: Path, root: Path) -> list[str]:
 
 def main() -> int:
     violations = find_violations(SCAN_DIRS, ROOT)
+    insert_violations = find_insert_violations(SCAN_DIRS, ROOT)
     garden_violations = find_garden_violations(GARDEN_SCAN_DIR, ROOT)
     failed = False
     if violations:
@@ -186,6 +236,15 @@ def main() -> int:
             "ALLOWLIST with a reason if intentionally cross-tenant):\n\n"
         )
         for v in violations:
+            sys.stderr.write(f"  {v}\n")
+    if insert_violations:
+        failed = True
+        sys.stderr.write(
+            "\nFact-write tenant-scope guard FAILED — these `INSERT INTO facts` statements omit "
+            "the tenant_id column (a fact written without a tenant later reads as cross-tenant; "
+            "add tenant_id to the column list, or add to INSERT_ALLOWLIST with a reason):\n\n"
+        )
+        for v in insert_violations:
             sys.stderr.write(f"  {v}\n")
     if garden_violations:
         failed = True
@@ -198,7 +257,7 @@ def main() -> int:
             sys.stderr.write(f"  {v}\n")
     if failed:
         return 1
-    print("Fact-query tenant-scope + garden-ACL guard: OK")
+    print("Fact-query tenant-scope (read+write) + garden-ACL guard: OK")
     return 0
 
 
