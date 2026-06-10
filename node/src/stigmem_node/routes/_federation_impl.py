@@ -280,12 +280,11 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
                 peer_row = conn.execute(
                     "SELECT federation_pubkey FROM peers WHERE id = ?", (peer_id,)
                 ).fetchone()
-            if (
-                peer_row is not None
-                and manifest_obj.public_key == peer_row["federation_pubkey"]
-                and node_id in manifest_obj.entities
-            ):
-                with _bind_db() as conn:
+                if (
+                    peer_row is not None
+                    and manifest_obj.public_key == peer_row["federation_pubkey"]
+                    and node_id in manifest_obj.entities
+                ):
                     conn.execute(
                         "UPDATE peers SET entity_uri = ? WHERE id = ?",
                         (manifest_obj.entity_uri, peer_id),

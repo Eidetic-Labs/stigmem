@@ -29,7 +29,7 @@ def resolve_origin_key(node_id: str) -> set[str]:
             "SELECT entity_uri FROM peers WHERE node_id = ? AND status = 'active'",
             (node_id,),
         ).fetchone()
-    if row is None or not row["entity_uri"]:
+    if row is None or not (row["entity_uri"] or "").strip():
         raise OriginIdentityError(f"no verified entity_uri bound to node_id {node_id!r}")
 
     manifest = get_peer_manifest(row["entity_uri"], trust_mode=settings.trust_mode)
@@ -43,6 +43,6 @@ def resolve_origin_key(node_id: str) -> set[str]:
     keys = {manifest.public_key}
     if manifest.rotation_events:
         last = manifest.rotation_events[-1]
-        if getattr(last, "previous_public_key", ""):
+        if last.previous_public_key:
             keys.add(last.previous_public_key)
     return keys
