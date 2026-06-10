@@ -50,6 +50,9 @@ def node_metadata() -> dict[str, object]:
         from ..federation.peer_token import get_local_pubkey
 
         result["federation_pubkey"] = get_local_pubkey()
+        from ..db import get_node_entity_uri
+
+        result["entity_uri"] = get_node_entity_uri()
         result["federation_version"] = "0.5"
         result["federation_endpoints"] = {
             "peers": "/v1/federation/peers",

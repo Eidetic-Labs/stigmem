@@ -22,3 +22,23 @@ def test_existing_peer_row_defaults_entity_uri_null(client):
         conn.commit()
         row = conn.execute("SELECT entity_uri FROM peers WHERE id='p1'").fetchone()
     assert row["entity_uri"] is None
+
+
+def test_wellknown_publishes_entity_uri(fed_node):
+    """The node advertises its own org entity_uri so peers can record+verify it.
+
+    The entity_uri block is guarded by ``if settings.federation_enabled:`` and the
+    default ``client`` fixture leaves federation disabled. We use the suite's existing
+    ``fed_node`` fixture (conftest.py) — same mechanism test_well_known.py uses for the
+    enabled-node case — which patches a federation_enabled=True Settings via _patch_settings.
+    """
+    body = fed_node.client.get("/.well-known/stigmem").json()
+    assert "entity_uri" in body
+    assert body["entity_uri"]  # non-empty (defaults to node_url when unset)
+
+
+def test_get_node_entity_uri_defaults_to_node_url():
+    from stigmem_node.db import get_node_entity_uri
+    from stigmem_node.settings import settings
+
+    assert get_node_entity_uri() in (settings.entity_uri or settings.node_url, settings.node_url)
