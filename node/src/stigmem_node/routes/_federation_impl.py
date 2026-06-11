@@ -529,6 +529,9 @@ _V2_INGEST_REASON_HTTP: dict[str, int] = {
     "malformed_entry": status.HTTP_400_BAD_REQUEST,
     "missing_tombstone_origin_or_sig": status.HTTP_400_BAD_REQUEST,
     "malformed_tombstone": status.HTTP_400_BAD_REQUEST,
+    # Rev-3: revocation envelope parse reasons (mirror the tombstone shapes).
+    "missing_revocation_origin_or_sig": status.HTTP_400_BAD_REQUEST,
+    "malformed_revocation": status.HTTP_400_BAD_REQUEST,
     # origin != sender with relay OFF — the push route is not a weaker path than pull.
     "origin_not_sender": status.HTTP_403_FORBIDDEN,
     "relay_sender_not_trusted": status.HTTP_403_FORBIDDEN,
@@ -538,6 +541,54 @@ _V2_INGEST_REASON_HTTP: dict[str, int] = {
     "scope_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
     "tenant_policy_unsafe": status.HTTP_403_FORBIDDEN,
 }
+
+
+def _ingest_revocation_v2(
+    entry: dict[str, Any], peer: dict[str, Any] | None, fed_settings: Any
+) -> dict[str, Any]:
+    """Push-ingest ONE v2 revocation envelope entry through the SHARED secure chain (Rev-3).
+
+    Routes the posted envelope through ``ingest_revocation_entry`` — the EXACT verify+apply
+    code path the pull loop uses — so the push surface can never be weaker than pull. A relayed
+    (origin != sender) revocation requires relay ON + the SENDER peer relay_trusted (same
+    fail-closed gate). On a skip/reject the helper's ``reason`` is mapped to the push route's
+    HTTP contract; on success returns ``{"status": "ok", "type": "revocation"}``.
+    """
+    from ..federation.federation_pull import ingest_revocation_entry
+
+    if peer is None:
+        # A v2 envelope needs the authenticated peer (relay_trusted + node_id). Fail closed.
+        _audit_tombstone_payload_rejected(
+            entry.get("revocation", entry), "revocation", "v2_envelope_requires_peer_identity"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="v2 revocation envelope requires an authenticated peer identity",
+        )
+
+    sender_node_id = str(peer["node_id"])
+    try:
+        relay_trusted = bool(peer["relay_trusted"])
+    except (KeyError, IndexError, TypeError):
+        relay_trusted = bool(dict(peer).get("relay_trusted"))
+
+    result = ingest_revocation_entry(
+        entry=entry,
+        sender_node_id=sender_node_id,
+        peer=peer,
+        relay_enabled=fed_settings.federation_relay_enabled,
+        relay_trusted=relay_trusted,
+        relay_cache={},
+    )
+    if result.applied:
+        return {"status": "ok", "type": "revocation"}
+
+    reason = result.reason or "revocation_verification_failed"
+    _audit_tombstone_payload_rejected(entry.get("revocation", entry), "revocation", reason)
+    raise HTTPException(
+        status_code=_V2_INGEST_REASON_HTTP.get(reason, status.HTTP_400_BAD_REQUEST),
+        detail=f"revocation_rejected: {reason}",
+    )
 
 
 def _ingest_tombstone_v2(
@@ -644,6 +695,13 @@ def federation_ingest_tombstone_impl(
         get_mtls_peer_cert,
         fed_settings,
     )
+
+    # v2 enveloped revocation — a single ``{"revocation", "origin", "origin_sig"}`` entry routed
+    # through the SHARED secure chain (Rev-3) so push and pull verify identically. A relayed
+    # (origin != sender) revocation requires relay ON + sender relay_trusted. Checked BEFORE the
+    # bare-revocation path: a v2 entry carries ``tombstone_id`` nested under ``revocation``.
+    if "revocation" in payload and "origin" in payload:
+        return _ingest_revocation_v2(payload, peer, fed_settings)
 
     if "tombstone_id" in payload:
         return _ingest_revocation(payload, fed_settings)

@@ -634,8 +634,42 @@ def apply_inbound_tombstone(
     return True
 
 
-def apply_inbound_revocation(record: TombstoneRevocationRecord) -> bool:
-    """Apply an inbound revocation from federation. Idempotent on id."""
+def apply_inbound_revocation(
+    record: TombstoneRevocationRecord,
+    *,
+    origin_node_id: str | None = None,
+    origin_tenant: str | None = None,
+    origin_entity_uri: str | None = None,
+    origin_allowed_scopes: list[str] | None = None,
+    origin_allowed_tenants: list[str] | None = None,
+    origin_sig: str | None = None,
+    received_from: str | None = None,
+) -> bool:
+    """Apply an inbound revocation from federation. Idempotent on id.
+
+    The optional ``origin_*`` + ``received_from`` kwargs persist the verified v2 origin
+    block (migration 050 columns) for a RELAYED revocation (Phase 2c Rev-3), mirroring
+    ``apply_inbound_tombstone``'s origin persistence (W6.7). The egress relay gate
+    (``list_federatable_revocations``, Rev-2) reads these columns to decide whether this
+    node may re-federate the revocation onward, and the emit path forwards the stored
+    origin block + signature verbatim. ALL default None ⇒ a self/direct revocation (every
+    origin column stays NULL — unchanged Rev-2 behaviour). ``origin_allowed_scopes`` /
+    ``origin_allowed_tenants`` are stored as ``json.dumps(sorted([...]))`` TEXT, the SAME
+    canonical encoding the fact/tombstone ingest paths use, so the egress LIKE-membership
+    gate matches exactly.
+
+    Caller MUST verify both signatures before calling this for a relayed revocation.
+    """
+    import json as _json
+
+    scopes_json = (
+        _json.dumps(sorted(origin_allowed_scopes)) if origin_allowed_scopes is not None else None
+    )
+    tenants_json = (
+        _json.dumps(sorted(origin_allowed_tenants))
+        if origin_allowed_tenants is not None
+        else None
+    )
     with db() as conn:
         tomb = conn.execute(
             "SELECT id FROM tombstones WHERE id = ?", (record.tombstone_id,)
@@ -661,8 +695,10 @@ def apply_inbound_revocation(record: TombstoneRevocationRecord) -> bool:
         )
         conn.execute(
             """INSERT INTO tombstone_revocations
-               (id, tombstone_id, reason, signed_by, key_id, signature, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (id, tombstone_id, reason, signed_by, key_id, signature, created_at,
+                received_from, origin_node_id, origin_tenant, origin_entity_uri,
+                origin_allowed_scopes, origin_allowed_tenants, origin_sig)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.id,
                 record.tombstone_id,
@@ -671,6 +707,13 @@ def apply_inbound_revocation(record: TombstoneRevocationRecord) -> bool:
                 record.key_id,
                 record.signature,
                 record.created_at,
+                received_from,
+                origin_node_id,
+                origin_tenant,
+                origin_entity_uri,
+                scopes_json,
+                tenants_json,
+                origin_sig,
             ),
         )
     invalidate_tombstone_cache()

@@ -338,6 +338,21 @@ class TombstoneEntryResult:
     reason: str | None = None
 
 
+@dataclass(frozen=True)
+class RevocationEntryResult:
+    """Outcome of verifying + applying ONE inbound revocation envelope entry.
+
+    ``applied`` is True iff the revocation passed the full secure chain and
+    ``apply_inbound_revocation`` was invoked. ``reason`` is a stable machine code for the
+    skip/reject cause (None on success). The PULL path logs + continues on a skip; the PUSH
+    route maps ``reason`` to an HTTP status (Rev-3) — the SINGLE shared code path means push
+    and pull can never diverge on what they accept. Mirrors :class:`TombstoneEntryResult`.
+    """
+
+    applied: bool
+    reason: str | None = None
+
+
 def ingest_tombstone_entry(
     *,
     entry: dict[str, Any],
@@ -650,17 +665,22 @@ async def pull_tombstones_from_peer_once(
         except Exception as exc:
             logger.warning("Tombstone ingest from %s failed: %s", peer["node_id"], exc)
 
-    # Rev-2: revocations are now ENVELOPED on the wire (RevocationEnvelopeEntry). Parse each
-    # envelope and apply only DIRECT (origin.node_id == sender) revocations after verifying
-    # BOTH the revocation ORIGIN-attestation signature (anti-relaunder: binds rid+tombstone_id
-    # + grant) AND the ISSUER-signer signature (the shared resolve_and_verify helper, same as
-    # the tombstone direct path). A RELAYED revocation (origin != sender) is SKIPPED here — the
-    # secure relay chain lands in Rev-3 (no relay_trusted / origin-key-for-relay path yet).
+    # Rev-2/Rev-3: revocations are ENVELOPED on the wire (RevocationEnvelopeEntry). The per-
+    # revocation secure chain (DIRECT vs RELAYED, both signatures, relay_trusted gate, tenant
+    # gate, fail-closed, apply) lives in the SHARED ``ingest_revocation_entry`` so the PUSH
+    # /ingest route runs byte-identical verification (Rev-3). The pull loop logs + continues on
+    # any skip; the push route maps the same reasons to HTTP statuses. The per-PAGE relay_cache
+    # is shared with the tombstone loop above so a relayed-origin manifest fetch + rotation check
+    # runs ONCE per page across both tombstones and revocations.
     for entry in data.get("revocations", []):
         try:
             ingest_revocation_entry(
                 entry=entry,
                 sender_node_id=sender_node_id,
+                peer=peer,
+                relay_enabled=relay_enabled,
+                relay_trusted=sender_relay_trusted,
+                relay_cache=relay_cache,
             )
         except Exception as exc:
             logger.warning("Tombstone revocation ingest from %s failed: %s", peer["node_id"], exc)
@@ -672,20 +692,29 @@ def ingest_revocation_entry(
     *,
     entry: dict[str, Any],
     sender_node_id: str,
-) -> bool:
-    """Verify + apply ONE v2 revocation envelope entry (Rev-2 — DIRECT only).
+    peer: dict[str, Any],
+    relay_enabled: bool,
+    relay_trusted: bool,
+    relay_cache: dict[str, set[str]],
+) -> RevocationEntryResult:
+    """Verify + apply ONE v2 revocation envelope entry through the full secure chain (Rev-3).
 
     Mirrors ``ingest_tombstone_entry`` but for tombstone REVOCATIONS, which have no
-    entity_uri/scope of their own (they reference a tombstone by ``tombstone_id``):
+    entity_uri/scope of their own (they reference a tombstone by ``tombstone_id``) — so there
+    is NO scope gate, only a tenant gate. Extracted so the PULL loop and the PUSH ingest route
+    share ONE verify+apply path and can never diverge. The ordered chain mirrors the tombstone
+    relay ingest exactly:
 
       parse entry → parse record → DIRECT (origin==sender) vs RELAYED (origin!=sender)
-      → [relayed] SKIP (Rev-3 enables the secure relay chain)
-      → resolve origin key (direct: 2a peer chain)
-      → verify revocation ORIGIN-attestation signature (binds rid+tombstone_id+grant)
-      → verify ISSUER-signer signature (BOTH required; shared resolve_and_verify helper)
-      → apply_inbound_revocation
+      → [relayed] relay ON + sender relay_trusted gate (fail-closed)
+      → resolve origin key (direct: 2a peer chain; relayed: W4.2 secure relay resolver)
+      → verify revocation ORIGIN signature (anti-relaunder: rid+tombstone_id bound in the tuple)
+      → verify ISSUER-signer signature (BOTH required)
+      → [relayed] resolve_origin_tenant_for_peer (default-deny; no scope gate)
+      → apply_inbound_revocation (relayed: + origin cols + received_from; direct: bare)
 
-    Returns True iff the revocation was applied. The pull loop logs + continues on a skip.
+    Returns a :class:`RevocationEntryResult`; never raises HTTPException (the push route owns
+    the HTTP mapping). Direct (origin==sender) + relay-OFF are byte-identical to Rev-2.
     """
     from ..lifecycle.tombstone_signing import (
         IssuerVerificationError,
@@ -694,7 +723,11 @@ def ingest_revocation_entry(
     )
     from ..lifecycle.tombstones import apply_inbound_revocation
     from ..models.tombstones import TombstoneRevocationRecord
-    from .origin_identity import OriginIdentityError, resolve_origin_key
+    from .origin_identity import (
+        OriginIdentityError,
+        resolve_origin_key,
+        resolve_origin_key_for_relay,
+    )
     from .origin_signature import (
         OriginSignatureError,
         verify_revocation_origin_signature,
@@ -702,7 +735,7 @@ def ingest_revocation_entry(
 
     if not isinstance(entry, dict):
         logger.warning("Revocation ingest from %s: malformed entry (not an object)", sender_node_id)
-        return False
+        return RevocationEntryResult(False, "malformed_entry")
     rev = entry.get("revocation")
     origin = entry.get("origin")
     origin_sig = entry.get("origin_sig")
@@ -711,28 +744,48 @@ def ingest_revocation_entry(
             "Revocation ingest from %s: entry missing revocation/origin/origin_sig",
             sender_node_id,
         )
-        return False
+        return RevocationEntryResult(False, "missing_revocation_origin_or_sig")
     try:
         record = TombstoneRevocationRecord(**rev)
     except Exception as exc:
         logger.warning("Revocation ingest from %s: malformed revocation: %s", sender_node_id, exc)
-        return False
+        return RevocationEntryResult(False, "malformed_revocation")
 
-    # DIRECT vs RELAYED. Rev-2 applies only DIRECT (origin == sender). A relayed revocation is
-    # SKIPPED — the relay_trusted gate + origin-key-for-relay resolver arrive in Rev-3.
     is_relayed = origin.get("node_id") != sender_node_id
-    if is_relayed:
-        logger.warning(
-            "Revocation ingest from %s: skip relayed revocation %s (origin_not_sender; "
-            "relay not yet enabled for revocations)",
-            sender_node_id,
-            record.id,
-        )
-        return False
+    origin_manifest = entry.get("origin_manifest")
+    if not isinstance(origin_manifest, dict):
+        origin_manifest = None
 
-    # Resolve the ORIGIN's verified key set (direct: 2a peer chain — the sender IS the origin).
+    if is_relayed:
+        if not relay_enabled:
+            logger.warning(
+                "Revocation ingest from %s: skip relayed revocation %s (origin_not_sender; "
+                "relay disabled)",
+                sender_node_id,
+                record.id,
+            )
+            return RevocationEntryResult(False, "origin_not_sender")
+        if not relay_trusted:
+            logger.warning(
+                "Revocation ingest from %s: skip relayed revocation %s "
+                "(relay_sender_not_trusted)",
+                sender_node_id,
+                record.id,
+            )
+            return RevocationEntryResult(False, "relay_sender_not_trusted")
+
+    # Resolve the ORIGIN's verified key set. Direct: 2a peer chain (sender IS the origin).
+    # Relayed: the W4.2 secure relay resolver (fetch-on-first / pin / stored / fail-closed).
     try:
-        keys = resolve_origin_key(sender_node_id)
+        if is_relayed:
+            keys = resolve_origin_key_for_relay(
+                origin["node_id"],
+                origin.get("entity_uri", ""),
+                cache=relay_cache,
+                origin_manifest=origin_manifest,
+            )
+        else:
+            keys = resolve_origin_key(sender_node_id)
     except OriginIdentityError as exc:
         logger.warning(
             "Revocation ingest from %s: skip %s (origin_unresolvable): %s",
@@ -740,7 +793,7 @@ def ingest_revocation_entry(
             record.id,
             exc,
         )
-        return False
+        return RevocationEntryResult(False, "origin_unresolvable")
 
     # Verify the revocation ORIGIN-attestation signature (binds rid + tombstone_id + grant —
     # anti-relaunder: a relay that retargets which revocation/tombstone it carries invalidates it).
@@ -763,7 +816,7 @@ def ingest_revocation_entry(
             record.id,
             exc,
         )
-        return False
+        return RevocationEntryResult(False, "origin_sig_invalid")
 
     # ALSO verify the ISSUER-signer signature (both required): a revocation must ALSO be a real
     # tombstone REVERSAL. Same shared helper the tombstone direct path uses, with the revocation
@@ -782,10 +835,46 @@ def ingest_revocation_entry(
             record.id,
             exc.reason,
         )
-        return False
+        return RevocationEntryResult(False, "issuer_sig_invalid")
 
+    if is_relayed:
+        # Tenant gate (default-deny): the wire-carried origin tenant must resolve to a LOCAL
+        # tenant under this peer's policy or the relay is refused. There is NO scope gate — a
+        # revocation has no scope of its own. The resolver's value is discarded: the revocation
+        # row has no tenant_id column; the call is run purely for its fail-closed side effect.
+        try:
+            with db() as conn:
+                resolve_origin_tenant_for_peer(peer, origin.get("tenant", ""), conn)
+        except PeerPolicyError as exc:
+            logger.warning(
+                "Revocation ingest from %s: skip relayed revocation %s (tenant policy unsafe): %s",
+                sender_node_id,
+                record.id,
+                exc,
+            )
+            write_audit_log(
+                sender_node_id,
+                "federation_tenant_policy_rejected",
+                {"reason": str(exc), "surface": "revocations_relay"},
+            )
+            return RevocationEntryResult(False, "tenant_policy_unsafe")
+        # All checks passed — apply + PERSIST the verified origin block + received_from so this
+        # node can itself relay it onward (the egress gate Rev-2 reads these columns).
+        apply_inbound_revocation(
+            record,
+            origin_node_id=origin["node_id"],
+            origin_tenant=origin.get("tenant", ""),
+            origin_entity_uri=origin.get("entity_uri", ""),
+            origin_allowed_scopes=origin.get("allowed_scopes", []),
+            origin_allowed_tenants=origin.get("allowed_tenants", []),
+            origin_sig=origin_sig,
+            received_from=sender_node_id,
+        )
+        return RevocationEntryResult(True, None)
+
+    # DIRECT: both signatures verified — apply (origin columns None for direct/self).
     apply_inbound_revocation(record)
-    return True
+    return RevocationEntryResult(True, None)
 
 
 def _load_tombstone_cursor(peer_id: str) -> str | None:
