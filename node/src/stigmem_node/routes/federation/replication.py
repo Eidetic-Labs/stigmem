@@ -783,6 +783,10 @@ def _push_fact_with_cap_token(
     except FederationIntegrityError as exc:
         return False, {"fact_id": fact.get("id"), "error": exc.reason}
     except Exception:
+        # F-2: a bare swallow here masks a genuinely-broken relay write as a soft per-fact
+        # reject — undiagnosable. Log the traceback (return contract unchanged: still a
+        # generic ingest_error to the caller) so a silently-failing ingest is findable.
+        logger.exception("federation push ingest failed")
         return False, {"fact_id": fact.get("id"), "error": "ingest_error"}
 
 
@@ -891,4 +895,7 @@ def _push_fact_with_peer_token(
     except FederationIntegrityError as exc:
         return False, {"fact_id": fact.get("id"), "error": exc.reason}
     except Exception:
+        # F-2: same swallow on the peer-token push path — log the traceback (return
+        # contract unchanged) so a broken relay write is diagnosable in logs.
+        logger.exception("federation push ingest failed")
         return False, {"fact_id": fact.get("id"), "error": "ingest_error"}
