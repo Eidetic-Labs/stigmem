@@ -34,6 +34,7 @@ from ...plugins import Deny, TenantContext, get_registry
 from .common import (
     PeerTokenDep,
     _allowed_output_scopes,
+    _allowed_output_tenants,
     _cap_token_covers_scope,
     _get_mtls_peer_cert,
     _public_module,
@@ -41,6 +42,19 @@ from .common import (
     logger,
     router,
 )
+
+
+def _json_token(value: str) -> str:
+    """Return the canonical JSON-quoted token for *value* (``foo`` → ``"foo"``).
+
+    Stored ``origin_allowed_scopes`` / ``origin_allowed_tenants`` are
+    ``json.dumps(sorted([...]))`` TEXT, so each element appears verbatim as a
+    JSON string literal. Searching for the quoted token makes a ``LIKE '%…%'``
+    membership test exact (the surrounding quotes prevent a prefix/substring
+    false match). ``json.dumps`` here matches the encoder ingest uses, so any
+    string requiring escaping is encoded identically on both sides.
+    """
+    return json.dumps(value)
 
 
 def build_origin_entry(
@@ -136,6 +150,62 @@ def pull_facts(
     # pull_tenant; only an explicit pin overrides the default tenant.
     pull_tenant = peer["pull_tenant"] or "default"
 
+    # F-FED-2c W2.3: the re-federation clause. With relay OFF this is exactly
+    # today's ``received_from IS NULL`` (no param) — byte-identical, zero
+    # regression. With relay ON it widens to ALSO admit inbound (relayed) facts,
+    # but ONLY within the origin's signed propagation grant, enforced ENTIRELY in
+    # SQL so the LIMIT applies post-filter (no Python post-filtering → no short
+    # pages / skipped cursor). The gate (all in SQL):
+    #   * received_from IS NULL                         (self-originated, as today), OR
+    #   * the fact is relayed AND
+    #       - facts.scope ∈ origin_allowed_scopes ∩ peer.allowed_scopes ∩ token.scopes
+    #         (the ``facts.scope IN (query_scopes)`` clause already constrains scope to
+    #          the peer∩token set, so here we only additionally require the scope to be
+    #          inside the per-fact origin grant), AND
+    #       - origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅.
+    # origin_allowed_scopes / origin_allowed_tenants are stored as the canonical
+    # ``json.dumps(sorted([...]))`` TEXT (migration 044). Rather than json_each
+    # (NOT translated by postgres_backend._pg_translate → would break Postgres) we
+    # use a portable LIKE against that canonical text: each element appears verbatim
+    # as the JSON-quoted token ``"value"``; the surrounding quotes make the match
+    # exact (``"acme"`` never matches inside ``"acme2"``). All comparison values are
+    # the peer's SMALL known set, bound as params — never string-interpolated.
+    relay_clause: str
+    relay_params: list[Any] = []
+    if _public_module().settings.federation_relay_enabled:
+        peer_tenants = _allowed_output_tenants(peer)
+        if peer_tenants:
+            # scope ∈ origin_allowed_scopes: the fact's own (already peer∩token-bounded)
+            # ``facts.scope`` must appear in the stored origin grant. The grant is the
+            # canonical sorted-JSON text, so the scope appears verbatim as ``"scope"``.
+            # ``facts.scope`` is a COLUMN (not a bind value), so the JSON quotes are
+            # added in SQL via ``||`` concat (portable: SQLite + Postgres). No param.
+            scope_in_origin = (
+                "facts.origin_allowed_scopes LIKE '%\"' || facts.scope || '\"%'"
+            )
+            # origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅: OR over the peer's
+            # known tenant set (sorted for deterministic SQL + param order). Each
+            # tenant is bound as the json-quoted token ``"tenant"`` so the LIKE match
+            # is exact (``"a"`` never matches inside ``"ab"``).
+            tenant_overlap = " OR ".join(
+                "facts.origin_allowed_tenants LIKE '%' || ? || '%'" for _ in peer_tenants
+            )
+            relay_clause = (
+                "(facts.received_from IS NULL"
+                f" OR (facts.received_from IS NOT NULL AND {scope_in_origin}"
+                f" AND ({tenant_overlap})))"
+            )
+            # Params, in the EXACT order their ? appears in relay_clause: one per
+            # peer tenant for tenant_overlap (sorted to match the clause order).
+            # scope_in_origin carries NO param (column-only concat).
+            relay_params.extend(_json_token(t) for t in sorted(peer_tenants))
+        else:
+            # Peer authorised for no tenant ⇒ relay can never apply; fall back to
+            # the self-only clause (no param).
+            relay_clause = "facts.received_from IS NULL"
+    else:
+        relay_clause = "facts.received_from IS NULL"  # do not re-federate inbound facts (§3.1)
+
     scope_placeholders = ",".join("?" * len(query_scopes))
     params: list[Any] = list(query_scopes)
     conditions: list[str] = [
@@ -144,13 +214,18 @@ def pull_facts(
         f"facts.scope IN ({scope_placeholders})",
         "facts.tenant_id = ?",
         "facts.hlc IS NOT NULL",  # only facts with an HLC are replication-eligible
-        "facts.received_from IS NULL",  # do not re-federate inbound facts (§3.1)
+        relay_clause,  # F-FED-2c W2.3: self-only (relay off) OR origin-gated relayed
         "facts.entity NOT LIKE 'stigmem:conflict:%'",  # conflict entities are local (§6.5)
         "facts.relation NOT LIKE 'stigmem:%'",  # meta-facts (received_from, ttl) are local
         "facts.re_federation_blocked = 0",  # exclude relay-blocked company facts (§6.8.2)
         "(facts.derived_from IS NULL OR facts.derived_from = '' OR facts.derived_from = '[]')",
     ]
+    # Param lockstep: the scope IN (...) placeholders are already at the front of
+    # ``params``; ``facts.tenant_id = ?`` binds pull_tenant next; the relay_clause
+    # placeholders (if any) come immediately AFTER because relay_clause sits after
+    # the tenant_id clause in ``conditions`` and BEFORE the garden subquery's ?.
     params.append(pull_tenant)
+    params.extend(relay_params)
     # F-FED-GARDEN T1 (fail-closed, UNCONDITIONAL — not gated on garden_acl_enforced()
     # and not routed through the identity read chokepoint): the fact's effective
     # garden is the PROJECTED garden COALESCE(fgm.garden_id, facts.garden_id). A

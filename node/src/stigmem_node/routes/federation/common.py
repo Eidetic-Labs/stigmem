@@ -22,15 +22,56 @@ def _public_module() -> Any:
     """Return the public federation module so test monkey-patches stay visible."""
     return sys.modules["stigmem_node.routes.federation"]
 
-def _allowed_output_scopes(peer: dict[str, Any], token_payload: dict[str, Any]) -> set[str]:
-    """Intersection of peer's declaration allowed_scopes and token's scopes claim (§5.8)."""
+def _allowed_output_scopes(
+    peer: dict[str, Any],
+    token_payload: dict[str, Any],
+    origin_allowed_scopes: list[str] | None = None,
+) -> set[str]:
+    """Scopes this peer may receive: peer.allowed_scopes ∩ token.scopes (§5.8).
+
+    For a RELAYED fact (F-FED-2c W2.3) the origin's signed propagation grant
+    further constrains the set: a relayed fact may only egress for scopes the
+    ORIGIN authorised. Pass ``origin_allowed_scopes`` (the per-fact grant) to
+    additionally intersect with it. For self-originated facts leave it ``None``
+    — the result is then exactly the 2b behaviour (peer ∩ token only).
+
+    ``local`` is always stripped; ``team`` is stripped unless
+    ``federation_allow_team`` is set. These node-policy filters apply to the
+    origin grant too — a relay never widens scope beyond local node policy.
+    """
     peer_scopes = set(json.loads(peer["allowed_scopes"]))
     token_scopes = set(token_payload.get("scopes", []))
     combined = peer_scopes & token_scopes
+    if origin_allowed_scopes is not None:
+        combined &= set(origin_allowed_scopes)
     combined.discard("local")
     if not _public_module().settings.federation_allow_team:
         combined.discard("team")
     return combined
+
+
+def _allowed_output_tenants(
+    peer: dict[str, Any],
+    origin_allowed_tenants: list[str] | None = None,
+) -> set[str]:
+    """Tenants this peer is authorised to receive facts for (F-FED-2c W2.3).
+
+    Parallels ``_allowed_output_scopes`` on the tenant axis. The base set is the
+    peer's declared ``allowed_tenants`` (migration 041, JSON array); when that
+    column is NULL/empty the peer's resolved ``pull_tenant`` (or ``"default"``)
+    is the sole authorised tenant. For a RELAYED fact the origin's signed
+    ``origin_allowed_tenants`` grant additionally intersects: a relayed fact may
+    only egress when the origin authorised at least one tenant the peer is
+    allowed to receive. Pass ``None`` (self-originated) to skip the origin
+    constraint.
+    """
+    raw = peer.get("allowed_tenants")
+    peer_tenants: set[str] = set(json.loads(raw)) if raw else set()
+    if not peer_tenants:
+        peer_tenants = {peer.get("pull_tenant") or "default"}
+    if origin_allowed_tenants is not None:
+        peer_tenants &= set(origin_allowed_tenants)
+    return peer_tenants
 
 
 # ---------------------------------------------------------------------------

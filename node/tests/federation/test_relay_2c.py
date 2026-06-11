@@ -213,3 +213,320 @@ def test_relayed_emit_without_stored_sig_is_skipped(caplog) -> None:  # type: ig
         )
     assert result is None
     assert any(record.id in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# W2.3 — SQL egress RE-FEDERATES relayed facts ONLY within origin propagation
+# limits, and ONLY when ``federation_relay_enabled`` is ON.
+#
+# These are end-to-end pull-endpoint tests: an INBOUND (received_from not NULL)
+# fact is inserted directly into the DB with controlled origin_allowed_scopes /
+# origin_allowed_tenants / scope / re_federation_blocked, a peer is registered
+# with specific allowed_scopes / allowed_tenants, and the pull endpoint is hit.
+# The assertions are over WHICH fact ids come back in the v2 envelope.
+# ---------------------------------------------------------------------------
+
+import uuid  # noqa: E402
+
+from conftest import FedNode, make_peer_token  # noqa: E402
+
+from stigmem_node.db import db as _db_ctx  # noqa: E402
+
+from .helpers import generate_ed25519_b64  # noqa: E402
+
+
+def _set_relay_enabled(value: bool) -> None:
+    """Toggle federation_relay_enabled on the live (test-patched) settings object.
+
+    The pull route reads the flag via ``_public_module().settings`` — the same
+    Settings instance the fed_node fixture patched across federation modules — so
+    mutating that instance is sufficient and is restored by the fixture teardown.
+    """
+    import stigmem_node.settings as _settings_mod  # noqa: PLC0415
+
+    _settings_mod.settings.federation_relay_enabled = value
+
+
+def _insert_inbound_fact(
+    db_path: str,
+    *,
+    entity: str,
+    scope: str,
+    hlc: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    re_federation_blocked: int = 0,
+    tenant_id: str = "default",
+) -> str:
+    """Insert an INBOUND (relayed) fact row directly + return its id.
+
+    ``received_from`` is non-NULL (this is a relayed fact, not self-originated).
+    origin_allowed_scopes / origin_allowed_tenants are stored with the SAME
+    canonical encoding ingest uses: ``json.dumps(sorted([...]))``. A stored
+    origin_sig is set so the W2.2 emit path forwards it rather than skipping.
+    """
+    import sqlite3  # noqa: PLC0415
+
+    fact_id = str(uuid.uuid4())
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """INSERT INTO facts
+               (id, entity, relation, value_type, value_v, source, timestamp,
+                confidence, scope, hlc, tenant_id, received_from,
+                origin_node_id, origin_allowed_scopes, re_federation_blocked,
+                origin_tenant, origin_allowed_tenants, origin_sig, cid)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                fact_id,
+                entity,
+                "relayed:value",
+                "string",
+                "from-upstream",
+                _ORIGIN_NODE_ID,
+                "2026-06-10T00:00:00Z",
+                1.0,
+                scope,
+                hlc,
+                tenant_id,
+                "stigmem:node:direct-peer",  # received_from -> relayed
+                _ORIGIN_NODE_ID,
+                json.dumps(sorted(origin_allowed_scopes)),
+                re_federation_blocked,
+                _ORIGIN_TENANT,
+                json.dumps(sorted(origin_allowed_tenants)),
+                f"STORED-SIG-{fact_id}",
+                f"bafycid{fact_id[:8]}",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return fact_id
+
+
+def _register_pull_peer(
+    fed_node: FedNode,
+    *,
+    allowed_scopes: list[str],
+    allowed_tenants: list[str],
+    pull_tenant: str = "default",
+) -> tuple[str, str]:
+    """Register an active peer with explicit allowed_scopes/allowed_tenants/pull_tenant.
+
+    Returns (node_id, priv_b64) for minting a pull token.
+    """
+    import sqlite3  # noqa: PLC0415
+
+    pub_b64, priv_b64 = generate_ed25519_b64()
+    node_id = f"stigmem://relay-pull-{uuid.uuid4()}"
+    conn = sqlite3.connect(fed_node.db_path)
+    try:
+        conn.execute(
+            """INSERT INTO peers
+               (id, node_id, node_url, federation_pubkey, allowed_scopes,
+                status, declaration_sig, signed_at, pull_tenant, allowed_tenants)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(uuid.uuid4()),
+                node_id,
+                "http://relay-pull",
+                pub_b64,
+                json.dumps(allowed_scopes),
+                "active",
+                "test_dummy_sig",
+                "2026-05-02T00:00:00Z",
+                pull_tenant,
+                json.dumps(allowed_tenants),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return node_id, priv_b64
+
+
+def _pull_ids(fed_node: FedNode, node_id: str, priv: str, scopes: list[str], **q: Any) -> set[str]:
+    """Hit the pull endpoint and return the set of returned fact ids."""
+    token = make_peer_token(priv, node_id, fed_node.node_id, scopes)
+    qs = "&".join(f"{k}={v}" for k, v in q.items())
+    url = "/v1/federation/facts" + (f"?{qs}" if qs else "")
+    r = fed_node.client.get(url, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    return {e["fact"]["id"] for e in r.json()["facts"]}
+
+
+def test_relay_on_egresses_relayed_fact_within_origin_limits(fed_node: FedNode) -> None:
+    """W2.3 (a): relay ON — a relayed fact egresses iff its scope is in
+    origin_allowed_scopes ∩ peer.allowed_scopes AND
+    origin_allowed_tenants ∩ peer.allowed_tenants is non-empty."""
+    _set_relay_enabled(True)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:in-limits",
+        scope="public",
+        hlc="100.000",
+        origin_allowed_scopes=["public", "team"],
+        origin_allowed_tenants=["acme", "default"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+    assert fid in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_on_blocks_relayed_fact_scope_outside_origin_grant(fed_node: FedNode) -> None:
+    """W2.3 (a, negative): a relayed fact whose scope is NOT in
+    origin_allowed_scopes does NOT egress even when relay is ON."""
+    _set_relay_enabled(True)
+    # Origin only granted scope "team"; the peer is pulling scope "public".
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:scope-outside",
+        scope="public",
+        hlc="101.000",
+        origin_allowed_scopes=["team"],  # 'public' NOT granted by origin
+        origin_allowed_tenants=["default"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+    assert fid not in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_on_blocks_relayed_fact_tenant_outside_origin_grant(fed_node: FedNode) -> None:
+    """W2.3 (b): a relayed fact whose origin_allowed_tenants excludes the peer's
+    tenant set does NOT egress."""
+    _set_relay_enabled(True)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:tenant-outside",
+        scope="public",
+        hlc="102.000",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["acme"],  # peer.allowed_tenants is ["default"] → no overlap
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+    assert fid not in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_on_never_egresses_re_federation_blocked(fed_node: FedNode) -> None:
+    """W2.3 (c): a relayed fact with re_federation_blocked=1 never egresses,
+    even when scope + tenant otherwise pass."""
+    _set_relay_enabled(True)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:blocked",
+        scope="public",
+        hlc="103.000",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["default"],
+        re_federation_blocked=1,
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+    assert fid not in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_off_never_egresses_inbound_facts(fed_node: FedNode) -> None:
+    """W2.3 (d): with relay OFF (today's behaviour), NO inbound fact egresses —
+    even one fully within origin propagation limits. Regression guard."""
+    _set_relay_enabled(False)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:off",
+        scope="public",
+        hlc="104.000",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["default"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+    assert fid not in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_on_pagination_filters_in_sql_not_python(fed_node: FedNode) -> None:
+    """W2.3 (e): with relay ON and a mix of pass/fail relayed facts spanning more
+    than one page at a small limit, the cursor advances correctly, every page is
+    full (no short page from post-filtering), and exactly the eligible facts come
+    back across all pages. Proves the gate is IN SQL (LIMIT applies post-filter)."""
+    _set_relay_enabled(True)
+
+    # 12 relayed facts: even-indexed PASS (origin grants public+default), odd-indexed
+    # FAIL (origin tenant excludes the peer's tenant). Interleaved so a post-filter
+    # would produce short pages. HLCs strictly increasing for stable cursor order.
+    expected_pass: set[str] = set()
+    for i in range(12):
+        passes = i % 2 == 0
+        fid = _insert_inbound_fact(
+            fed_node.db_path,
+            entity=f"relay:page-{i}",
+            scope="public",
+            hlc=f"2{i:03d}.000",
+            origin_allowed_scopes=["public"],
+            origin_allowed_tenants=(["default"] if passes else ["acme"]),
+        )
+        if passes:
+            expected_pass.add(fid)
+
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+
+    # Page through with a small limit. Each page (except possibly the last) must be
+    # FULL — a short non-final page would mean Python post-filtering shrank it.
+    collected: set[str] = set()
+    cursor: str | None = None
+    limit = 3
+    for _ in range(20):  # generous page cap; loop breaks on has_more=False
+        token = make_peer_token(priv, node_id, fed_node.node_id, ["public"])
+        qs = f"limit={limit}" + (f"&cursor={cursor}" if cursor else "")
+        r = fed_node.client.get(
+            f"/v1/federation/facts?{qs}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        page_ids = [e["fact"]["id"] for e in body["facts"]]
+        collected.update(page_ids)
+        if body["has_more"]:
+            assert len(page_ids) == limit, "non-final page is short → filtering leaked to Python"
+        cursor = body["cursor"]
+        if not body["has_more"]:
+            break
+
+    assert collected == expected_pass
+    # 6 eligible facts at limit 3 ⇒ no eligible fact lost, no ineligible fact slipped in.
+    assert len(collected) == 6
+
+
+def test_relay_off_egress_query_byte_identical_clause(fed_node: FedNode) -> None:
+    """W2.3 guardrail: relay OFF must keep the egress query byte-identical to today.
+    A self-originated fact still egresses (the relay branch must not perturb the
+    non-relay path)."""
+    _set_relay_enabled(False)
+    r = fed_node.client.post(
+        "/v1/facts",
+        json={
+            "entity": f"self:relayoff:{uuid.uuid4()}",
+            "relation": "test:value",
+            "value": {"type": "string", "v": "local"},
+            "source": "agent:test",
+            "scope": "public",
+        },
+    )
+    assert r.status_code == 201
+    self_id = r.json()["id"]
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["default"]
+    )
+    assert self_id in _pull_ids(fed_node, node_id, priv, ["public"])
+    # sanity: confirm the row is genuinely self-originated (received_from IS NULL)
+    with _db_ctx() as conn:
+        row = conn.execute(
+            "SELECT received_from FROM facts WHERE id = ?", (self_id,)
+        ).fetchone()
+    assert row["received_from"] is None
