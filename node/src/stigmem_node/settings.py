@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # When True (default), every request must carry a valid Bearer token.
     # Set to False only for local development / single-operator installs.
     auth_required: bool = True
+    # /metrics (Prometheus) leaks per-principal entity_uri/tenant/peer labels and
+    # enables unbounded-cardinality DoS, so it requires the admin capability by
+    # default (M11 / F-AVAIL-1).  Set False only where /metrics is otherwise
+    # access-controlled, e.g. behind a private scrape interface or a sidecar proxy.
+    metrics_require_auth: bool = True
     # Static API-key lifecycle controls. 0 disables max-age enforcement.
     api_key_max_age_days: int = 90
     api_key_expiring_soon_days: int = 30
