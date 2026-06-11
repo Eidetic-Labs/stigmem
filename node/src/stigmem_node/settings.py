@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # Allow team-scoped facts to cross federation boundaries
     # (must be explicitly enabled; audit-logged).
     federation_allow_team: bool = False
+    # Relay re-federates inbound facts only when ON, subject to origin
+    # scope/tenant propagation (Phase 2c). Default OFF = today's behaviour.
+    federation_relay_enabled: bool = False
 
     # Decay sweeper (Phase 6, spec §decay)
     # 0 = disabled; positive = decay non-expiring facts older than N seconds
