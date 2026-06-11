@@ -16,6 +16,7 @@ import pytest
 from stigmem_node.models.federation import (
     FederationTombstonesResponseV2,
     OriginBlock,
+    RevocationEnvelopeEntry,
     TombstoneEnvelopeEntry,
 )
 from stigmem_node.models.tombstones import (
@@ -156,8 +157,12 @@ def test_federation_tombstones_response_v2_has_more_defaults_false(
 
 def test_federation_tombstones_response_v2_with_all_fields(
     tombstone_envelope_entry: TombstoneEnvelopeEntry,
+    origin_block: OriginBlock,
 ) -> None:
-    """(b) FederationTombstonesResponseV2 accepts all optional fields."""
+    """(b) FederationTombstonesResponseV2 accepts all optional fields.
+
+    Rev-2: ``revocations`` is now a list of ``RevocationEnvelopeEntry`` (enveloped with a
+    signed origin block), no longer a bare ``TombstoneRevocationRecord`` list."""
     revocation = TombstoneRevocationRecord(
         id="rev-001",
         tombstone_id="ts-001",
@@ -167,16 +172,22 @@ def test_federation_tombstones_response_v2_with_all_fields(
         signature="sig-rev",
         created_at="2026-06-10T01:00:00Z",
     )
+    revocation_entry = RevocationEnvelopeEntry(
+        revocation=revocation,
+        origin=origin_block,
+        origin_sig="sig-rev-origin",
+    )
     resp = FederationTombstonesResponseV2(
         v=2,
         tombstones=[tombstone_envelope_entry],
-        revocations=[revocation],
+        revocations=[revocation_entry],
         cursor="2026-06-10T00:00:00Z",
         has_more=True,
     )
     assert resp.v == 2
     assert len(resp.tombstones) == 1
     assert len(resp.revocations) == 1
+    assert resp.revocations[0].origin_sig == "sig-rev-origin"
     assert resp.cursor == "2026-06-10T00:00:00Z"
     assert resp.has_more is True
 

@@ -121,16 +121,34 @@ class TombstoneEnvelopeEntry(BaseModel):
     origin_manifest: dict[str, Any] | None = None
 
 
+class RevocationEnvelopeEntry(BaseModel):
+    """V2 per-revocation envelope carrying origin attestation (Phase 2c Rev-2).
+
+    Mirrors TombstoneEnvelopeEntry for tombstone REVOCATIONS; reuses OriginBlock
+    unchanged. A revocation has no entity_uri/scope of its own — it references a
+    tombstone by ``tombstone_id`` — so its origin attestation binds the revocation
+    ``id`` + the referenced ``tombstone_id`` + the origin grant (Rev-1's
+    ``canonical_revocation_origin_tuple``), and the egress gate is TENANT-only.
+    """
+
+    revocation: TombstoneRevocationRecord
+    origin: OriginBlock
+    origin_sig: str
+    # Carried, self-verifying origin manifest body for RELAYED revocations.
+    # Absent (None) for self-originated revocations and direct (origin==sender) entries.
+    origin_manifest: dict[str, Any] | None = None
+
+
 class FederationTombstonesResponseV2(BaseModel):
     """V2 federation tombstone poll response with per-tombstone origin envelopes.
 
-    Mirrors FederationFactsResponse; revocations stay as TombstoneRevocationRecord
-    for now (enveloped in a later task). Back-compat: FederationTombstonesResponse
-    (v1) in tombstones.py is unchanged.
+    Mirrors FederationFactsResponse; revocations are now ALSO enveloped (Rev-2) so a
+    relayed revocation carries its origin attestation on the wire. Back-compat:
+    FederationTombstonesResponse (v1) in tombstones.py is unchanged.
     """
 
     v: int = 2
     tombstones: list[TombstoneEnvelopeEntry]
-    revocations: list[TombstoneRevocationRecord]
+    revocations: list[RevocationEnvelopeEntry]
     cursor: str | None = None
     has_more: bool = False

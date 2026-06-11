@@ -272,6 +272,100 @@ def _row_to_revocation(row: Any) -> TombstoneRevocationRecord:
     )
 
 
+def _revocation_origin_fields(row: Any) -> dict[str, Any]:
+    """Surface the v2 origin columns (migration 050) from a tombstone_revocations row.
+
+    Mirrors ``_row_origin_fields`` for tombstones. NULL for every column = self/direct
+    revocation (unchanged behaviour). The egress emit (``build_revocation_origin_entry``)
+    reads ``received_from`` to decide self-originated vs relayed and forwards the stored
+    origin block verbatim for a relayed revocation. Returned as a plain dict (not on
+    ``TombstoneRevocationRecord``, which is the wire model and must not carry local-only
+    relay columns). Missing columns (a row that predates migration 050 / a fixture row
+    from ``model_dump``) read as ``None`` via the tolerant ``_get`` below.
+    """
+
+    def _get(key: str) -> Any:
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    return {
+        "received_from": _get("received_from"),
+        "origin_node_id": _get("origin_node_id"),
+        "origin_tenant": _get("origin_tenant"),
+        "origin_entity_uri": _get("origin_entity_uri"),
+        "origin_allowed_scopes": _get("origin_allowed_scopes"),
+        "origin_allowed_tenants": _get("origin_allowed_tenants"),
+        "origin_sig": _get("origin_sig"),
+    }
+
+
+def list_federatable_revocations(
+    *,
+    peer: dict[str, Any] | None,
+    relay_enabled: bool,
+    since: str | None = None,
+    limit: int,
+) -> tuple[list[tuple[TombstoneRevocationRecord, dict[str, Any]]], bool]:
+    """Federation-egress variant of ``list_revocations`` with the Rev-2 relay gate.
+
+    Mirrors ``list_federatable_tombstones`` (W6.6) but the gate is TENANT-ONLY: a
+    revocation references a tombstone by id and has NO scope of its own, so there is no
+    scope-membership clause — only ``origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅``.
+    Enforced ENTIRELY in SQL so ``LIMIT`` applies post-filter (no Python post-filtering →
+    no short pages / skipped cursor). The egress WHERE is:
+
+    * relay OFF → ``received_from IS NULL`` (self-only; byte-for-byte the self-only set).
+    * relay ON →
+      ``received_from IS NULL OR (received_from IS NOT NULL AND <tenant_overlap>)`` where
+        - ``<tenant_overlap>`` = an OR-of-LIKE over the peer's known tenant set, each bound
+          as ``json.dumps(tenant)``.
+      A peer authorised for no tenant (or no resolvable peer row) ⇒ relay can never apply ⇒
+      self-only (fail-closed).
+
+    Returns ``(rows, has_more)`` where ``rows`` is at most ``limit``
+    ``(TombstoneRevocationRecord, origin_fields)`` pairs. The admin ``list_revocations``
+    path is untouched.
+    """
+    from ..routes.federation.common import _allowed_output_tenants  # noqa: PLC0415
+
+    relay_clause: str
+    relay_params: list[Any] = []
+    if relay_enabled and peer is not None:
+        peer_tenants = _allowed_output_tenants(peer)
+        if peer_tenants:
+            # origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅: OR over the peer's known
+            # tenant set (sorted for deterministic SQL + param order). Each tenant is bound
+            # as the json-quoted token ``"tenant"`` so the LIKE match is exact. NO scope
+            # clause — a revocation has no scope of its own (tenant-only gate, Rev-2).
+            tenant_overlap = " OR ".join(
+                "origin_allowed_tenants LIKE '%' || ? || '%'" for _ in peer_tenants
+            )
+            relay_clause = (
+                "(received_from IS NULL"
+                f" OR (received_from IS NOT NULL AND ({tenant_overlap})))"
+            )
+            relay_params.extend(_json_token(t) for t in sorted(peer_tenants))
+        else:
+            relay_clause = "received_from IS NULL"
+    else:
+        relay_clause = "received_from IS NULL"  # do not re-federate inbound revocations
+
+    query = f"SELECT * FROM tombstone_revocations WHERE {relay_clause}"  # noqa: S608  # nosec B608 — clause is a literal fragment; values in params
+    params: list[Any] = list(relay_params)
+    if since is not None:
+        query += " AND created_at > ?"
+        params.append(since)
+    query += " ORDER BY created_at LIMIT ?"
+    params.append(limit + 1)
+    with db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return [(_row_to_revocation(r), _revocation_origin_fields(r)) for r in rows], has_more
+
+
 def create_tombstone(
     entity_uri: str,
     scope: str,

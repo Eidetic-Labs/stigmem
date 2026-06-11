@@ -1909,9 +1909,9 @@ export interface components {
          * FederationTombstonesResponseV2
          * @description V2 federation tombstone poll response with per-tombstone origin envelopes.
          *
-         *     Mirrors FederationFactsResponse; revocations stay as TombstoneRevocationRecord
-         *     for now (enveloped in a later task). Back-compat: FederationTombstonesResponse
-         *     (v1) in tombstones.py is unchanged.
+         *     Mirrors FederationFactsResponse; revocations are now ALSO enveloped (Rev-2) so a
+         *     relayed revocation carries its origin attestation on the wire. Back-compat:
+         *     FederationTombstonesResponse (v1) in tombstones.py is unchanged.
          */
         FederationTombstonesResponseV2: {
             /** Cursor */
@@ -1922,7 +1922,7 @@ export interface components {
              */
             has_more: boolean;
             /** Revocations */
-            revocations: components["schemas"]["TombstoneRevocationRecord"][];
+            revocations: components["schemas"]["RevocationEnvelopeEntry"][];
             /** Tombstones */
             tombstones: components["schemas"]["TombstoneEnvelopeEntry"][];
             /**
@@ -2553,6 +2553,26 @@ export interface components {
             /** Tenant Id */
             tenant_id: string;
         };
+        /**
+         * RevocationEnvelopeEntry
+         * @description V2 per-revocation envelope carrying origin attestation (Phase 2c Rev-2).
+         *
+         *     Mirrors TombstoneEnvelopeEntry for tombstone REVOCATIONS; reuses OriginBlock
+         *     unchanged. A revocation has no entity_uri/scope of its own — it references a
+         *     tombstone by ``tombstone_id`` — so its origin attestation binds the revocation
+         *     ``id`` + the referenced ``tombstone_id`` + the origin grant (Rev-1's
+         *     ``canonical_revocation_origin_tuple``), and the egress gate is TENANT-only.
+         */
+        RevocationEnvelopeEntry: {
+            origin: components["schemas"]["OriginBlock"];
+            /** Origin Manifest */
+            origin_manifest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Origin Sig */
+            origin_sig: string;
+            revocation: components["schemas"]["TombstoneRevocationRecord"];
+        };
         /** ScoreBreakdown */
         ScoreBreakdown: {
             /**
@@ -2903,6 +2923,7 @@ export type SchemaRecallResponse = components['schemas']['RecallResponse'];
 export type SchemaRecallWeights = components['schemas']['RecallWeights'];
 export type SchemaRegisterKeyRequest = components['schemas']['RegisterKeyRequest'];
 export type SchemaRegisterKeyResponse = components['schemas']['RegisterKeyResponse'];
+export type SchemaRevocationEnvelopeEntry = components['schemas']['RevocationEnvelopeEntry'];
 export type SchemaScoreBreakdown = components['schemas']['ScoreBreakdown'];
 export type SchemaScoredFact = components['schemas']['ScoredFact'];
 export type SchemaSubscriptionCreateRequest = components['schemas']['SubscriptionCreateRequest'];

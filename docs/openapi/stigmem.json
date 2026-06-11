@@ -1327,7 +1327,7 @@
         "type": "object"
       },
       "FederationTombstonesResponseV2": {
-        "description": "V2 federation tombstone poll response with per-tombstone origin envelopes.\n\nMirrors FederationFactsResponse; revocations stay as TombstoneRevocationRecord\nfor now (enveloped in a later task). Back-compat: FederationTombstonesResponse\n(v1) in tombstones.py is unchanged.",
+        "description": "V2 federation tombstone poll response with per-tombstone origin envelopes.\n\nMirrors FederationFactsResponse; revocations are now ALSO enveloped (Rev-2) so a\nrelayed revocation carries its origin attestation on the wire. Back-compat:\nFederationTombstonesResponse (v1) in tombstones.py is unchanged.",
         "properties": {
           "cursor": {
             "anyOf": [
@@ -1347,7 +1347,7 @@
           },
           "revocations": {
             "items": {
-              "$ref": "#/components/schemas/TombstoneRevocationRecord"
+              "$ref": "#/components/schemas/RevocationEnvelopeEntry"
             },
             "title": "Revocations",
             "type": "array"
@@ -3003,6 +3003,40 @@
           "tenant_id"
         ],
         "title": "RegisterKeyResponse",
+        "type": "object"
+      },
+      "RevocationEnvelopeEntry": {
+        "description": "V2 per-revocation envelope carrying origin attestation (Phase 2c Rev-2).\n\nMirrors TombstoneEnvelopeEntry for tombstone REVOCATIONS; reuses OriginBlock\nunchanged. A revocation has no entity_uri/scope of its own \u2014 it references a\ntombstone by ``tombstone_id`` \u2014 so its origin attestation binds the revocation\n``id`` + the referenced ``tombstone_id`` + the origin grant (Rev-1's\n``canonical_revocation_origin_tuple``), and the egress gate is TENANT-only.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/OriginBlock"
+          },
+          "origin_manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Manifest"
+          },
+          "origin_sig": {
+            "title": "Origin Sig",
+            "type": "string"
+          },
+          "revocation": {
+            "$ref": "#/components/schemas/TombstoneRevocationRecord"
+          }
+        },
+        "required": [
+          "revocation",
+          "origin",
+          "origin_sig"
+        ],
+        "title": "RevocationEnvelopeEntry",
         "type": "object"
       },
       "ScoreBreakdown": {

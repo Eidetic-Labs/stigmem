@@ -8,17 +8,21 @@ from typing import Annotated, Any
 from fastapi import Header, HTTPException, Request, status
 
 from ...db import get_node_entity_uri, get_or_create_node_id
-from ...federation.origin_signature import sign_tombstone_origin
+from ...federation.origin_signature import sign_revocation_origin, sign_tombstone_origin
 from ...federation.peer_token import _get_privkey_obj
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
-from ...lifecycle.tombstones import list_federatable_tombstones, list_revocations
+from ...lifecycle.tombstones import (
+    list_federatable_revocations,
+    list_federatable_tombstones,
+)
 from ...models.federation import (
     FederationTombstonesResponseV2,
     OriginBlock,
+    RevocationEnvelopeEntry,
     TombstoneEnvelopeEntry,
 )
-from ...models.tombstones import TombstoneRecord
+from ...models.tombstones import TombstoneRecord, TombstoneRevocationRecord
 from .._federation_impl import federation_ingest_tombstone_impl
 from .common import _get_mtls_peer_cert, _public_module, _try_peer_token_auth, router
 
@@ -131,6 +135,105 @@ def build_tombstone_origin_entry(
     )
 
 
+def build_revocation_origin_entry(
+    record: TombstoneRevocationRecord,
+    origin_fields: dict[str, Any],
+    *,
+    own_node_id: str,
+    own_entity_uri: str,
+    pull_tenant: str,
+    priv: Any,
+) -> RevocationEnvelopeEntry | None:
+    """Build one v2 revocation envelope entry, mirroring ``build_tombstone_origin_entry``.
+
+    A revocation has no entity_uri/scope of its own — it references a tombstone by
+    ``tombstone_id`` — so the signed origin tuple binds the revocation ``id`` + the
+    referenced ``tombstone_id`` + the origin grant (Rev-1's ``sign_revocation_origin``).
+
+    * **Self-originated** (``received_from`` is None / origin_node_id absent or this node):
+      build a FRESH origin block from THIS node's identity and sign via
+      ``sign_revocation_origin``. ``allowed_scopes`` is ``[]`` (revocations carry no scope);
+      ``allowed_tenants`` = ``[pull_tenant]``. ``origin_manifest`` is None.
+    * **Relayed** (``received_from`` set, stored origin_sig + origin_entity_uri present):
+      forward the STORED origin block + STORED ``origin_sig`` VERBATIM (no re-sign). A relayed
+      revocation missing the stored ``origin_sig`` / ``origin_entity_uri`` (pre-Rev-1 origin)
+      is not attributable → SKIP (return None). Attach ``origin_manifest`` = the stored
+      manifest for the origin's entity_uri (best-effort) so an UNREACHABLE downstream can
+      anchor-match it (mirrors the tombstone path's W6.7 attach).
+
+    Returns None (skip + warn) when a relayed revocation is not forwardable.
+    """
+    import json as _json
+
+    received_from = origin_fields.get("received_from")
+    origin_node_id = origin_fields.get("origin_node_id")
+    self_originated = received_from is None and (
+        origin_node_id is None or origin_node_id == own_node_id
+    )
+
+    if self_originated:
+        origin = OriginBlock(
+            tenant=pull_tenant,
+            node_id=own_node_id,
+            allowed_scopes=[],
+            allowed_tenants=[pull_tenant],
+            entity_uri=own_entity_uri,
+        )
+        sig = sign_revocation_origin(
+            priv,
+            revocation_id=record.id,
+            tombstone_id=record.tombstone_id,
+            origin_node_id=own_node_id,
+            origin_tenant=pull_tenant,
+            origin_allowed_scopes=[],
+            origin_allowed_tenants=[pull_tenant],
+            origin_entity_uri=own_entity_uri,
+        )
+        return RevocationEnvelopeEntry(
+            revocation=record, origin=origin, origin_sig=sig, origin_manifest=None
+        )
+
+    # Relayed: forward the stored origin block + stored sig verbatim (no re-sign).
+    stored_sig = origin_fields.get("origin_sig")
+    stored_entity_uri = origin_fields.get("origin_entity_uri")
+    if not stored_sig or not stored_entity_uri:
+        logger.warning(
+            "federation revocation relay skip: relayed revocation %s missing stored "
+            "origin_sig/origin_entity_uri (pre-Rev-1 origin, not relayable)",
+            record.id,
+        )
+        return None
+    stored_scopes_raw = origin_fields.get("origin_allowed_scopes")
+    stored_tenants_raw = origin_fields.get("origin_allowed_tenants")
+    origin = OriginBlock(
+        tenant=(origin_fields.get("origin_tenant") or pull_tenant),
+        node_id=(origin_node_id or received_from),
+        allowed_scopes=(_json.loads(stored_scopes_raw) if stored_scopes_raw else []),
+        allowed_tenants=(_json.loads(stored_tenants_raw) if stored_tenants_raw else []),
+        entity_uri=stored_entity_uri,
+    )
+    carried_manifest: dict[str, Any] | None = None
+    try:
+        stored_manifest = get_peer_manifest(
+            stored_entity_uri,
+            refresh_if_expired=False,
+            trust_mode=_public_module().settings.trust_mode,
+        )
+        if stored_manifest is not None:
+            from ...identity.manifest import manifest_to_dict
+
+            carried_manifest = manifest_to_dict(stored_manifest)
+    except Exception as exc:  # noqa: BLE001 — manifest attach is an optimisation, never blocks emit
+        logger.debug(
+            "federation revocation relay: could not attach origin_manifest for %s: %s",
+            stored_entity_uri,
+            exc,
+        )
+    return RevocationEnvelopeEntry(
+        revocation=record, origin=origin, origin_sig=stored_sig, origin_manifest=carried_manifest
+    )
+
+
 @router.get("/v1/federation/tombstones", response_model=FederationTombstonesResponseV2)
 def federation_list_tombstones(
     request: Request,
@@ -199,7 +302,16 @@ def federation_list_tombstones(
         since=since,
         limit=limit,
     )
-    revocation_list = list_revocations(since=since)[:limit]
+    # Rev-2: revocations are now egress-gated (tenant-only) IN SQL, mirroring the tombstone
+    # egress gate — relay OFF emits only self-originated revocations; relay ON emits a relayed
+    # revocation only when origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅. LIMIT applies
+    # post-filter so pagination stays correct (no short pages from Python post-filtering).
+    revocation_rows, _rev_has_more = list_federatable_revocations(
+        peer=peer,
+        relay_enabled=fed_settings.federation_relay_enabled,
+        since=since,
+        limit=limit,
+    )
     cursor = rows[-1][0].created_at if rows else None
 
     # W6.5: build the v2 signed-origin envelope. A self-originated tombstone gets a fresh
@@ -223,10 +335,27 @@ def federation_list_tombstones(
             continue
         entries.append(entry)
 
+    # Rev-2: build the v2 signed-origin revocation envelope. A self-originated revocation gets
+    # a fresh origin block signed by THIS node's federation key; a relayed revocation forwards
+    # its stored origin block + sig verbatim (or is skipped if pre-Rev-1 / unattributable).
+    revocation_entries: list[RevocationEnvelopeEntry] = []
+    for rev_record, rev_origin_fields in revocation_rows:
+        rev_entry = build_revocation_origin_entry(
+            rev_record,
+            rev_origin_fields,
+            own_node_id=own_node_id,
+            own_entity_uri=own_entity_uri,
+            pull_tenant=pull_tenant,
+            priv=priv,
+        )
+        if rev_entry is None:
+            continue
+        revocation_entries.append(rev_entry)
+
     return FederationTombstonesResponseV2(
         v=2,
         tombstones=entries,
-        revocations=revocation_list,
+        revocations=revocation_entries,
         cursor=cursor,
         has_more=has_more,
     )
