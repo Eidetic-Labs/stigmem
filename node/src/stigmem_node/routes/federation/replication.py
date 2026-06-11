@@ -12,7 +12,11 @@ from ...federation.federation_ingest import (
     FederationHlcSkewError,
     FederationIntegrityError,
 )
-from ...federation.origin_identity import OriginIdentityError, resolve_origin_key
+from ...federation.origin_identity import (
+    OriginIdentityError,
+    resolve_origin_key,
+    resolve_origin_key_for_relay,
+)
 from ...federation.origin_signature import (
     OriginSignatureError,
     sign_origin,
@@ -517,6 +521,10 @@ def push_facts(
     accepted = 0
     rejected = 0
     errors: list[dict[str, Any]] = []
+    # F-FED-2c W3.2: per-REQUEST relay key cache, threaded through the page loop so a
+    # relayed-origin manifest fetch + rotation check runs once per push (not per fact).
+    # A local (not a module global) so a stale binding never persists across requests.
+    relay_cache: dict[str, set[str]] = {}
 
     for entry in entries:
         if not isinstance(entry, dict):
@@ -540,11 +548,13 @@ def push_facts(
 
         if using_cap_token:
             assert cap_token is not None
-            ok, err = _push_fact_with_cap_token(fact, fact_scope, origin, origin_sig, cap_token)
+            ok, err = _push_fact_with_cap_token(
+                fact, fact_scope, origin, origin_sig, cap_token, relay_cache
+            )
         else:
             assert peer is not None and token_payload is not None
             ok, err = _push_fact_with_peer_token(
-                fact, fact_scope, origin, origin_sig, peer, token_payload
+                fact, fact_scope, origin, origin_sig, peer, token_payload, relay_cache
             )
 
         if ok:
@@ -565,12 +575,22 @@ def _verify_origin_and_resolve_tenant(
     sender_node_id: str,
     peer_row: dict[str, Any] | Any,
     conn: Any,
+    *,
+    relay_cache: dict[str, set[str]] | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
-    """Run the 7 fail-closed ordered origin checks; return (local_tenant, error).
+    """Run the fail-closed ordered origin checks; return (local_tenant, error).
 
     On any failure returns (None, error_dict) and the fact MUST NOT be ingested.
     Raises HTTPException(409) only for an unresolvable per-origin tenant policy
     (PeerPolicyError) — the push handler turns that into a 409 response.
+
+    Relay (F-FED-2c W3.2): when ``federation_relay_enabled`` is OFF the
+    ``origin.node_id == sender`` check is MANDATORY (unchanged 2b — byte-identical
+    direct path). When ON and the origin differs from the sender (a RELAYED fact),
+    it is admitted ONLY IF the sender peer is ``relay_trusted`` (fail-closed) AND the
+    origin is independently verified by fetching the origin's manifest from its signed
+    entity_uri (``resolve_origin_key_for_relay``). ``relay_cache`` is the per-request
+    dict threaded through the page loop so the relay fetch/rotation check runs once.
     """
     fact_id = fact.get("id")
     # 0. fact id present (later steps sign over / index by it)
@@ -579,12 +599,32 @@ def _verify_origin_and_resolve_tenant(
     # 1. cid present
     if not fact.get("cid"):
         return None, {"fact_id": fact_id, "error": "cid_required"}
-    # 2. origin node_id == authenticated sender
-    if origin.get("node_id") != sender_node_id:
-        return None, {"fact_id": fact_id, "error": "origin_not_sender"}
-    # 3. resolve the signing key set for the origin (regardless of trust_mode)
+    # 2. origin node_id vs authenticated sender — direct (==) vs relayed (!=)
+    is_relayed = origin.get("node_id") != sender_node_id
+    relay_enabled = _public_module().settings.federation_relay_enabled
+    if is_relayed:
+        # Relay OFF ⇒ origin==sender is mandatory (unchanged 2b): reject.
+        if not relay_enabled:
+            return None, {"fact_id": fact_id, "error": "origin_not_sender"}
+        # Relay ON ⇒ the SENDER peer must be relay_trusted (fail-closed).
+        relay_trusted = False
+        try:
+            relay_trusted = bool(peer_row["relay_trusted"])
+        except (KeyError, IndexError, TypeError):
+            relay_trusted = bool((peer_row or {}).get("relay_trusted"))
+        if not relay_trusted:
+            return None, {"fact_id": fact_id, "error": "relay_sender_not_trusted"}
+    # 3. resolve the signing key set for the origin (regardless of trust_mode).
+    #    Direct: 2a peer chain. Relayed: fetch-on-first from the signed entity_uri.
     try:
-        keys = resolve_origin_key(origin["node_id"])
+        if is_relayed:
+            keys = resolve_origin_key_for_relay(
+                origin["node_id"],
+                origin.get("entity_uri", ""),
+                cache=relay_cache if relay_cache is not None else {},
+            )
+        else:
+            keys = resolve_origin_key(origin["node_id"])
     except OriginIdentityError:
         return None, {"fact_id": fact_id, "error": "origin_unresolvable"}
     # 4. verify origin signature over (fact_id, cid, origin, valid_until)
@@ -614,6 +654,7 @@ def _push_fact_with_cap_token(
     origin: dict[str, Any],
     origin_sig: str,
     cap_token: dict[str, Any],
+    relay_cache: dict[str, set[str]] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single v2 fact under capability-token auth.
 
@@ -629,8 +670,14 @@ def _push_fact_with_cap_token(
 
     sender_node_id = cap_token.get("subject", "")
     fact_source = fact.get("source", "")
-    # Source non-forgery: source must match capability token subject
-    if fact_source != sender_node_id:
+    # Source non-forgery: source must match the cap-token subject for a DIRECT fact.
+    # F-FED-2c W3.2: a RELAYED fact (origin.node_id != sender, relay enabled) carries the
+    # ORIGIN's node_id as source — accept it against the origin node_id; the relay-trust +
+    # origin-signature checks below bind it to the verified origin key.
+    _relay_on = _public_module().settings.federation_relay_enabled
+    _is_relayed = _relay_on and origin.get("node_id") != sender_node_id
+    _expected_source = origin.get("node_id") if _is_relayed else sender_node_id
+    if fact_source != _expected_source:
         return False, {"fact_id": fact.get("id"), "error": "source_not_owned"}
 
     with db() as conn:
@@ -644,7 +691,8 @@ def _push_fact_with_cap_token(
 
         try:
             local_tenant, err = _verify_origin_and_resolve_tenant(
-                fact, fact_scope, origin, origin_sig, sender_node_id, peer_row, conn
+                fact, fact_scope, origin, origin_sig, sender_node_id, peer_row, conn,
+                relay_cache=relay_cache,
             )
         except PeerPolicyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -706,6 +754,7 @@ def _push_fact_with_peer_token(
     origin_sig: str,
     peer: dict[str, Any],
     token_payload: dict[str, Any],
+    relay_cache: dict[str, set[str]] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single v2 fact under peer-JWT auth.
 
@@ -721,9 +770,17 @@ def _push_fact_with_peer_token(
         )
         return False, {"fact_id": fact.get("id"), "error": "scope_not_permitted"}
 
-    # Source non-forgery: source must match the sending peer's node_id (§6.4)
+    # Source non-forgery (§6.4): source must match the sending peer's node_id for a DIRECT
+    # fact. F-FED-2c W3.2: a RELAYED fact (origin.node_id != sender, relay enabled) carries
+    # the ORIGIN's node_id as source — the origin owns it, not the relay. In that case the
+    # source must match the ORIGIN node_id instead; the relay-trust + origin-signature
+    # checks in _verify_origin_and_resolve_tenant are what actually bind the fact to the
+    # verified origin key. The byte-identical direct rule still applies when relay is OFF.
     fact_source = fact.get("source", "")
-    if fact_source != peer["node_id"]:
+    _relay_on = _public_module().settings.federation_relay_enabled
+    _is_relayed = _relay_on and origin.get("node_id") != peer["node_id"]
+    _expected_source = origin.get("node_id") if _is_relayed else peer["node_id"]
+    if fact_source != _expected_source:
         _public_module().write_audit_log(
             peer["id"],
             "rejected_fact",
@@ -740,7 +797,8 @@ def _push_fact_with_peer_token(
     with db() as conn:
         try:
             local_tenant, err = _verify_origin_and_resolve_tenant(
-                fact, fact_scope, origin, origin_sig, sender_node_id, peer, conn
+                fact, fact_scope, origin, origin_sig, sender_node_id, peer, conn,
+                relay_cache=relay_cache,
             )
         except PeerPolicyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

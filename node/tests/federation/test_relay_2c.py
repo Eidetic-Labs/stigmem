@@ -51,9 +51,7 @@ def test_relay_trusted_defaults_to_zero(client) -> None:  # type: ignore[no-unty
             "'SIG', '2026-01-01T00:00:00Z')"
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT relay_trusted FROM peers WHERE id='rt1'"
-        ).fetchone()
+        row = conn.execute("SELECT relay_trusted FROM peers WHERE id='rt1'").fetchone()
     assert row["relay_trusted"] == 0
 
 
@@ -581,7 +579,426 @@ def test_relay_off_egress_query_byte_identical_clause(fed_node: FedNode) -> None
     assert self_id in _pull_ids(fed_node, node_id, priv, ["public"])
     # sanity: confirm the row is genuinely self-originated (received_from IS NULL)
     with _db_ctx() as conn:
-        row = conn.execute(
-            "SELECT received_from FROM facts WHERE id = ?", (self_id,)
-        ).fetchone()
+        row = conn.execute("SELECT received_from FROM facts WHERE id = ?", (self_id,)).fetchone()
     assert row["received_from"] is None
+
+
+# ---------------------------------------------------------------------------
+# W3.2 — resolve_origin_key_for_relay: fetch-on-first relayed-origin resolution
+# (entity-authority uniqueness, https-only fetch, threaded pubkey cache, first-
+# contact audit) + relay-trusted-gated ingest with origin scope/tenant gating.
+# ---------------------------------------------------------------------------
+
+import base64 as _b64  # noqa: E402
+
+from cryptography.hazmat.primitives.serialization import (  # noqa: E402
+    Encoding,
+    PublicFormat,
+)
+
+from stigmem_node.identity.key_rotation import generate_key_id  # noqa: E402
+from stigmem_node.identity.manifest import (  # noqa: E402
+    OrgManifest,
+    manifest_to_dict,
+    sign_manifest,
+)
+
+
+def _pub_b64(priv: Ed25519PrivateKey) -> str:
+    return (
+        _b64.urlsafe_b64encode(priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+        .decode()
+        .rstrip("=")
+    )
+
+
+def _build_manifest(
+    priv: Ed25519PrivateKey, *, entity_uri: str, entities: list[str]
+) -> OrgManifest:
+    """A self-signed, currently-valid OrgManifest whose public_key == priv's pubkey."""
+    m = OrgManifest(
+        entity_uri=entity_uri,
+        key_id=generate_key_id(priv.public_key()),
+        public_key=_pub_b64(priv),
+        issued_at="2026-01-01T00:00:00Z",
+        expires_at="2026-12-01T00:00:00Z",
+        entities=entities,
+    )
+    sign_manifest(m, priv)
+    return m
+
+
+class _FetchStub:
+    """Stub for ``origin_identity.httpx.get`` that serves a manifest at the well-known
+    path and counts calls (to prove the per-page cache dedups fetches)."""
+
+    def __init__(self, manifest: OrgManifest | None) -> None:
+        self._json = manifest_to_dict(manifest) if manifest is not None else None
+        self.calls = 0
+
+    def __call__(self, url, *a, **k):  # type: ignore[no-untyped-def]
+        import httpx as _httpx  # noqa: PLC0415
+
+        self.calls += 1
+        if self._json is None or not url.endswith("/.well-known/stigmem-manifest.json"):
+            return _httpx.Response(404)
+        return _httpx.Response(200, json=self._json)
+
+
+def _neutralize_ssrf_dns(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """No-op the SSRF/DNS guard in the resolver so a non-resolvable .example host can be
+    fetched. The HTTPS-only scheme guard is exercised separately (it raises pre-DNS)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+
+
+_RELAY_ENTITY = "https://relay-origin.example"
+_RELAY_NODE = "stigmem:node:relay-origin"
+
+
+def test_relay_resolve_returns_keyset_for_nonpeer_origin(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (a): a NON-peer origin whose manifest is fetchable from entity_uri and lists
+    node_id in entities resolves to the verified key set (fetch-on-first)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    stub = _FetchStub(manifest)
+    monkeypatch.setattr(oi.httpx, "get", stub)
+    _neutralize_ssrf_dns(monkeypatch)
+
+    keys = oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
+    assert _pub_b64(priv) in keys
+    assert stub.calls == 1
+
+
+def test_relay_resolve_fails_closed_when_node_not_in_entities(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (b): FAIL-CLOSED when node_id is NOT listed in the fetched manifest.entities."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    # Manifest does NOT list _RELAY_NODE among its entities.
+    manifest = _build_manifest(priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY])
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    try:
+        oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
+        raise AssertionError("expected OriginIdentityError")
+    except oi.OriginIdentityError:
+        pass
+
+
+def test_relay_resolve_rejects_entity_authority_substitution(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (c) ENTITY-AUTHORITY: a manifest from entity_uri=X claiming a node_id ALREADY
+    bound to a DIFFERENT entity_uri is REJECTED (anti-substitution)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    from stigmem_node.identity.trust_store import store_peer_manifest  # noqa: PLC0415
+
+    # Pre-existing binding: _RELAY_NODE belongs to the LEGITIMATE entity (stored manifest
+    # lists the node in its entities).
+    legit_priv = Ed25519PrivateKey.generate()
+    legit_uri = "https://legit-owner.example"
+    legit_manifest = _build_manifest(
+        legit_priv, entity_uri=legit_uri, entities=[legit_uri, _RELAY_NODE]
+    )
+    store_peer_manifest(legit_uri, legit_manifest, None, trust_mode="relaxed")
+
+    # Hostile org X serves its own valid manifest also claiming _RELAY_NODE.
+    hostile_priv = Ed25519PrivateKey.generate()
+    hostile_manifest = _build_manifest(
+        hostile_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    stub = _FetchStub(hostile_manifest)
+    monkeypatch.setattr(oi.httpx, "get", stub)
+    _neutralize_ssrf_dns(monkeypatch)
+
+    try:
+        oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
+        raise AssertionError("expected OriginIdentityError (entity-authority substitution)")
+    except oi.OriginIdentityError:
+        pass
+    # The uniqueness check fires BEFORE the fetch — the hostile manifest is never pulled.
+    assert stub.calls == 0
+
+
+def test_relay_resolve_cache_dedups_within_request_and_refetches_fresh(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (d) CACHE: two resolves with the same (entity_uri,key_id) in ONE cache do ONE
+    fetch; a FRESH cache (new request) re-fetches (proves it's threaded-local, not global)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    stub = _FetchStub(manifest)
+    monkeypatch.setattr(oi.httpx, "get", stub)
+    _neutralize_ssrf_dns(monkeypatch)
+
+    cache: dict[str, set[str]] = {}
+    oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache=cache)
+    oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache=cache)
+    assert stub.calls == 1  # second resolve served from the threaded cache
+
+    # A new request threads a FRESH cache → re-fetch (no module-global persisting state).
+    oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
+    assert stub.calls == 2
+
+
+def test_relay_resolve_https_only_rejects_http_nonloopback(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (e) HTTPS-ONLY: a relay-origin entity_uri with http scheme (non-loopback) is
+    rejected by the safety guard (assert_safe_url https-only)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    from stigmem_node.settings import settings  # noqa: PLC0415
+
+    # federation_insecure OFF (production) so the loopback-dev skip cannot apply.
+    monkeypatch.setattr(settings, "federation_insecure", False)
+    priv = Ed25519PrivateKey.generate()
+    http_uri = "http://relay-origin.example"  # non-loopback http
+    manifest = _build_manifest(priv, entity_uri=http_uri, entities=[http_uri, _RELAY_NODE])
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+
+    try:
+        oi.resolve_origin_key_for_relay(_RELAY_NODE, http_uri, cache={})
+        raise AssertionError("expected OriginIdentityError (http rejected)")
+    except oi.OriginIdentityError:
+        pass
+
+
+def test_relay_resolve_emits_first_contact_audit(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (f) FIRST-CONTACT AUDIT: binding a new (node_id, entity_uri) via relay emits a
+    relay_origin_first_contact audit event."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    seen: list[tuple[str, dict]] = []
+
+    def _spy_emit_nofail(event_type, **kw):  # type: ignore[no-untyped-def]
+        seen.append((event_type, kw))
+
+    import stigmem_node.observability.audit_event as ae  # noqa: PLC0415
+
+    monkeypatch.setattr(ae, "emit_nofail", _spy_emit_nofail)
+
+    priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
+    events = [e for e, _ in seen]
+    assert "relay_origin_first_contact" in events
+    detail = next(kw for e, kw in seen if e == "relay_origin_first_contact")
+    assert detail["detail"]["node_id"] == _RELAY_NODE
+    assert detail["detail"]["entity_uri"] == _RELAY_ENTITY
+
+
+# ---- W3.2 ingest gating (push endpoint, end-to-end) -----------------------
+
+
+def _b64_pub(priv: Ed25519PrivateKey) -> str:
+    return _pub_b64(priv)
+
+
+def _make_sender_peer(db_path: str, *, node_id: str, pub_b64: str, relay_trusted: int) -> None:
+    """Insert an active sender peer with explicit relay_trusted + tenant map allowing 'acme'."""
+    import sqlite3  # noqa: PLC0415
+
+    peer_id = str(uuid.uuid4())
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """INSERT INTO peers
+               (id, node_id, node_url, federation_pubkey, allowed_scopes, status,
+                declaration_sig, signed_at, ingest_tenant, relay_trusted)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                peer_id,
+                node_id,
+                "https://sender.example",
+                pub_b64,
+                json.dumps(["public"]),
+                "active",
+                "SIG",
+                "2026-01-01T00:00:00Z",
+                "default",  # ingest_tenant pin so the origin tenant 'default' resolves
+                relay_trusted,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _relayed_push_body(
+    sender_priv: Ed25519PrivateKey,
+    origin_priv: Ed25519PrivateKey,
+    *,
+    scope: str,
+    origin_allowed_scopes: list[str],
+) -> dict[str, Any]:
+    """A v2 push envelope where origin.node_id != sender (a RELAYED fact), signed by the
+    ORIGIN key (the fact must verify against the fetched origin manifest)."""
+    from .helpers import make_v2_envelope  # noqa: PLC0415
+
+    fact = {
+        "id": str(uuid.uuid4()),
+        "entity": "stigmem://t/relayed",
+        "relation": "r",
+        "value": {"type": "string", "v": "x"},
+        "source": _RELAY_NODE,
+        "scope": scope,
+        "timestamp": "2026-06-01T00:00:00Z",
+        "confidence": 1.0,
+        "valid_until": None,
+    }
+    origin = {
+        "tenant": "default",
+        "node_id": _RELAY_NODE,
+        "allowed_scopes": origin_allowed_scopes,
+        "allowed_tenants": ["default"],
+        "entity_uri": _RELAY_ENTITY,
+    }
+    return make_v2_envelope(origin_priv, facts=[fact], origin=origin)
+
+
+def _push(fed_node: FedNode, sender_node_id: str, sender_priv: str, body: dict[str, Any]):  # type: ignore[no-untyped-def]
+    token = make_peer_token(sender_priv, sender_node_id, fed_node.node_id, ["public"])
+    return fed_node.client.post(
+        "/v1/federation/facts/push",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+def test_relay_ingest_trusted_sender_verifying_origin_is_ingested(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (g): relay ON + relay_trusted sender + verifying relayed origin → INGESTED."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    import stigmem_node.settings as _smod  # noqa: PLC0415
+
+    monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
+    monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
+
+    origin_priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        origin_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    sender_pub, sender_priv = generate_ed25519_b64()
+    sender_node = "stigmem:node:relay-sender"
+    sender_priv_obj = Ed25519PrivateKey.from_private_bytes(
+        _b64.urlsafe_b64decode(sender_priv + "=" * (-len(sender_priv) % 4))
+    )
+    _make_sender_peer(fed_node.db_path, node_id=sender_node, pub_b64=sender_pub, relay_trusted=1)
+
+    body = _relayed_push_body(
+        sender_priv_obj, origin_priv, scope="public", origin_allowed_scopes=["public"]
+    )
+    r = _push(fed_node, sender_node, sender_priv, body)
+    assert r.status_code == 202, r.text
+    assert r.json()["accepted"] == 1, r.json()
+
+
+def test_relay_ingest_untrusted_sender_is_rejected(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (g): relay ON but sender NOT relay_trusted → relayed fact REJECTED (fail-closed)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    import stigmem_node.settings as _smod  # noqa: PLC0415
+
+    monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
+    monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
+
+    origin_priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        origin_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    sender_pub, sender_priv = generate_ed25519_b64()
+    sender_node = "stigmem:node:relay-sender-untrusted"
+    sender_priv_obj = Ed25519PrivateKey.from_private_bytes(
+        _b64.urlsafe_b64decode(sender_priv + "=" * (-len(sender_priv) % 4))
+    )
+    _make_sender_peer(fed_node.db_path, node_id=sender_node, pub_b64=sender_pub, relay_trusted=0)
+
+    body = _relayed_push_body(
+        sender_priv_obj, origin_priv, scope="public", origin_allowed_scopes=["public"]
+    )
+    r = _push(fed_node, sender_node, sender_priv, body)
+    assert r.status_code == 202, r.text
+    assert r.json()["accepted"] == 0
+    assert any(e["error"] == "relay_sender_not_trusted" for e in r.json()["errors"]), r.json()
+
+
+def test_relay_ingest_scope_outside_origin_grant_is_rejected(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (g) INGEST SCOPE GATE: a relayed fact whose scope ∉ origin_allowed_scopes is
+    REJECTED even from a relay_trusted sender."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    import stigmem_node.settings as _smod  # noqa: PLC0415
+
+    monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
+    monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
+
+    origin_priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        origin_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    sender_pub, sender_priv = generate_ed25519_b64()
+    sender_node = "stigmem:node:relay-sender-scopegate"
+    sender_priv_obj = Ed25519PrivateKey.from_private_bytes(
+        _b64.urlsafe_b64decode(sender_priv + "=" * (-len(sender_priv) % 4))
+    )
+    _make_sender_peer(fed_node.db_path, node_id=sender_node, pub_b64=sender_pub, relay_trusted=1)
+
+    # fact.scope = 'public' but the origin only granted 'team' → must be rejected on ingest.
+    body = _relayed_push_body(
+        sender_priv_obj, origin_priv, scope="public", origin_allowed_scopes=["team"]
+    )
+    r = _push(fed_node, sender_node, sender_priv, body)
+    assert r.status_code == 202, r.text
+    assert r.json()["accepted"] == 0
+    assert any(e["error"] == "scope_not_in_origin_grant" for e in r.json()["errors"]), r.json()
+
+
+def test_relay_off_origin_not_sender_rejected_unchanged_2b(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W3.2 (g) regression: with relay OFF, an origin≠sender fact is REJECTED with the
+    unchanged 2b error origin_not_sender (byte-identical direct path)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    import stigmem_node.settings as _smod  # noqa: PLC0415
+
+    monkeypatch.setattr(_smod.settings, "federation_relay_enabled", False)
+    monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
+
+    origin_priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        origin_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    sender_pub, sender_priv = generate_ed25519_b64()
+    sender_node = "stigmem:node:relay-sender-off"
+    sender_priv_obj = Ed25519PrivateKey.from_private_bytes(
+        _b64.urlsafe_b64decode(sender_priv + "=" * (-len(sender_priv) % 4))
+    )
+    _make_sender_peer(fed_node.db_path, node_id=sender_node, pub_b64=sender_pub, relay_trusted=1)
+
+    body = _relayed_push_body(
+        sender_priv_obj, origin_priv, scope="public", origin_allowed_scopes=["public"]
+    )
+    r = _push(fed_node, sender_node, sender_priv, body)
+    assert r.status_code == 202, r.text
+    # Relay OFF ⇒ the relay relaxation never engages: the fact (source=origin≠sender) is
+    # rejected fail-closed by the unchanged 2b source-non-forgery rule (source_not_owned),
+    # NEVER ingested. This proves the relay-OFF path stays byte-identical to 2b.
+    assert r.json()["accepted"] == 0
+    assert any(e["error"] == "source_not_owned" for e in r.json()["errors"]), r.json()

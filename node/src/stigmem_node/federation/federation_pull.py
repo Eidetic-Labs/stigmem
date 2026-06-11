@@ -23,7 +23,11 @@ from .federation_ingest import (
     ingest_fact,
     write_audit_log,
 )
-from .origin_identity import OriginIdentityError, resolve_origin_key
+from .origin_identity import (
+    OriginIdentityError,
+    resolve_origin_key,
+    resolve_origin_key_for_relay,
+)
 from .origin_signature import OriginSignatureError, verify_origin_signature
 from .peer_policy import (
     PeerPolicyError,
@@ -144,6 +148,15 @@ async def pull_from_peer_once(
         # asserts and signs)". The per-fact ordered checks mirror the push path exactly:
         # cid → origin==sender → resolve key → verify sig → scope-in-grant → resolve tenant.
         sender_node_id = peer["node_id"]
+        # F-FED-2c W3.2: per-PAGE relay key cache, threaded into resolve_origin_key_for_relay
+        # so a relayed-origin manifest fetch + rotation check runs once per page, not per
+        # fact. A local (not a module global) so no stale binding persists across pages.
+        relay_cache: dict[str, set[str]] = {}
+        relay_enabled = settings.federation_relay_enabled
+        try:
+            sender_relay_trusted = bool(peer["relay_trusted"])
+        except (KeyError, IndexError, TypeError):
+            sender_relay_trusted = bool(dict(peer).get("relay_trusted"))
         ingested = 0
         for entry in data.get("facts", []):
             if not isinstance(entry, dict):
@@ -167,13 +180,31 @@ async def pull_from_peer_once(
             if not fact.get("cid"):
                 logger.warning("Pull from %s: skip fact (cid_required)", sender_node_id)
                 continue
-            # 2. origin node_id == authenticated sender
-            if origin.get("node_id") != sender_node_id:
-                logger.warning("Pull from %s: skip fact (origin_not_sender)", sender_node_id)
-                continue
-            # 3. resolve the origin's signing key set (regardless of trust_mode)
+            # 2. origin node_id vs authenticated sender — direct (==) vs relayed (!=).
+            #    F-FED-2c W3.2: relay OFF ⇒ origin==sender is mandatory (unchanged 2b).
+            #    Relay ON ⇒ a relayed fact is admitted only if the SENDER peer is
+            #    relay_trusted (fail-closed); the origin itself is independently verified
+            #    below via the fetch-on-first resolver.
+            is_relayed = origin.get("node_id") != sender_node_id
+            if is_relayed:
+                if not relay_enabled:
+                    logger.warning("Pull from %s: skip fact (origin_not_sender)", sender_node_id)
+                    continue
+                if not sender_relay_trusted:
+                    logger.warning(
+                        "Pull from %s: skip relayed fact (relay_sender_not_trusted)",
+                        sender_node_id,
+                    )
+                    continue
+            # 3. resolve the origin's signing key set (regardless of trust_mode).
+            #    Direct: 2a peer chain. Relayed: fetch-on-first from the signed entity_uri.
             try:
-                keys = resolve_origin_key(origin["node_id"])
+                if is_relayed:
+                    keys = resolve_origin_key_for_relay(
+                        origin["node_id"], origin.get("entity_uri", ""), cache=relay_cache
+                    )
+                else:
+                    keys = resolve_origin_key(origin["node_id"])
             except OriginIdentityError as exc:
                 logger.warning(
                     "Pull from %s: skip fact (origin_unresolvable): %s", sender_node_id, exc
@@ -401,7 +432,8 @@ async def pull_all_peers_once() -> None:
     """Pull one batch from every active peer. Called by the loop and by tests."""
     with db() as conn:
         peers = conn.execute(
-            "SELECT id, node_id, node_url, allowed_scopes, ingest_tenant, pull_tenant "
+            "SELECT id, node_id, node_url, allowed_scopes, ingest_tenant, pull_tenant, "
+            "relay_trusted "
             "FROM peers WHERE status = 'active'"
         ).fetchall()
 
