@@ -138,6 +138,68 @@ def _insert_relayed_tombstone(
     return tomb_id
 
 
+def _insert_relayed_revocation(
+    db_path: str,
+    *,
+    tombstone_id: str,
+    created_at: str,
+    origin_allowed_tenants: list[str],
+) -> str:
+    """Insert an INBOUND (relayed) revocation row (received_from IS NOT NULL) + stored origin
+    block. The gate on revocations is TENANT-ONLY (no scope), so only origin_allowed_tenants is
+    controlled here. A stored origin_sig + origin_entity_uri are set so the Rev-2 emit path
+    forwards rather than skipping it. The referenced tombstone is also created (the poll route
+    surfaces the revocation independently of tombstone presence, but we keep it consistent)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """INSERT INTO tombstones
+               (id, entity_uri, scope, reason, signed_by, key_id, signature,
+                created_at, legal_hold, tenant_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                tombstone_id,
+                f"user:rev-target-{tombstone_id}",
+                "public",
+                None,
+                "stigmem://local/issuer",
+                "key-1",
+                "issuer-sig",
+                created_at,
+                0,
+                _TENANT,
+            ),
+        )
+        rev_id = f"tombrevoke_{uuid.uuid4()}"
+        conn.execute(
+            """INSERT INTO tombstone_revocations
+               (id, tombstone_id, reason, signed_by, key_id, signature, created_at,
+                received_from, origin_node_id, origin_tenant, origin_entity_uri,
+                origin_allowed_scopes, origin_allowed_tenants, origin_sig)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                rev_id,
+                tombstone_id,
+                "relayed-revocation",
+                _ORIGIN_ENTITY_URI,
+                "key-1",
+                "issuer-sig",
+                created_at,
+                "stigmem:node:tomb-direct-peer",  # received_from -> relayed
+                _ORIGIN_NODE_ID,
+                _ORIGIN_TENANT,
+                _ORIGIN_ENTITY_URI,
+                None,
+                json.dumps(sorted(origin_allowed_tenants)),
+                f"STORED-ORIGIN-SIG-{rev_id}",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return rev_id
+
+
 def _register_pull_peer(
     fed_node: FedNode,
     *,
@@ -185,6 +247,16 @@ def _poll_entity_uris(
     r = fed_node.client.get(url, headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200, r.text
     return {e["tombstone"]["entity_uri"] for e in r.json()["tombstones"]}
+
+
+def _poll_revocation_ids(fed_node: FedNode, node_id: str, priv: str, **q: Any) -> set[str]:
+    """Hit the tombstone poll endpoint; return the set of returned revocation ids."""
+    token = make_peer_token(priv, node_id, fed_node.node_id, ["public"])
+    qs = "&".join(f"{k}={v}" for k, v in q.items())
+    url = "/v1/federation/tombstones" + (f"?{qs}" if qs else "")
+    r = fed_node.client.get(url, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    return {e["revocation"]["id"] for e in r.json()["revocations"]}
 
 
 # ---------------------------------------------------------------------------
@@ -373,3 +445,131 @@ def test_relay_on_pagination_filters_in_sql_not_python(
     assert collected == expected_pass
     # 6 eligible tombstones at limit 3 ⇒ no eligible row lost, no ineligible row slipped in.
     assert len(collected) == 6
+
+
+# ---------------------------------------------------------------------------
+# LIKE-metacharacter egress hardening: the tenant-overlap LIKE must be EXACT on
+# BOTH the tombstone and the revocation egress gate. peer.allowed_tenants is
+# operator-set free text (migration 041, no enum), so a wildcard-bearing tenant
+# name (``_`` single-char / ``%`` any-run) must NOT false-match a DIFFERENT origin
+# tenant. ``a_me`` must not match origin grant ``["acme"]``.
+# ---------------------------------------------------------------------------
+
+
+def test_tombstone_relay_tenant_underscore_does_not_wildcard_match(
+    fed_node: FedNode, _trust_off: None
+) -> None:
+    """A peer whose allowed_tenants is ``["a_me"]`` (``_`` = LIKE single-char wildcard) must
+    NOT receive a relayed tombstone whose origin_allowed_tenants is ``["acme"]`` — the ``_``
+    must be escaped so it matches only a literal underscore, not the ``c`` in ``acme``."""
+    _set_relay_enabled(True)
+    relayed_e = "user:tomb-underscore"
+    _insert_relayed_tombstone(
+        fed_node.db_path,
+        entity_uri=relayed_e,
+        scope="public",
+        created_at="2026-06-10T00:00:01Z",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["acme"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a_me"]
+    )
+    assert relayed_e not in _poll_entity_uris(fed_node, node_id, priv)
+
+
+def test_tombstone_relay_tenant_percent_does_not_wildcard_match(
+    fed_node: FedNode, _trust_off: None
+) -> None:
+    """A peer whose allowed_tenants is ``["a%"]`` (``%`` = LIKE any-run wildcard) must NOT
+    receive a relayed tombstone whose origin_allowed_tenants is ``["acme"]``."""
+    _set_relay_enabled(True)
+    relayed_e = "user:tomb-percent"
+    _insert_relayed_tombstone(
+        fed_node.db_path,
+        entity_uri=relayed_e,
+        scope="public",
+        created_at="2026-06-10T00:00:01Z",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["acme"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a%"]
+    )
+    assert relayed_e not in _poll_entity_uris(fed_node, node_id, priv)
+
+
+def test_tombstone_relay_tenant_exact_metachar_still_egresses(
+    fed_node: FedNode, _trust_off: None
+) -> None:
+    """Positive control: an exact literal ``a_me`` tenant on both sides still egresses —
+    escaping the wildcard must not break a legitimate metacharacter-bearing tenant match."""
+    _set_relay_enabled(True)
+    relayed_e = "user:tomb-exact-metachar"
+    _insert_relayed_tombstone(
+        fed_node.db_path,
+        entity_uri=relayed_e,
+        scope="public",
+        created_at="2026-06-10T00:00:01Z",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["a_me"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a_me"]
+    )
+    assert relayed_e in _poll_entity_uris(fed_node, node_id, priv)
+
+
+def test_revocation_relay_tenant_underscore_does_not_wildcard_match(
+    fed_node: FedNode, _trust_off: None
+) -> None:
+    """A peer whose allowed_tenants is ``["a_me"]`` must NOT receive a relayed revocation whose
+    origin_allowed_tenants is ``["acme"]`` — the revocation egress gate (tenant-only) must
+    escape the ``_`` so it does not wildcard-match a different origin tenant."""
+    _set_relay_enabled(True)
+    rev_id = _insert_relayed_revocation(
+        fed_node.db_path,
+        tombstone_id=f"tomb_{uuid.uuid4()}",
+        created_at="2026-06-10T00:00:01Z",
+        origin_allowed_tenants=["acme"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a_me"]
+    )
+    assert rev_id not in _poll_revocation_ids(fed_node, node_id, priv)
+
+
+def test_revocation_relay_tenant_percent_does_not_wildcard_match(
+    fed_node: FedNode, _trust_off: None
+) -> None:
+    """A peer whose allowed_tenants is ``["a%"]`` must NOT receive a relayed revocation whose
+    origin_allowed_tenants is ``["acme"]``."""
+    _set_relay_enabled(True)
+    rev_id = _insert_relayed_revocation(
+        fed_node.db_path,
+        tombstone_id=f"tomb_{uuid.uuid4()}",
+        created_at="2026-06-10T00:00:01Z",
+        origin_allowed_tenants=["acme"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a%"]
+    )
+    assert rev_id not in _poll_revocation_ids(fed_node, node_id, priv)
+
+
+def test_revocation_relay_tenant_exact_metachar_still_egresses(
+    fed_node: FedNode, _trust_off: None
+) -> None:
+    """Positive control: an exact literal ``a_me`` tenant on both sides still egresses a
+    relayed revocation."""
+    _set_relay_enabled(True)
+    rev_id = _insert_relayed_revocation(
+        fed_node.db_path,
+        tombstone_id=f"tomb_{uuid.uuid4()}",
+        created_at="2026-06-10T00:00:01Z",
+        origin_allowed_tenants=["a_me"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a_me"]
+    )
+    assert rev_id in _poll_revocation_ids(fed_node, node_id, priv)

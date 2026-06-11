@@ -61,6 +61,23 @@ def _json_token(value: str) -> str:
     return json.dumps(value)
 
 
+def _like_escape(value: str) -> str:
+    """Escape SQL ``LIKE`` metacharacters in *value* for use with ``ESCAPE '\\'``.
+
+    The membership gate below builds ``LIKE`` patterns whose comparison value comes from
+    operator-set free text (``peer.allowed_tenants`` — migration 041, no enum) and from the
+    stored ``facts.scope`` column. ``LIKE`` treats ``_`` (single char) and ``%`` (any run) as
+    wildcards, so an un-escaped tenant such as ``a_me`` would FALSE-MATCH a DIFFERENT origin
+    grant of ``acme`` → cross-tenant over-egress (HIGH). The membership check is meant to be
+    EXACT, so we escape the escape char FIRST, then both wildcards, and pair every escaped
+    ``LIKE`` with ``ESCAPE '\\'``. Backslash is standard in SQLite + Postgres (PG default
+    ``standard_conforming_strings=on`` treats ``'\\'`` as a literal backslash) and survives
+    ``postgres_backend._pg_translate`` untouched (it rewrites only ``%`` → ``%%``, ``?`` and
+    a few DDL forms — never backslashes or the ``ESCAPE`` keyword).
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def build_origin_entry(
     record: Any,
     row: Any,
@@ -228,15 +245,24 @@ def pull_facts(
             # canonical sorted-JSON text, so the scope appears verbatim as ``"scope"``.
             # ``facts.scope`` is a COLUMN (not a bind value), so the JSON quotes are
             # added in SQL via ``||`` concat (portable: SQLite + Postgres). No param.
+            # ``facts.scope`` is a COLUMN, so its LIKE metacharacters (``%`` / ``_``) are
+            # escaped IN SQL via nested REPLACE (escape char first, then the wildcards) and the
+            # clause carries ``ESCAPE '\'`` so the match is EXACT — defence-in-depth against a
+            # historical scope row that predates the scope-enum validation.
             scope_in_origin = (
-                "facts.origin_allowed_scopes LIKE '%\"' || facts.scope || '\"%'"
+                "facts.origin_allowed_scopes LIKE '%\"' || "
+                "REPLACE(REPLACE(REPLACE(facts.scope,'\\','\\\\'),'%','\\%'),'_','\\_')"
+                " || '\"%' ESCAPE '\\'"
             )
             # origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅: OR over the peer's
             # known tenant set (sorted for deterministic SQL + param order). Each
             # tenant is bound as the json-quoted token ``"tenant"`` so the LIKE match
-            # is exact (``"a"`` never matches inside ``"ab"``).
+            # is exact (``"a"`` never matches inside ``"ab"``); ``_like_escape`` then
+            # neutralises the LIKE wildcards in the operator-set tenant value so e.g.
+            # ``a_me`` cannot wildcard-match a different origin grant ``acme``.
             tenant_overlap = " OR ".join(
-                "facts.origin_allowed_tenants LIKE '%' || ? || '%'" for _ in peer_tenants
+                "facts.origin_allowed_tenants LIKE '%' || ? || '%' ESCAPE '\\'"
+                for _ in peer_tenants
             )
             relay_clause = (
                 "(facts.received_from IS NULL"
@@ -245,8 +271,9 @@ def pull_facts(
             )
             # Params, in the EXACT order their ? appears in relay_clause: one per
             # peer tenant for tenant_overlap (sorted to match the clause order).
-            # scope_in_origin carries NO param (column-only concat).
-            relay_params.extend(_json_token(t) for t in sorted(peer_tenants))
+            # scope_in_origin carries NO param (column-only concat). Each param is the
+            # json-quoted token with LIKE wildcards escaped (paired with ESCAPE '\').
+            relay_params.extend(_like_escape(_json_token(t)) for t in sorted(peer_tenants))
         else:
             # Peer authorised for no tenant ⇒ relay can never apply; fall back to
             # the self-only clause (no param).

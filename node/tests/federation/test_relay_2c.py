@@ -585,6 +585,74 @@ def test_relay_off_egress_query_byte_identical_clause(fed_node: FedNode) -> None
 
 
 # ---------------------------------------------------------------------------
+# LIKE-metacharacter egress hardening: the tenant-overlap LIKE must be EXACT.
+# peer.allowed_tenants is operator-set free text (migration 041, no enum), so a
+# tenant name containing a SQL LIKE wildcard (``_`` single-char / ``%`` any-run)
+# must NOT false-match a DIFFERENT origin tenant. ``a_me`` must not match origin
+# grant ``["acme"]``; ``a%`` must not match anything but a literal ``a%``.
+# ---------------------------------------------------------------------------
+
+
+def test_relay_on_tenant_underscore_does_not_wildcard_match(fed_node: FedNode) -> None:
+    """A peer whose allowed_tenants is ``["a_me"]`` (underscore = LIKE single-char wildcard)
+    must NOT receive a relayed fact whose origin_allowed_tenants is ``["acme"]`` — the ``_``
+    must be escaped so it matches only a literal underscore, not the ``c`` in ``acme``."""
+    _set_relay_enabled(True)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:tenant-underscore",
+        scope="public",
+        hlc="300.000",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["acme"],  # the ONLY origin-granted tenant
+    )
+    # peer tenant ``a_me`` would LIKE-match ``"acme"`` if ``_`` is left unescaped.
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a_me"], pull_tenant="default"
+    )
+    assert fid not in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_on_tenant_percent_does_not_wildcard_match(fed_node: FedNode) -> None:
+    """A peer whose allowed_tenants is ``["a%"]`` (percent = LIKE any-run wildcard) must NOT
+    receive a relayed fact whose origin_allowed_tenants is ``["acme"]`` — ``%`` must be escaped
+    so it matches only a literal percent sign, not ``cme``."""
+    _set_relay_enabled(True)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:tenant-percent",
+        scope="public",
+        hlc="301.000",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["acme"],
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a%"], pull_tenant="default"
+    )
+    assert fid not in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+def test_relay_on_tenant_exact_metachar_match_still_egresses(fed_node: FedNode) -> None:
+    """Positive control: a peer whose allowed_tenants is the LITERAL ``["a_me"]`` DOES receive
+    a relayed fact whose origin_allowed_tenants is the literal ``["a_me"]`` — escaping the
+    wildcard must not break a legitimate exact match on a metacharacter-bearing tenant name."""
+    _set_relay_enabled(True)
+    fid = _insert_inbound_fact(
+        fed_node.db_path,
+        entity="relay:tenant-exact-metachar",
+        scope="public",
+        hlc="302.000",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["a_me"],  # the origin literally granted the ``a_me`` tenant
+        tenant_id="a_me",
+    )
+    node_id, priv = _register_pull_peer(
+        fed_node, allowed_scopes=["public"], allowed_tenants=["a_me"], pull_tenant="a_me"
+    )
+    assert fid in _pull_ids(fed_node, node_id, priv, ["public"])
+
+
+# ---------------------------------------------------------------------------
 # W3.2 — resolve_origin_key_for_relay: fetch-on-first relayed-origin resolution
 # (entity-authority uniqueness, https-only fetch, threaded pubkey cache, first-
 # contact audit) + relay-trusted-gated ingest with origin scope/tenant gating.

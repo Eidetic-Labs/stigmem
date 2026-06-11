@@ -182,6 +182,21 @@ def _json_token(value: str) -> str:
     return _json.dumps(value)
 
 
+def _like_escape(value: str) -> str:
+    """Escape SQL ``LIKE`` metacharacters in *value* for use with ``ESCAPE '\\'``.
+
+    Mirrors ``routes.federation.replication._like_escape``. The tenant-overlap / scope-membership
+    gates below build ``LIKE`` patterns from operator-set free text (``peer.allowed_tenants`` —
+    migration 041, no enum) and from the stored ``scope`` column. ``LIKE`` treats ``_`` (single
+    char) and ``%`` (any run) as wildcards, so an un-escaped tenant such as ``a_me`` would
+    FALSE-MATCH a DIFFERENT origin grant of ``acme`` → cross-tenant over-egress (HIGH). The
+    membership check must be EXACT, so escape the escape char FIRST then both wildcards, and pair
+    every escaped ``LIKE`` with ``ESCAPE '\\'`` (standard in SQLite + Postgres; survives
+    ``postgres_backend._pg_translate`` untouched).
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def list_federatable_tombstones(
     *,
     peer: dict[str, Any] | None,
@@ -225,12 +240,22 @@ def list_federatable_tombstones(
             # JSON quotes are added in SQL via ``||`` concat (portable: SQLite + Postgres). No
             # param. The stored grant is the canonical sorted-JSON text, so the scope appears
             # verbatim as ``"scope"``.
-            scope_in_origin = "origin_allowed_scopes LIKE '%\"' || scope || '\"%'"
+            # ``scope`` is a COLUMN, so its LIKE wildcards (``%`` / ``_``) are escaped IN SQL via
+            # nested REPLACE (escape char first, then the wildcards) and the clause carries
+            # ``ESCAPE '\'`` so the match is EXACT — defence-in-depth against a historical scope
+            # row that predates scope-enum validation.
+            scope_in_origin = (
+                "origin_allowed_scopes LIKE '%\"' || "
+                "REPLACE(REPLACE(REPLACE(scope,'\\','\\\\'),'%','\\%'),'_','\\_')"
+                " || '\"%' ESCAPE '\\'"
+            )
             # origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅: OR over the peer's known
             # tenant set (sorted for deterministic SQL + param order). Each tenant is bound
-            # as the json-quoted token ``"tenant"`` so the LIKE match is exact.
+            # as the json-quoted token ``"tenant"`` so the LIKE match is exact; ``_like_escape``
+            # then neutralises the LIKE wildcards in the operator-set tenant value so e.g.
+            # ``a_me`` cannot wildcard-match a different origin grant ``acme``.
             tenant_overlap = " OR ".join(
-                "origin_allowed_tenants LIKE '%' || ? || '%'" for _ in peer_tenants
+                "origin_allowed_tenants LIKE '%' || ? || '%' ESCAPE '\\'" for _ in peer_tenants
             )
             relay_clause = (
                 "(received_from IS NULL"
@@ -239,8 +264,9 @@ def list_federatable_tombstones(
             )
             # Params, in the EXACT order their ? appears in relay_clause: one per peer tenant
             # for tenant_overlap (sorted to match the clause order). scope_in_origin carries
-            # NO param (column-only concat).
-            relay_params.extend(_json_token(t) for t in sorted(peer_tenants))
+            # NO param (column-only concat). Each param is the json-quoted token with LIKE
+            # wildcards escaped (paired with ESCAPE '\').
+            relay_params.extend(_like_escape(_json_token(t)) for t in sorted(peer_tenants))
         else:
             relay_clause = "received_from IS NULL"
     else:
@@ -337,16 +363,18 @@ def list_federatable_revocations(
         if peer_tenants:
             # origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅: OR over the peer's known
             # tenant set (sorted for deterministic SQL + param order). Each tenant is bound
-            # as the json-quoted token ``"tenant"`` so the LIKE match is exact. NO scope
-            # clause — a revocation has no scope of its own (tenant-only gate, Rev-2).
+            # as the json-quoted token ``"tenant"`` so the LIKE match is exact; ``_like_escape``
+            # neutralises the LIKE wildcards in the operator-set tenant value so e.g. ``a_me``
+            # cannot wildcard-match a different origin grant ``acme``. NO scope clause — a
+            # revocation has no scope of its own (tenant-only gate, Rev-2).
             tenant_overlap = " OR ".join(
-                "origin_allowed_tenants LIKE '%' || ? || '%'" for _ in peer_tenants
+                "origin_allowed_tenants LIKE '%' || ? || '%' ESCAPE '\\'" for _ in peer_tenants
             )
             relay_clause = (
                 "(received_from IS NULL"
                 f" OR (received_from IS NOT NULL AND ({tenant_overlap})))"
             )
-            relay_params.extend(_json_token(t) for t in sorted(peer_tenants))
+            relay_params.extend(_like_escape(_json_token(t)) for t in sorted(peer_tenants))
         else:
             relay_clause = "received_from IS NULL"
     else:
