@@ -347,6 +347,26 @@ def tmp_db(tmp_path: object, backend: str, encrypt: str) -> Generator[str, None,
 
 
 @pytest.fixture()
+def migrated_db(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> Generator[str, None, None]:
+    """Provide a fully-migrated SQLite DB and patch db_mod.settings to point at it.
+
+    Tests that do not request the ``client`` fixture (and therefore skip the
+    normal ``tmp_db`` → ``client`` setup path) must request this fixture
+    explicitly if they invoke code paths that call ``db()`` internally — e.g.
+    any recall-ranking path that touches ``caller_visible_gardens``.
+
+    Using ``monkeypatch`` ensures the settings override is automatically
+    reverted at test teardown with no manual restore needed.
+    """
+    db_file = str(tmp_path) + "/test.db"  # type: ignore[operator]
+    apply_migrations(db_path=db_file)
+    test_settings = Settings(db_path=db_file, auth_required=False, node_url="http://testnode")
+    monkeypatch.setattr(settings_module, "settings", test_settings)
+    monkeypatch.setattr(db_mod, "settings", test_settings)
+    yield db_file
+
+
+@pytest.fixture()
 def client(tmp_db: str, backend: str, encrypt: str) -> Generator[TestClient, None, None]:
     """TestClient with auth disabled and a fresh in-process DB."""
     original = settings_module.settings
