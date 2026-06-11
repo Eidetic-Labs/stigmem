@@ -21,6 +21,7 @@ from .common import (  # noqa: F401
     router,
 )
 from .peers import approve_peer, list_peers, register_peer  # noqa: F401
+from .pins import create_origin_pin, delete_pin, list_pins  # noqa: F401
 from .replication import (  # noqa: F401
     _push_fact_with_cap_token,
     _push_fact_with_peer_token,
@@ -43,11 +44,14 @@ __all__ = [
     "_verify_push_cap_token",
     "get_audit_log",
     "approve_peer",
+    "create_origin_pin",
+    "delete_pin",
     "federation_ingest_tombstone",
     "federation_list_tombstones",
     "ingest_fact",
     "list_conflicts",
     "list_peers",
+    "list_pins",
     "logger",
     "pull_facts",
     "push_facts",

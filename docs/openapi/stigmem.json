@@ -2126,6 +2126,30 @@
         "title": "OriginBlock",
         "type": "object"
       },
+      "OriginPinRequest": {
+        "description": "Body for POST /v1/federation/origin-pins.",
+        "properties": {
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
+          "key_fingerprint": {
+            "title": "Key Fingerprint",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_uri",
+          "node_id",
+          "key_fingerprint"
+        ],
+        "title": "OriginPinRequest",
+        "type": "object"
+      },
       "PeerApprovalRequest": {
         "properties": {
           "pubkey_fingerprint": {
@@ -6184,6 +6208,139 @@
         "summary": "Get Manifest",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/v1/federation/origin-pins": {
+      "delete": {
+        "description": "Remove an operator pin for (entity_uri, node_id). Requires admin:federation.\n\n``entity_uri`` and ``node_id`` are passed as query parameters to avoid\npath-encoding complications with ``://`` URIs.  Returns 404 when no such\npin exists.",
+        "operationId": "delete_pin_v1_federation_origin_pins_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "entity_uri",
+            "required": true,
+            "schema": {
+              "title": "Entity Uri",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Pin V1 Federation Origin Pins Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Pin",
+        "tags": [
+          "federation"
+        ]
+      },
+      "get": {
+        "description": "List all operator-pinned origins. Requires admin:federation.",
+        "operationId": "list_pins_v1_federation_origin_pins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Pins V1 Federation Origin Pins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Pins",
+        "tags": [
+          "federation"
+        ]
+      },
+      "post": {
+        "description": "Pin an origin's (entity_uri, node_id, key_fingerprint) out-of-band.\n\nIdempotent: re-pinning the same key is a no-op update; re-pinning a\ndifferent key replaces the previous fingerprint (explicit operator action).\nRequires admin:federation.",
+        "operationId": "create_origin_pin_v1_federation_origin_pins_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginPinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Origin Pin V1 Federation Origin Pins Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Origin Pin",
+        "tags": [
+          "federation"
         ]
       }
     },

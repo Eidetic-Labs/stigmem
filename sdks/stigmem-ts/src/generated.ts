@@ -777,6 +777,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/federation/origin-pins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pins
+         * @description List all operator-pinned origins. Requires admin:federation.
+         */
+        get: operations["list_pins_v1_federation_origin_pins_get"];
+        put?: never;
+        /**
+         * Create Origin Pin
+         * @description Pin an origin's (entity_uri, node_id, key_fingerprint) out-of-band.
+         *
+         *     Idempotent: re-pinning the same key is a no-op update; re-pinning a
+         *     different key replaces the previous fingerprint (explicit operator action).
+         *     Requires admin:federation.
+         */
+        post: operations["create_origin_pin_v1_federation_origin_pins_post"];
+        /**
+         * Delete Pin
+         * @description Remove an operator pin for (entity_uri, node_id). Requires admin:federation.
+         *
+         *     ``entity_uri`` and ``node_id`` are passed as query parameters to avoid
+         *     path-encoding complications with ``://`` URIs.  Returns 404 when no such
+         *     pin exists.
+         */
+        delete: operations["delete_pin_v1_federation_origin_pins_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/federation/peers": {
         parameters: {
             query?: never;
@@ -2166,6 +2202,18 @@ export interface components {
             /** Tenant */
             tenant: string;
         };
+        /**
+         * OriginPinRequest
+         * @description Body for POST /v1/federation/origin-pins.
+         */
+        OriginPinRequest: {
+            /** Entity Uri */
+            entity_uri: string;
+            /** Key Fingerprint */
+            key_fingerprint: string;
+            /** Node Id */
+            node_id: string;
+        };
         /** PeerApprovalRequest */
         PeerApprovalRequest: {
             /** Pubkey Fingerprint */
@@ -2799,6 +2847,7 @@ export type SchemaMemoryCardResponse = components['schemas']['MemoryCardResponse
 export type SchemaNeighborItem = components['schemas']['NeighborItem'];
 export type SchemaNeighborsResponse = components['schemas']['NeighborsResponse'];
 export type SchemaOriginBlock = components['schemas']['OriginBlock'];
+export type SchemaOriginPinRequest = components['schemas']['OriginPinRequest'];
 export type SchemaPeerApprovalRequest = components['schemas']['PeerApprovalRequest'];
 export type SchemaPeerApprovalResponse = components['schemas']['PeerApprovalResponse'];
 export type SchemaPeerPolicyPatch = components['schemas']['PeerPolicyPatch'];
@@ -4087,6 +4136,97 @@ export interface operations {
             path: {
                 entity_uri_encoded: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pins_v1_federation_origin_pins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    create_origin_pin_v1_federation_origin_pins_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OriginPinRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_pin_v1_federation_origin_pins_delete: {
+        parameters: {
+            query: {
+                entity_uri: string;
+                node_id: string;
+            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
