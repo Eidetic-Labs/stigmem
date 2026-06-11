@@ -119,6 +119,27 @@ def deliver_pending() -> None:
         ).isoformat()
 
         with db() as conn:
+            # 0. Prune terminal events older than the retention window (M12 / F-AVAIL-2).
+            #    Only delivered/failed rows are touched — pending/delivering are never pruned.
+            #    The horizon is clamped to >= subscription_replay_s so the replay API
+            #    never loses events it is supposed to surface.
+            retention_s = _settings_pkg.settings.subscription_event_retention_s
+            if retention_s > 0:
+                effective_retention_s = max(
+                    retention_s,
+                    _settings_pkg.settings.subscription_replay_s,
+                )
+                prune_cutoff = datetime.fromtimestamp(
+                    time.time() - effective_retention_s,
+                    UTC,
+                ).isoformat()
+                conn.execute(
+                    """DELETE FROM subscription_events
+                         WHERE delivery_status IN ('delivered', 'failed')
+                           AND created_at < ?""",
+                    (prune_cutoff,),
+                )
+
             # 1. Recover stale claims left behind by a crashed worker.  We do NOT
             #    reset delivery_attempts — the next attempt counts as a retry.
             conn.execute(

@@ -328,6 +328,11 @@ class Settings(BaseSettings):
     # F-AVAIL-3: cap on active subscriptions per (subscriber_identity, tenant).
     # 0 disables the cap. Default is generous; raise for high-fan-out operators.
     max_subscriptions_per_principal: int = 1000
+    # M12 / F-AVAIL-2: terminal (delivered/failed) subscription_events older than
+    # this are pruned by the delivery sweep so the table cannot grow unbounded.
+    # Clamped to >= subscription_replay_s at prune time so the replay window is
+    # never truncated.  0 disables pruning entirely.
+    subscription_event_retention_s: int = 604800  # 7 days
     # GHSA-5p3m-vhh6-9236: webhook delivery_address must be https by default.
     # When False (default), a webhook delivery_address is required to be https at
     # both creation and delivery time. Set True ONLY for local/dev where http
