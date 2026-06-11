@@ -370,10 +370,13 @@ def _authenticate_tombstone_caller(
     try_peer_token_auth: Any,
     get_mtls_peer_cert: Any,
     fed_settings: Any,
-) -> None:
+) -> dict[str, Any] | None:
     """F-1 fix: caller must present a valid peer-JWT OR a tombstone-write capability token.
 
-    Raises HTTPException on any auth failure. Returns None on success.
+    Raises HTTPException on any auth failure. On success returns the authenticated peer
+    row (when authed by peer-JWT) or None (capability-token caller). W6.8: the peer is
+    RETURNED rather than re-resolved by the v2 path — peer tokens carry a single-use nonce,
+    so calling ``try_peer_token_auth`` twice on the same token fails the second nonce check.
     """
     peer_auth = try_peer_token_auth(authorization)
     if peer_auth is not None:
@@ -384,7 +387,8 @@ def _authenticate_tombstone_caller(
                     status_code=401,
                     detail="peer certificate URI SAN does not match node_id",
                 )
-        return
+        peer_row: dict[str, Any] = peer_auth[0]
+        return peer_row
 
     if x_stigmem_capability is None:
         raise HTTPException(status_code=401, detail="peer token or capability token required")
@@ -407,6 +411,7 @@ def _authenticate_tombstone_caller(
         ) from exc
     if cap_token.get("verb", "") not in ("tombstone:write", "write"):
         raise HTTPException(status_code=403, detail="capability token missing tombstone:write verb")
+    return None
 
 
 def _verify_signed_artifact_or_400(
@@ -517,6 +522,91 @@ def _ingest_tombstone(payload: dict[str, Any], fed_settings: Any) -> dict[str, A
     return {"status": "ok", "written": written}
 
 
+# W6.8: reason codes emitted by the SHARED ``ingest_tombstone_entry`` (the v2 secure chain)
+# mapped to the PUSH route's HTTP contract. The pull loop logs+continues on these reasons;
+# the push route surfaces them as 4xx so a posting peer learns its envelope was rejected.
+_V2_INGEST_REASON_HTTP: dict[str, int] = {
+    "malformed_entry": status.HTTP_400_BAD_REQUEST,
+    "missing_tombstone_origin_or_sig": status.HTTP_400_BAD_REQUEST,
+    "malformed_tombstone": status.HTTP_400_BAD_REQUEST,
+    # origin != sender with relay OFF — the push route is not a weaker path than pull.
+    "origin_not_sender": status.HTTP_403_FORBIDDEN,
+    "relay_sender_not_trusted": status.HTTP_403_FORBIDDEN,
+    "origin_unresolvable": status.HTTP_401_UNAUTHORIZED,
+    "origin_sig_invalid": status.HTTP_400_BAD_REQUEST,
+    "issuer_sig_invalid": status.HTTP_400_BAD_REQUEST,
+    "scope_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
+    "tenant_policy_unsafe": status.HTTP_403_FORBIDDEN,
+}
+
+
+def _ingest_tombstone_v2(
+    entry: dict[str, Any], peer: dict[str, Any] | None, fed_settings: Any
+) -> dict[str, Any]:
+    """Push-ingest ONE v2 tombstone envelope entry through the SHARED secure chain.
+
+    Routes the posted envelope through ``ingest_tombstone_entry`` — the EXACT verify+apply
+    code path the pull loop uses (W6.8) — so the push surface can never be weaker than pull.
+    A relayed (origin != sender) tombstone requires relay ON + the SENDER peer relay_trusted
+    (same fail-closed gate). On a skip/reject the helper's ``reason`` is mapped to the push
+    route's HTTP contract; on success returns the existing ``{"status": "ok", "written": ...}``.
+    """
+    from ..federation.federation_pull import ingest_tombstone_entry
+
+    if peer is None:
+        # The shared chain needs the authenticated peer (relay_trusted + tenant policy +
+        # node_id). A capability-token-only caller cannot post a v2 envelope: there is no peer
+        # identity to gate relay/tenant against. Fail closed.
+        _audit_tombstone_payload_rejected(
+            entry.get("tombstone", entry), "tombstone", "v2_envelope_requires_peer_identity"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="v2 tombstone envelope requires an authenticated peer identity",
+        )
+
+    sender_node_id = str(peer["node_id"])
+    try:
+        relay_trusted = bool(peer["relay_trusted"])
+    except (KeyError, IndexError, TypeError):
+        relay_trusted = bool(dict(peer).get("relay_trusted"))
+
+    # Resolve the page-level (direct) ingest tenant fail-closed — same resolver the pull loop
+    # uses for a DIRECT tombstone. A mis-pinned peer ⇒ 403 rather than mis-landing the tombstone.
+    from ..db import db as _db
+    from ..federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
+
+    try:
+        with _db() as conn:
+            direct_tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+    except PeerPolicyError as exc:
+        _audit_tombstone_payload_rejected(
+            entry.get("tombstone", entry), "tombstone", f"tenant_policy_unsafe: {exc}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=f"tenant policy unsafe: {exc}"
+        ) from exc
+
+    result = ingest_tombstone_entry(
+        entry=entry,
+        sender_node_id=sender_node_id,
+        peer=peer,
+        relay_enabled=fed_settings.federation_relay_enabled,
+        relay_trusted=relay_trusted,
+        direct_tenant_id=direct_tenant_id,
+        relay_cache={},
+    )
+    if result.applied:
+        return {"status": "ok", "written": True}
+
+    reason = result.reason or "tombstone_verification_failed"
+    _audit_tombstone_payload_rejected(entry.get("tombstone", entry), "tombstone", reason)
+    raise HTTPException(
+        status_code=_V2_INGEST_REASON_HTTP.get(reason, status.HTTP_400_BAD_REQUEST),
+        detail=f"tombstone_rejected: {reason}",
+    )
+
+
 def federation_ingest_tombstone_impl(
     request: Request,
     payload: dict[str, Any],
@@ -528,7 +618,16 @@ def federation_ingest_tombstone_impl(
     """Inbound tombstone push from a federation peer (§23.4.2).
 
     Auth: peer JWT or capability token with tombstone:write verb (mirrors push_facts).
-    Verifies signature against org manifest, writes to local tombstones table.
+
+    Body shapes (W6.8):
+      * ``{"tombstone_id": ...}``  → revocation ingest (unchanged; later task).
+      * v2 envelope — a single ``{"tombstone", "origin", "origin_sig"}`` entry OR a
+        ``{"v": 2, "tombstones": [...]}`` page → routed through the SHARED secure chain
+        (``ingest_tombstone_entry``) so push and pull verify identically. A relayed
+        (origin != sender) tombstone requires relay ON + sender relay_trusted.
+      * bare ``TombstoneRecord`` (pre-v2) → accepted as a DIRECT, issuer-verified tombstone
+        (received_from=None, origin==self semantics) for back-compat with single-node callers.
+        A relayed tombstone MUST use the v2 envelope (a bare body carries no origin block).
     """
     # Lazy lookup: tests monkey-patch ``federation.settings``.
     from typing import cast as _cast
@@ -537,7 +636,7 @@ def federation_ingest_tombstone_impl(
 
     fed_settings = _cast(Any, _fed_mod).settings
 
-    _authenticate_tombstone_caller(
+    peer = _authenticate_tombstone_caller(
         request,
         authorization,
         x_stigmem_capability,
@@ -548,6 +647,20 @@ def federation_ingest_tombstone_impl(
 
     if "tombstone_id" in payload:
         return _ingest_revocation(payload, fed_settings)
+
+    # v2 enveloped tombstone — a single entry, or a full v2 page of entries. ``peer`` is the
+    # peer already resolved by the auth step (the peer-JWT nonce is single-use, so it is not
+    # re-verified here).
+    if "tombstone" in payload and "origin" in payload:
+        return _ingest_tombstone_v2(payload, peer, fed_settings)
+    if payload.get("v") == 2 and isinstance(payload.get("tombstones"), list):
+        written_any = False
+        for sub_entry in payload["tombstones"]:
+            res = _ingest_tombstone_v2(sub_entry, peer, fed_settings)
+            written_any = written_any or bool(res.get("written"))
+        return {"status": "ok", "written": written_any}
+
+    # Bare (pre-v2) tombstone — back-compat DIRECT issuer-verified path (unchanged).
     return _ingest_tombstone(payload, fed_settings)
 
 
