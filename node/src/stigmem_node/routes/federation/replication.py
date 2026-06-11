@@ -554,7 +554,7 @@ def push_facts(
     # F-FED-2c W3.2: per-REQUEST relay key cache, threaded through the page loop so a
     # relayed-origin manifest fetch + rotation check runs once per push (not per fact).
     # A local (not a module global) so a stale binding never persists across requests.
-    relay_cache: dict[str, set[str]] = {}
+    relay_cache: dict[tuple[str, str], set[str]] = {}
 
     for entry in entries:
         if not isinstance(entry, dict):
@@ -612,7 +612,7 @@ def _verify_origin_and_resolve_tenant(
     peer_row: dict[str, Any] | Any,
     conn: Any,
     *,
-    relay_cache: dict[str, set[str]] | None = None,
+    relay_cache: dict[tuple[str, str], set[str]] | None = None,
     origin_manifest: dict[str, Any] | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Run the fail-closed ordered origin checks; return (local_tenant, error).
@@ -692,7 +692,7 @@ def _push_fact_with_cap_token(
     origin: dict[str, Any],
     origin_sig: str,
     cap_token: dict[str, Any],
-    relay_cache: dict[str, set[str]] | None = None,
+    relay_cache: dict[tuple[str, str], set[str]] | None = None,
     origin_manifest: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single v2 fact under capability-token auth.
@@ -793,7 +793,7 @@ def _push_fact_with_peer_token(
     origin_sig: str,
     peer: dict[str, Any],
     token_payload: dict[str, Any],
-    relay_cache: dict[str, set[str]] | None = None,
+    relay_cache: dict[tuple[str, str], set[str]] | None = None,
     origin_manifest: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single v2 fact under peer-JWT auth.

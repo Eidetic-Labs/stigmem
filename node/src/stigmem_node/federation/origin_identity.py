@@ -188,7 +188,7 @@ def resolve_origin_key_for_relay(
     node_id: str,
     entity_uri: str,
     *,
-    cache: dict[str, set[str]],
+    cache: dict[tuple[str, str], set[str]],
     origin_manifest: dict[str, object] | None = None,
 ) -> set[str]:
     """Resolve the signing key set for a RELAYED origin (offline-safe, zero transitive trust).
@@ -216,10 +216,15 @@ def resolve_origin_key_for_relay(
        * **Fail-closed**: no pin, no stored binding, not reachable → raise
          (``relay_origin_unanchored``). The unknown-AND-unreachable case is correctly refused.
 
-    *cache* is a per-request dict threaded through the page loop, keyed by *entity_uri*
-    → verified key set, so the fetch + rotation check happen ONCE per page rather than
-    once per fact. It MUST be a local threaded through calls — a module-level global
-    would persist a stale binding across requests and defeat rotation/revocation.
+    *cache* is a per-request dict threaded through the page loop, keyed by the
+    ``(entity_uri, node_id)`` PAIR → verified key set, so the fetch + rotation check happen
+    ONCE per (origin, node) rather than once per fact. The key MUST include ``node_id``:
+    every check after the cache short-circuit (entity-authority/uniqueness, ``node_id ∈
+    entities``, the operator-pin lookup) is node_id-scoped, so an ``entity_uri``-only key
+    would let a SECOND node_id carried with the same ``entity_uri`` inherit the first one's
+    key set and bypass those checks (entity-authority + per-node pin bypass). It MUST be a
+    local threaded through calls — a module-level global would persist a stale binding
+    across requests and defeat rotation/revocation.
 
     Returns ``{current_key} ∪ rotation-window keys`` (same shape as
     ``resolve_origin_key``). Raises OriginIdentityError on any failure.
@@ -233,8 +238,9 @@ def resolve_origin_key_for_relay(
     if not (entity_uri or "").strip():
         raise OriginIdentityError(f"relayed origin {node_id!r} carries no entity_uri")
 
-    # Cache hit: this entity_uri was already anchored + verified earlier this page.
-    cached = cache.get(entity_uri)
+    # Cache hit: this (entity_uri, node_id) pair was already anchored + verified earlier
+    # this page. Keyed on the PAIR — see the node_id-scoped-checks note in the docstring.
+    cached = cache.get((entity_uri, node_id))
     if cached is not None:
         return cached
 
@@ -297,7 +303,7 @@ def resolve_origin_key_for_relay(
                 f"relayed origin {node_id!r} candidate key does not match the operator pin"
             )
         keys = _keys_from_manifest(candidate)
-        cache[entity_uri] = keys
+        cache[(entity_uri, node_id)] = keys
         return keys
 
     stored = get_peer_manifest(
@@ -311,7 +317,7 @@ def resolve_origin_key_for_relay(
                 f"relayed origin {node_id!r} candidate key differs from the stored binding"
             )
         keys = _keys_from_manifest(candidate)
-        cache[entity_uri] = keys
+        cache[(entity_uri, node_id)] = keys
         return keys
 
     if fetched is not None:
@@ -323,7 +329,7 @@ def resolve_origin_key_for_relay(
             logger.debug("relay first-contact manifest store rejected for %s: %s", entity_uri, exc)
         _audit_relay("relay_origin_first_contact", node_id=node_id, entity_uri=entity_uri)
         keys = _keys_from_manifest(fetched)
-        cache[entity_uri] = keys
+        cache[(entity_uri, node_id)] = keys
         return keys
 
     # Fail-closed: a candidate existed (carried/stored) but there is no pin, no stored binding,

@@ -152,7 +152,7 @@ async def pull_from_peer_once(
         # F-FED-2c W3.2: per-PAGE relay key cache, threaded into resolve_origin_key_for_relay
         # so a relayed-origin manifest fetch + rotation check runs once per page, not per
         # fact. A local (not a module global) so no stale binding persists across pages.
-        relay_cache: dict[str, set[str]] = {}
+        relay_cache: dict[tuple[str, str], set[str]] = {}
         relay_enabled = settings.federation_relay_enabled
         try:
             sender_relay_trusted = bool(peer["relay_trusted"])
@@ -361,7 +361,7 @@ def ingest_tombstone_entry(
     relay_enabled: bool,
     relay_trusted: bool,
     direct_tenant_id: str,
-    relay_cache: dict[str, set[str]],
+    relay_cache: dict[tuple[str, str], set[str]],
 ) -> TombstoneEntryResult:
     """Verify + apply ONE v2 tombstone envelope entry through the full secure chain.
 
@@ -636,7 +636,7 @@ async def pull_tombstones_from_peer_once(
     # W6.7: per-PAGE relay key cache, threaded into resolve_origin_key_for_relay so a relayed-
     # origin manifest fetch + rotation check runs ONCE per page, not per tombstone. A local (not
     # a module global) so no stale binding persists across pages — mirrors the fact pull loop.
-    relay_cache: dict[str, set[str]] = {}
+    relay_cache: dict[tuple[str, str], set[str]] = {}
     relay_enabled = settings.federation_relay_enabled
     try:
         sender_relay_trusted = bool(peer["relay_trusted"])
@@ -695,7 +695,7 @@ def ingest_revocation_entry(
     peer: dict[str, Any],
     relay_enabled: bool,
     relay_trusted: bool,
-    relay_cache: dict[str, set[str]],
+    relay_cache: dict[tuple[str, str], set[str]],
 ) -> RevocationEntryResult:
     """Verify + apply ONE v2 revocation envelope entry through the full secure chain (Rev-3).
 

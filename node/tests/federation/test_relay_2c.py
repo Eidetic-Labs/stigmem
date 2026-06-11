@@ -1351,3 +1351,91 @@ def test_relay_ingest_unreachable_unpinned_origin_is_rejected(fed_node, monkeypa
     assert r.status_code == 202, r.text
     assert r.json()["accepted"] == 0
     assert any(e["error"] == "origin_unresolvable" for e in r.json()["errors"]), r.json()
+
+
+# ---------------------------------------------------------------------------
+# CACHE-COLLISION BYPASS (BLOCKER): the per-page relay resolver cache MUST be
+# keyed on the (entity_uri, node_id) PAIR, not entity_uri alone. Every check
+# after the cache short-circuit (entity-authority/uniqueness, node_id ∈ entities,
+# operator-pin lookup) is node_id-scoped — so a cache keyed on entity_uri alone
+# lets a SECOND node_id carried with the same entity_uri (within one page) inherit
+# the first node_id's resolved key set WITHOUT those node_id checks running.
+# ---------------------------------------------------------------------------
+
+_RELAY_NODE_A = "stigmem:node:relay-shared-a"
+_RELAY_NODE_B = "stigmem:node:relay-shared-b"
+
+
+def test_relay_resolve_cache_node_scoped_entity_authority(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """BLOCKER (entity-authority): two node_ids carried with the SAME entity_uri through one
+    shared cache. node_a IS in entities (resolves, primes the cache); node_b is NOT in
+    entities. With a cache keyed on entity_uri alone, node_b hits the short-circuit and
+    wrongly resolves. With the (entity_uri, node_id) key it MISSES the cache and is rejected
+    by the node_id ∈ entities check → MUST raise OriginIdentityError."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    # Manifest lists ONLY node_a among its entities (node_b is NOT authorized).
+    manifest = _build_manifest(
+        priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE_A]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    cache: dict = {}
+    # node_a resolves OK and primes the cache for _RELAY_ENTITY.
+    keys_a = oi.resolve_origin_key_for_relay(_RELAY_NODE_A, _RELAY_ENTITY, cache=cache)
+    assert _pub_b64(priv) in keys_a
+
+    # node_b shares the entity_uri + cache but is NOT in entities → MUST be rejected,
+    # not served the cached key set via an entity_uri-only collision.
+    try:
+        oi.resolve_origin_key_for_relay(_RELAY_NODE_B, _RELAY_ENTITY, cache=cache)
+        raise AssertionError(
+            "cache collision: node_b (∉ entities) inherited node_a's cached key set"
+        )
+    except oi.OriginIdentityError:
+        pass
+
+
+def test_relay_resolve_cache_node_scoped_per_node_pin(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """BLOCKER (per-node pin): both node_a and node_b are listed in the entity's manifest,
+    but the operator has pinned (entity_uri, node_b) to a DIFFERENT key than the manifest's.
+    node_a resolves first (primes the cache). node_b shares the entity_uri + cache. With an
+    entity_uri-only cache, node_b's tier-1 pin is NEVER consulted and node_b inherits the
+    manifest key. With the (entity_uri, node_id) key, node_b's pin IS consulted → the
+    manifest key ≠ the pin → REJECT (pin mismatch). The pinned key MUST NOT be bypassed."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    manifest_priv = Ed25519PrivateKey.generate()
+    pinned_priv = Ed25519PrivateKey.generate()  # node_b's operator-pinned key (different)
+    # Manifest lists BOTH nodes and is served by the (reachable) origin.
+    manifest = _build_manifest(
+        manifest_priv,
+        entity_uri=_RELAY_ENTITY,
+        entities=[_RELAY_ENTITY, _RELAY_NODE_A, _RELAY_NODE_B],
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))
+    _neutralize_ssrf_dns(monkeypatch)
+
+    # Operator pins (entity, node_b) to a DIFFERENT key than the manifest serves.
+    _put_pin(
+        entity_uri=_RELAY_ENTITY,
+        node_id=_RELAY_NODE_B,
+        key_fingerprint=fingerprint_from_pubkey(_pub_b64(pinned_priv)),
+    )
+
+    cache: dict = {}
+    # node_a has no pin → resolves via TOFU/fetch and primes the cache for _RELAY_ENTITY.
+    keys_a = oi.resolve_origin_key_for_relay(_RELAY_NODE_A, _RELAY_ENTITY, cache=cache)
+    assert _pub_b64(manifest_priv) in keys_a
+
+    # node_b shares the entity_uri + cache: its per-node pin MUST be consulted. The manifest
+    # key disagrees with the pin → MUST be rejected (NOT served the manifest key via cache).
+    try:
+        oi.resolve_origin_key_for_relay(_RELAY_NODE_B, _RELAY_ENTITY, cache=cache)
+        raise AssertionError(
+            "cache collision: node_b's per-node operator pin was bypassed via the shared cache"
+        )
+    except oi.OriginIdentityError:
+        pass
