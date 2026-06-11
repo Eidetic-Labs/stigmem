@@ -28,6 +28,7 @@ from ...federation.tls import check_peer_san
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
 from ...metrics import FEDERATION_EGRESS
+from ...models.constants import VALID_SCOPES
 from ...models.facts import row_to_record
 from ...models.federation import (
     FederationEnvelopeEntry,
@@ -707,6 +708,13 @@ def _verify_origin_and_resolve_tenant(
     # 5. fact scope must be inside the origin's granted scopes
     if fact_scope not in origin.get("allowed_scopes", []):
         return None, {"fact_id": fact_id, "error": "scope_not_in_origin_grant"}
+    # 5a. fact scope must be a CANONICAL enum value (F-2c-MED-2). The origin-grant check
+    #     above is satisfiable self-consistently by a malicious origin
+    #     (scope="a_b" + allowed_scopes=["a_b"]), so it does NOT bound the persisted
+    #     ``facts.scope`` to the enum. Validate against VALID_SCOPES fail-closed BEFORE
+    #     ingest so a non-enum/wildcard scope can never be stored.
+    if fact_scope not in VALID_SCOPES:
+        return None, {"fact_id": fact_id, "error": "invalid_scope"}
     # 5b. origin.tenant must be inside the origin's OWN signed allowed_tenants
     #     (ingest/egress symmetry — F-2c-MED-1). Both origin.tenant and
     #     origin.allowed_tenants are bound in the signed origin tuple, so a relay can't

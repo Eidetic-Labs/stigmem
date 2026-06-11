@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from ..db import db
+from ..models.constants import VALID_SCOPES
 from ..observability.metrics import FEDERATION_INGRESS, REPLICATION_LAG
 from ..settings import settings
 from .federation_ingest import (
@@ -239,6 +240,13 @@ async def pull_from_peer_once(
                 logger.warning(
                     "Pull from %s: skip fact (scope_not_in_origin_grant)", sender_node_id
                 )
+                continue
+            # 5a. fact scope must be a CANONICAL enum value (F-2c-MED-2). The origin-grant
+            #     check above is satisfiable self-consistently by a malicious origin
+            #     (scope="a_b" + allowed_scopes=["a_b"]), so validate against VALID_SCOPES
+            #     fail-closed BEFORE ingest — a non-enum/wildcard scope can never be stored.
+            if fact_scope not in VALID_SCOPES:
+                logger.warning("Pull from %s: skip fact (invalid_scope)", sender_node_id)
                 continue
             # 5b. origin.tenant must be inside the origin's OWN signed allowed_tenants
             #     (ingest/egress symmetry — F-2c-MED-1). The signed origin tuple binds both,
