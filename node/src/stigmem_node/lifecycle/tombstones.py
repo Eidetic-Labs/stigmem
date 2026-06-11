@@ -443,7 +443,18 @@ def list_revocations(since: str | None = None) -> list[TombstoneRevocationRecord
     return [_row_to_revocation(r) for r in rows]
 
 
-def apply_inbound_tombstone(record: TombstoneRecord, tenant_id: str = "default") -> bool:
+def apply_inbound_tombstone(
+    record: TombstoneRecord,
+    tenant_id: str = "default",
+    *,
+    origin_node_id: str | None = None,
+    origin_tenant: str | None = None,
+    origin_entity_uri: str | None = None,
+    origin_allowed_scopes: list[str] | None = None,
+    origin_allowed_tenants: list[str] | None = None,
+    origin_sig: str | None = None,
+    received_from: str | None = None,
+) -> bool:
     """Apply an inbound tombstone from federation (§23.4.2). Idempotent on id.
 
     ``tenant_id`` is the local tenant this peer's inbound data is stamped into
@@ -454,9 +465,30 @@ def apply_inbound_tombstone(record: TombstoneRecord, tenant_id: str = "default")
     would let a peer's RTBF tombstone suppress a *different* tenant's facts (and
     fail to suppress its own tenant's facts), so the tenant MUST be threaded here.
 
+    The optional ``origin_*`` + ``received_from`` kwargs persist the verified v2
+    origin block (migration 049 columns) for a RELAYED tombstone (Phase 2c W6.7),
+    mirroring ``ingest_fact``'s origin persistence. The egress relay gate
+    (``list_federatable_tombstones``, W6.6) reads these columns to decide whether
+    this node may re-federate the tombstone onward, and ``build_tombstone_origin_entry``
+    forwards the stored origin block + signature verbatim. ALL default None ⇒ a
+    self/direct tombstone (every origin column stays NULL — unchanged W6.5 behaviour).
+    ``origin_allowed_scopes`` / ``origin_allowed_tenants`` are stored as
+    ``json.dumps(sorted([...]))`` TEXT, the SAME canonical encoding the fact ingest
+    path uses, so the egress LIKE-membership gate matches exactly.
+
     Returns True if written, False if already existed.
     Caller MUST verify signature before calling this.
     """
+    import json as _json
+
+    scopes_json = (
+        _json.dumps(sorted(origin_allowed_scopes)) if origin_allowed_scopes is not None else None
+    )
+    tenants_json = (
+        _json.dumps(sorted(origin_allowed_tenants))
+        if origin_allowed_tenants is not None
+        else None
+    )
     with db() as conn:
         existing = conn.execute("SELECT id FROM tombstones WHERE id = ?", (record.id,)).fetchone()
         if existing:
@@ -474,8 +506,10 @@ def apply_inbound_tombstone(record: TombstoneRecord, tenant_id: str = "default")
         conn.execute(
             """INSERT INTO tombstones
                (id, entity_uri, scope, reason, signed_by, key_id, signature,
-                created_at, legal_hold, tenant_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                created_at, legal_hold, tenant_id,
+                received_from, origin_node_id, origin_tenant, origin_entity_uri,
+                origin_allowed_scopes, origin_allowed_tenants, origin_sig)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.id,
                 record.entity_uri,
@@ -487,6 +521,13 @@ def apply_inbound_tombstone(record: TombstoneRecord, tenant_id: str = "default")
                 record.created_at,
                 int(record.legal_hold),
                 tenant_id,
+                received_from,
+                origin_node_id,
+                origin_tenant,
+                origin_entity_uri,
+                scopes_json,
+                tenants_json,
+                origin_sig,
             ),
         )
     invalidate_tombstone_cache()

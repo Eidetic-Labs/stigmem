@@ -420,6 +420,15 @@ async def pull_tombstones_from_peer_once(
     )
 
     sender_node_id = peer["node_id"]
+    # W6.7: per-PAGE relay key cache, threaded into resolve_origin_key_for_relay so a relayed-
+    # origin manifest fetch + rotation check runs ONCE per page, not per tombstone. A local (not
+    # a module global) so no stale binding persists across pages — mirrors the fact pull loop.
+    relay_cache: dict[str, set[str]] = {}
+    relay_enabled = settings.federation_relay_enabled
+    try:
+        sender_relay_trusted = bool(peer["relay_trusted"])
+    except (KeyError, IndexError, TypeError):
+        sender_relay_trusted = bool(dict(peer).get("relay_trusted"))
     for entry in tombstones:
         if not isinstance(entry, dict):
             logger.warning(
@@ -441,21 +450,50 @@ async def pull_tombstones_from_peer_once(
             logger.warning("Tombstone pull from %s: malformed tombstone: %s", sender_node_id, exc)
             continue
 
-        # W6.5: DIRECT-only for this task. A relayed tombstone (origin.node_id != sender) is
-        # SKIPPED — the secure relay chain (relay_trusted + fetch-on-first origin resolve)
-        # arrives in the next task. Do NOT enable relay here.
-        if origin.get("node_id") != sender_node_id:
-            logger.warning(
-                "Tombstone pull from %s: skip relayed tombstone %s (origin_not_sender; "
-                "relay not yet enabled)",
-                sender_node_id,
-                record.id,
-            )
-            continue
+        # W6.5/W6.7: DIRECT (origin == sender) vs RELAYED (origin != sender). The per-tombstone
+        # ordered checks MIRROR the fact pull chain exactly (pull_from_peer_once): origin==sender
+        # branch → resolve key → verify origin sig → verify issuer sig → scope-in-grant →
+        # resolve tenant → apply.
+        #   - DIRECT: resolve the sender's 2a peer-chain key (W6.5, unchanged).
+        #   - RELAYED: relay OFF ⇒ SKIP (unchanged W6.5). Relay ON ⇒ admit only if the SENDER is
+        #     relay_trusted (fail-closed); resolve the ORIGIN key independently via the W4.2
+        #     secure resolver (pin/stored/fetch/fail-closed) — zero transitive trust.
+        is_relayed = origin.get("node_id") != sender_node_id
+        # W6.7: OPTIONAL carried origin manifest body — lets an unreachable receiver anchor-match
+        # a relayed origin against its operator pin / stored binding (mirrors the fact path).
+        origin_manifest = entry.get("origin_manifest")
+        if not isinstance(origin_manifest, dict):
+            origin_manifest = None
+        if is_relayed:
+            if not relay_enabled:
+                logger.warning(
+                    "Tombstone pull from %s: skip relayed tombstone %s (origin_not_sender; "
+                    "relay disabled)",
+                    sender_node_id,
+                    record.id,
+                )
+                continue
+            if not sender_relay_trusted:
+                logger.warning(
+                    "Tombstone pull from %s: skip relayed tombstone %s "
+                    "(relay_sender_not_trusted)",
+                    sender_node_id,
+                    record.id,
+                )
+                continue
 
-        # Resolve the DIRECT sender's verified key set (2a peer chain).
+        # Resolve the ORIGIN's verified key set. Direct: 2a peer chain. Relayed: the W4.2
+        # secure relay resolver (fetch-on-first / pin / stored / fail-closed).
         try:
-            keys = resolve_origin_key(sender_node_id)
+            if is_relayed:
+                keys = resolve_origin_key_for_relay(
+                    origin["node_id"],
+                    origin.get("entity_uri", ""),
+                    cache=relay_cache,
+                    origin_manifest=origin_manifest,
+                )
+            else:
+                keys = resolve_origin_key(sender_node_id)
         except OriginIdentityError as exc:
             logger.warning(
                 "Tombstone pull from %s: skip %s (origin_unresolvable): %s",
@@ -466,7 +504,7 @@ async def pull_tombstones_from_peer_once(
             continue
 
         # Verify the ORIGIN-attestation signature (binds tombstone id/entity_uri/scope +
-        # the origin's propagation grant).
+        # the origin's propagation grant — anti-relaunder: a widened scope invalidates it).
         try:
             verify_tombstone_origin_signature(
                 origin_sig,
@@ -491,7 +529,8 @@ async def pull_tombstones_from_peer_once(
 
         # W6.5: ALSO verify the ISSUER-signer signature on the pull path (closes the W6.1
         # gap where only the push /ingest route verified the issuer). Same shared helper the
-        # push route uses, so push and pull verify the issuer identically.
+        # push route uses, so push and pull verify the issuer identically. A relayed tombstone
+        # must ALSO be a real suppression order — BOTH signatures are required (W6.7).
         try:
             resolve_and_verify_tombstone_issuer(
                 record,
@@ -508,7 +547,60 @@ async def pull_tombstones_from_peer_once(
             )
             continue
 
-        # Both signatures verified — apply (origin columns None for direct/self, unchanged).
+        if is_relayed:
+            # Ingest-side scope gate (W6.7): the tombstone's scope must be inside the origin's
+            # granted scopes — a relay can't widen the scope a tombstone travels under.
+            if record.scope not in origin.get("allowed_scopes", []):
+                logger.warning(
+                    "Tombstone pull from %s: skip relayed tombstone %s "
+                    "(scope_not_in_origin_grant)",
+                    sender_node_id,
+                    record.id,
+                )
+                continue
+            # Resolve the wire-carried origin tenant to a LOCAL tenant (default-deny, the same
+            # fn the fact path uses). A mis-mapped origin tenant ⇒ SKIP rather than mis-land.
+            try:
+                with db() as conn:
+                    relay_tenant = resolve_origin_tenant_for_peer(
+                        peer, origin.get("tenant", ""), conn
+                    )
+            except PeerPolicyError as exc:
+                logger.warning(
+                    "Tombstone pull from %s: skip relayed tombstone %s "
+                    "(tenant policy unsafe): %s",
+                    sender_node_id,
+                    record.id,
+                    exc,
+                )
+                write_audit_log(
+                    sender_node_id,
+                    "federation_tenant_policy_rejected",
+                    {"reason": str(exc), "surface": "tombstones_relay"},
+                )
+                continue
+            # All checks passed — apply + PERSIST the verified origin block + received_from so
+            # this node can itself relay it onward (the egress gate W6.6 reads these columns).
+            try:
+                apply_inbound_tombstone(
+                    record,
+                    tenant_id=relay_tenant,
+                    origin_node_id=origin["node_id"],
+                    origin_tenant=origin.get("tenant", ""),
+                    origin_entity_uri=origin.get("entity_uri", ""),
+                    origin_allowed_scopes=origin.get("allowed_scopes", []),
+                    origin_allowed_tenants=origin.get("allowed_tenants", []),
+                    origin_sig=origin_sig,
+                    received_from=sender_node_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Relayed tombstone ingest from %s failed: %s", peer["node_id"], exc
+                )
+            continue
+
+        # DIRECT: both signatures verified — apply (origin columns None for direct/self,
+        # unchanged W6.5 behaviour).
         try:
             apply_inbound_tombstone(record, tenant_id=tenant_id)
         except Exception as exc:

@@ -46,8 +46,9 @@ def build_tombstone_origin_entry(
       forward the STORED origin block + STORED ``origin_sig`` VERBATIM (no re-sign) so the
       forwarded signature still verifies against the ORIGIN's key. A relayed tombstone
       missing the stored ``origin_sig`` / ``origin_entity_uri`` (pre-v2.1 origin) is not
-      attributable → SKIP (return None). ``origin_manifest`` is left None here; the secure
-      relay-ingest task handles manifest attach.
+      attributable → SKIP (return None). W6.7: attach ``origin_manifest`` = the stored
+      manifest for the origin's entity_uri (best-effort) so an UNREACHABLE downstream can
+      anchor-match it against a pin / stored binding (mirrors the fact path's W4.2 attach).
 
     Returns None (skip + warn) when a relayed tombstone is not forwardable.
     """
@@ -103,8 +104,30 @@ def build_tombstone_origin_entry(
         allowed_tenants=(_json.loads(stored_tenants_raw) if stored_tenants_raw else []),
         entity_uri=stored_entity_uri,
     )
+    # W6.7: attach the origin's stored manifest body (best-effort) so an UNREACHABLE downstream
+    # can anchor-match it against its pin / stored binding — mirrors the fact path's W4.2 attach
+    # in replication.build_origin_entry. Absent if we hold no stored manifest for the origin
+    # entity_uri (the manifest is an optimisation, never a trust grant; the downstream still
+    # resolves via its own pin/binding/fetch).
+    carried_manifest: dict[str, Any] | None = None
+    try:
+        stored_manifest = get_peer_manifest(
+            stored_entity_uri,
+            refresh_if_expired=False,
+            trust_mode=_public_module().settings.trust_mode,
+        )
+        if stored_manifest is not None:
+            from ...identity.manifest import manifest_to_dict
+
+            carried_manifest = manifest_to_dict(stored_manifest)
+    except Exception as exc:  # noqa: BLE001 — manifest attach is an optimisation, never blocks emit
+        logger.debug(
+            "federation tombstone relay: could not attach origin_manifest for %s: %s",
+            stored_entity_uri,
+            exc,
+        )
     return TombstoneEnvelopeEntry(
-        tombstone=record, origin=origin, origin_sig=stored_sig, origin_manifest=None
+        tombstone=record, origin=origin, origin_sig=stored_sig, origin_manifest=carried_manifest
     )
 
 
