@@ -155,7 +155,7 @@ def test_plugin_loaded_allows_normalized_assert_source_match(
     assert response.status_code == 201, response.text
 
 
-def test_recall_rank_hook_site_is_inert_until_plugin_gate_enabled(monkeypatch) -> None:
+def test_recall_rank_hook_site_is_inert_until_plugin_gate_enabled(migrated_db, monkeypatch) -> None:
     record = _fact_record()
     identity = Identity("stigmem://example.test/agent/caller", ["read"])
     weights = RecallWeights(lexical=0.0, semantic=0.0, graph=0.0, source_trust=1.0, recency=0.0)
@@ -188,7 +188,7 @@ def test_recall_rank_hook_site_is_inert_until_plugin_gate_enabled(monkeypatch) -
     assert plugin_scores[0].score > default_scores[0].score
 
 
-def test_default_install_ignores_recall_rank_environment_gates(monkeypatch) -> None:
+def test_default_install_ignores_recall_rank_environment_gates(migrated_db, monkeypatch) -> None:
     record = _fact_record()
     identity = Identity("stigmem://example.test/agent/caller", ["read"])
     weights = RecallWeights(lexical=0.0, semantic=0.0, graph=0.0, source_trust=1.0, recency=0.0)
@@ -213,7 +213,9 @@ def test_default_install_ignores_recall_rank_environment_gates(monkeypatch) -> N
     assert default_scores[0].score == 0.0
 
 
-def test_plugin_loaded_ignores_recall_rank_when_source_weight_disabled(monkeypatch) -> None:
+def test_plugin_loaded_ignores_recall_rank_when_source_weight_disabled(
+    migrated_db, monkeypatch
+) -> None:
     record = _fact_record()
     identity = Identity("stigmem://example.test/agent/caller", ["read"])
     weights = RecallWeights(
