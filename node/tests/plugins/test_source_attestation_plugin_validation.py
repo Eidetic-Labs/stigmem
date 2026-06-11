@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import importlib
 import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -356,6 +357,10 @@ def _fact_record() -> FactRecord:
 
 class _FederationIngestStub:
     ingested_facts: list[dict[str, object]] = []
+    # Provide the settings namespace the 2c push path reads via
+    # _public_module().settings.federation_relay_enabled.  Relay is OFF so
+    # these non-relay tests exercise the direct (origin==sender) path unchanged.
+    settings: object = types.SimpleNamespace(federation_relay_enabled=False)
 
     def ingest_fact(self, fact: dict[str, object], *_args, **_kwargs) -> None:
         self.ingested_facts.append(fact)
