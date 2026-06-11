@@ -544,7 +544,15 @@ def _issuer_signed_revocation(
     return rec.model_copy(update={"signature": sig})
 
 
-def _insert_tombstone(db_path: str, *, tombstone_id: str, entity_uri: str) -> None:
+def _insert_tombstone(
+    db_path: str,
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    signed_by: str = "stigmem://local/issuer",
+) -> None:
+    """``signed_by`` is the ISSUER — same-issuer binding requires a revocation's signer to
+    match it for the revocation to apply (happy-path callers pass the revoking signer)."""
     import sqlite3  # noqa: PLC0415
 
     conn = sqlite3.connect(db_path)
@@ -559,7 +567,7 @@ def _insert_tombstone(db_path: str, *, tombstone_id: str, entity_uri: str) -> No
                 entity_uri,
                 "*",
                 None,
-                "stigmem://local/issuer",
+                signed_by,
                 "key-1",
                 "issuer-sig",
                 "2026-06-10T00:00:00Z",
@@ -675,7 +683,13 @@ def test_revocation_pull_tenant_in_origin_grant_applied(relay_nodes) -> None:  #
     _set_relay_enabled(True)
 
     tomb_id = f"tomb_{uuid.uuid4()}"
-    _insert_tombstone(fed_node.db_path, tombstone_id=tomb_id, entity_uri=f"user:rg-ok-{tomb_id}")
+    # Same-issuer binding: tombstone issued by the same authority (origin) that revokes it.
+    _insert_tombstone(
+        fed_node.db_path,
+        tombstone_id=tomb_id,
+        entity_uri=f"user:rg-ok-{tomb_id}",
+        signed_by=origin_entity_uri,
+    )
     rev = _issuer_signed_revocation(
         origin_priv, tombstone_id=tomb_id, signed_by=origin_entity_uri, key_id=origin_key_id
     )

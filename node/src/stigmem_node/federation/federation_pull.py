@@ -749,7 +749,7 @@ def ingest_revocation_entry(
         resolve_and_verify_tombstone_issuer,
         verify_revocation_signature,
     )
-    from ..lifecycle.tombstones import apply_inbound_revocation
+    from ..lifecycle.tombstones import RevocationAuthorityMismatch, apply_inbound_revocation
     from ..models.tombstones import TombstoneRevocationRecord
     from .origin_identity import (
         OriginIdentityError,
@@ -900,21 +900,43 @@ def ingest_revocation_entry(
             )
             return RevocationEntryResult(False, "tenant_policy_unsafe")
         # All checks passed — apply + PERSIST the verified origin block + received_from so this
-        # node can itself relay it onward (the egress gate Rev-2 reads these columns).
-        apply_inbound_revocation(
-            record,
-            origin_node_id=origin["node_id"],
-            origin_tenant=origin.get("tenant", ""),
-            origin_entity_uri=origin.get("entity_uri", ""),
-            origin_allowed_scopes=origin.get("allowed_scopes", []),
-            origin_allowed_tenants=origin.get("allowed_tenants", []),
-            origin_sig=origin_sig,
-            received_from=sender_node_id,
-        )
+        # node can itself relay it onward (the egress gate Rev-2 reads these columns). The shared
+        # sink enforces SAME-ISSUER binding (revocation.signed_by == held tombstone's issuer);
+        # a cross-issuer revocation is rejected fail-closed (RTBF integrity).
+        try:
+            apply_inbound_revocation(
+                record,
+                origin_node_id=origin["node_id"],
+                origin_tenant=origin.get("tenant", ""),
+                origin_entity_uri=origin.get("entity_uri", ""),
+                origin_allowed_scopes=origin.get("allowed_scopes", []),
+                origin_allowed_tenants=origin.get("allowed_tenants", []),
+                origin_sig=origin_sig,
+                received_from=sender_node_id,
+            )
+        except RevocationAuthorityMismatch:
+            logger.warning(
+                "Revocation ingest from %s: skip relayed revocation %s "
+                "(revocation_authority_mismatch)",
+                sender_node_id,
+                record.id,
+            )
+            return RevocationEntryResult(False, RevocationAuthorityMismatch.reason)
         return RevocationEntryResult(True, None)
 
-    # DIRECT: both signatures verified — apply (origin columns None for direct/self).
-    apply_inbound_revocation(record)
+    # DIRECT: both signatures verified — apply (origin columns None for direct/self). The shared
+    # sink still enforces SAME-ISSUER binding: a direct revocation whose signer != the held
+    # tombstone's issuer is rejected fail-closed.
+    try:
+        apply_inbound_revocation(record)
+    except RevocationAuthorityMismatch:
+        logger.warning(
+            "Revocation ingest from %s: skip direct revocation %s "
+            "(revocation_authority_mismatch)",
+            sender_node_id,
+            record.id,
+        )
+        return RevocationEntryResult(False, RevocationAuthorityMismatch.reason)
     return RevocationEntryResult(True, None)
 
 

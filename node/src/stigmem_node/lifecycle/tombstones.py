@@ -30,6 +30,23 @@ from ..models.tombstones import (
 
 logger = logging.getLogger("stigmem.tombstones")
 
+
+class RevocationAuthorityMismatch(ValueError):
+    """A revocation's signer does not match the issuer of the tombstone it reverses.
+
+    Same-issuer binding (RTBF/censorship integrity): a revocation REINSTATES (un-suppresses)
+    a tombstoned entity, so it is the irreversible-harm direction. Only the authority that
+    SUPPRESSED an entity (the original tombstone's ``signed_by``) may un-suppress it. A
+    federated/relayed/bare-pushed revocation whose ``signed_by`` differs from the held
+    tombstone's ``signed_by`` is rejected fail-closed — a ``relay_trusted`` peer (or any
+    authenticated push peer) must NOT be able to mint a revocation against ANOTHER org's
+    tombstone and re-expose content that org ordered forgotten.
+
+    ``reason`` is the stable machine code surfaced by the pull/push wrappers.
+    """
+
+    reason = "revocation_authority_mismatch"
+
 # ---------------------------------------------------------------------------
 # In-process tombstone LRU cache (§23.3.3 rule 4 — refresh at most every 60s)
 # ---------------------------------------------------------------------------
@@ -63,7 +80,8 @@ def _refresh_tombstone_cache() -> None:
                 """SELECT t.entity_uri, t.scope
                    FROM tombstones t
                    WHERE NOT EXISTS (
-                       SELECT 1 FROM tombstone_revocations r WHERE r.tombstone_id = t.id
+                       SELECT 1 FROM tombstone_revocations r
+                       WHERE r.tombstone_id = t.id AND r.signed_by = t.signed_by
                    )"""
             ).fetchall()
             conn.execute("COMMIT")
@@ -527,8 +545,10 @@ def get_tombstone_status(entity_uri: str) -> TombstoneStatusResponse:
             )
         revocation_list = [_row_to_revocation(r) for r in rev_rows]
 
-    revoked_ids = {r.tombstone_id for r in revocation_list}
-    active = any(t.id not in revoked_ids for t in tombstone_list)
+    # Same-issuer binding: a tombstone is only reinstated by a revocation from its OWN
+    # issuer — a forged/cross-issuer revocation does not clear the suppression (RTBF integrity).
+    revoked_pairs = {(r.tombstone_id, r.signed_by) for r in revocation_list}
+    active = any((t.id, t.signed_by) not in revoked_pairs for t in tombstone_list)
     return TombstoneStatusResponse(
         tombstoned=active,
         tombstones=tombstone_list,
@@ -700,11 +720,33 @@ def apply_inbound_revocation(
     )
     with db() as conn:
         tomb = conn.execute(
-            "SELECT id FROM tombstones WHERE id = ?", (record.tombstone_id,)
+            "SELECT id, signed_by FROM tombstones WHERE id = ?", (record.tombstone_id,)
         ).fetchone()
         if tomb is None:
+            # Unknown tombstone (out-of-order arrival). The FK on tombstone_revocations
+            # already blocks a pre-revoked row under FK enforcement; the recall-time
+            # suppression-lift additionally requires SAME-ISSUER (r.signed_by = t.signed_by),
+            # so even if such a row landed it can never lift a FUTURE tombstone from a
+            # DIFFERENT issuer. Log + fall through (idempotent INSERT below).
             logger.warning(
                 "Inbound revocation for unknown tombstone %s; storing anyway", record.tombstone_id
+            )
+        elif tomb["signed_by"] != record.signed_by:
+            # SAME-ISSUER binding (RTBF integrity): only the authority that suppressed the
+            # entity may un-suppress it. A revocation signed by a DIFFERENT authority than the
+            # held tombstone's issuer is rejected fail-closed — this is the load-bearing check
+            # shared by the relay-pull, v2-push and bare-push revocation paths.
+            logger.warning(
+                "Inbound revocation %s rejected: signer %s != tombstone %s issuer %s "
+                "(revocation_authority_mismatch)",
+                record.id,
+                record.signed_by,
+                record.tombstone_id,
+                tomb["signed_by"],
+            )
+            raise RevocationAuthorityMismatch(
+                f"revocation signer {record.signed_by!r} does not match tombstone "
+                f"{record.tombstone_id!r} issuer {tomb['signed_by']!r}"
             )
         existing = conn.execute(
             "SELECT id FROM tombstone_revocations WHERE id = ?", (record.id,)

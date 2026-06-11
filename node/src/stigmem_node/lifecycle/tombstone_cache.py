@@ -36,7 +36,7 @@ def _load_from_db() -> frozenset[tuple[str, str]]:
             FROM tombstones t
             WHERE NOT EXISTS (
                 SELECT 1 FROM tombstone_revocations r
-                WHERE r.tombstone_id = t.id
+                WHERE r.tombstone_id = t.id AND r.signed_by = t.signed_by
             )
             """
         ).fetchall()

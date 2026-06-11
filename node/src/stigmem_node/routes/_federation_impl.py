@@ -476,7 +476,7 @@ def _verify_signed_artifact_or_400(
 def _ingest_revocation(payload: dict[str, Any], fed_settings: Any) -> dict[str, Any]:
     """Parse + verify + apply an inbound revocation. Returns the success response dict."""
     from ..lifecycle.tombstone_signing import verify_revocation_signature
-    from ..lifecycle.tombstones import apply_inbound_revocation
+    from ..lifecycle.tombstones import RevocationAuthorityMismatch, apply_inbound_revocation
 
     try:
         rev = TombstoneRevocationRecord(**payload)
@@ -493,7 +493,17 @@ def _ingest_revocation(payload: dict[str, Any], fed_settings: Any) -> dict[str, 
         verifier=verify_revocation_signature,
     )
 
-    apply_inbound_revocation(rev)
+    # Same-issuer binding (RTBF integrity): even the bare/back-compat push path must NOT let an
+    # authenticated peer revoke ANOTHER org's tombstone. apply_inbound_revocation is the shared
+    # chokepoint; a signer ≠ tombstone-issuer mismatch fails closed → 403.
+    try:
+        apply_inbound_revocation(rev)
+    except RevocationAuthorityMismatch as exc:
+        _audit_tombstone_payload_rejected(payload, "revocation", RevocationAuthorityMismatch.reason)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"revocation_rejected: {RevocationAuthorityMismatch.reason}",
+        ) from exc
     return {"status": "ok", "type": "revocation"}
 
 
@@ -544,6 +554,8 @@ _V2_INGEST_REASON_HTTP: dict[str, int] = {
     # F-2c-MED-1: origin.tenant ∉ origin.allowed_tenants (ingest/egress symmetry).
     "tenant_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
     "tenant_policy_unsafe": status.HTTP_403_FORBIDDEN,
+    # Same-issuer binding: revocation.signed_by != held tombstone's issuer (RTBF integrity).
+    "revocation_authority_mismatch": status.HTTP_403_FORBIDDEN,
 }
 
 

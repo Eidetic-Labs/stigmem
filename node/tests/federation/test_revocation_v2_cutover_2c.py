@@ -74,8 +74,19 @@ def _set_relay_enabled(value: bool) -> None:
     _settings_mod.settings.federation_relay_enabled = value
 
 
-def _insert_tombstone(db_path: str, *, tombstone_id: str, entity_uri: str) -> None:
-    """Insert a plain (self) tombstone row the revocation can reference."""
+def _insert_tombstone(
+    db_path: str,
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    signed_by: str = "stigmem://local/issuer",
+) -> None:
+    """Insert a plain (self) tombstone row the revocation can reference.
+
+    ``signed_by`` is the tombstone's ISSUER. Same-issuer binding (RTBF integrity) requires a
+    revocation's ``signed_by`` to match this for it to apply — happy-path callers pass the
+    revoking signer's URI here.
+    """
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
@@ -88,7 +99,7 @@ def _insert_tombstone(db_path: str, *, tombstone_id: str, entity_uri: str) -> No
                 entity_uri,
                 "*",
                 None,
-                "stigmem://local/issuer",
+                signed_by,
                 "key-1",
                 "issuer-sig",
                 "2026-06-10T00:00:00Z",
@@ -366,7 +377,13 @@ def test_pull_applies_direct_revocation_after_both_sigs(
 
     fed_node, sender_node_id, sender_entity_uri, sender_priv, key_id = bound_peer_node
     tomb_id = f"tomb_{uuid.uuid4()}"
-    _insert_tombstone(fed_node.db_path, tombstone_id=tomb_id, entity_uri="user:bob")
+    # Same-issuer binding: the tombstone must be issued by the same authority that revokes it.
+    _insert_tombstone(
+        fed_node.db_path,
+        tombstone_id=tomb_id,
+        entity_uri="user:bob",
+        signed_by=sender_entity_uri,
+    )
     rec = _issuer_signed_revocation(
         sender_priv, tombstone_id=tomb_id, signed_by=sender_entity_uri, key_id=key_id
     )

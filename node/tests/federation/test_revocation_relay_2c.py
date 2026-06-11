@@ -180,7 +180,15 @@ def _set_relay_enabled(value: bool) -> None:
     settings_module.settings.federation_relay_enabled = value
 
 
-def _insert_tombstone(db_path: str, *, tombstone_id: str, entity_uri: str) -> None:
+def _insert_tombstone(
+    db_path: str,
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    signed_by: str = "stigmem://local/issuer",
+) -> None:
+    """Insert a suppressing tombstone. ``signed_by`` is the ISSUER; same-issuer binding
+    (RTBF integrity) requires a revocation's ``signed_by`` to match it to apply."""
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
@@ -193,7 +201,7 @@ def _insert_tombstone(db_path: str, *, tombstone_id: str, entity_uri: str) -> No
                 entity_uri,
                 "*",
                 None,
-                "stigmem://local/issuer",
+                signed_by,
                 "key-1",
                 "issuer-sig",
                 "2026-06-10T00:00:00Z",
@@ -318,7 +326,13 @@ def test_relay_on_trusted_resolvable_origin_applies_with_columns(relay_nodes: An
     _set_relay_enabled(True)
 
     tomb_id = f"tomb_{uuid.uuid4()}"
-    _insert_tombstone(fed_node.db_path, tombstone_id=tomb_id, entity_uri="user:relay-rev")
+    # Same-issuer binding: the tombstone is issued by the same authority (origin) that revokes it.
+    _insert_tombstone(
+        fed_node.db_path,
+        tombstone_id=tomb_id,
+        entity_uri="user:relay-rev",
+        signed_by=origin_entity_uri,
+    )
     rec = _issuer_signed_revocation(
         origin_priv, tombstone_id=tomb_id, signed_by=origin_entity_uri, key_id=origin_key_id
     )
@@ -634,7 +648,13 @@ def test_direct_revocation_still_applied_unchanged(relay_nodes: Any) -> None:
     _set_relay_enabled(True)  # relay ON must not change the direct path
 
     tomb_id = f"tomb_{uuid.uuid4()}"
-    _insert_tombstone(fed_node.db_path, tombstone_id=tomb_id, entity_uri="user:relay-rev-direct")
+    # Same-issuer binding: tombstone issued by the same authority (sender) that revokes it.
+    _insert_tombstone(
+        fed_node.db_path,
+        tombstone_id=tomb_id,
+        entity_uri="user:relay-rev-direct",
+        signed_by=sender_entity_uri,
+    )
     rec = _issuer_signed_revocation(
         sender_priv, tombstone_id=tomb_id, signed_by=sender_entity_uri, key_id=sender_key_id
     )
@@ -895,7 +915,7 @@ def push_node(tmp_path: Any) -> Generator[_PushNode, None, None]:
     tombstones_mod.invalidate_tombstone_cache()
 
 
-def _push_insert_tombstone(entity_uri: str) -> str:
+def _push_insert_tombstone(entity_uri: str, signed_by: str = "stigmem://local/issuer") -> str:
     tomb_id = f"tomb_{uuid.uuid4()}"
     with _db_ctx() as conn:
         conn.execute(
@@ -908,7 +928,7 @@ def _push_insert_tombstone(entity_uri: str) -> str:
                 entity_uri,
                 "*",
                 None,
-                "stigmem://local/issuer",
+                signed_by,
                 "key-1",
                 "issuer-sig",
                 "2026-06-10T00:00:00Z",
@@ -926,7 +946,8 @@ def test_push_v2_relayed_revocation_trusted_applied(push_node: _PushNode) -> Non
     _set_relay_enabled(True)
     _set_relay_trusted(settings_module.settings.db_path, push_node.sender_node_id, 1)
 
-    tomb_id = _push_insert_tombstone("user:push-rev-relay")
+    # Same-issuer binding: tombstone issued by the same authority (origin) that revokes it.
+    tomb_id = _push_insert_tombstone("user:push-rev-relay", push_node.origin_entity_uri)
     rec = _issuer_signed_revocation(
         push_node.origin_priv,
         tombstone_id=tomb_id,
@@ -998,7 +1019,8 @@ def test_push_bare_revocation_accepted_as_direct(push_node: _PushNode) -> None:
     issuer-verified revocation (received_from NULL)."""
     _set_relay_enabled(True)
 
-    tomb_id = _push_insert_tombstone("user:push-rev-bare")
+    # Same-issuer binding: tombstone issued by the same authority (sender) that revokes it.
+    tomb_id = _push_insert_tombstone("user:push-rev-bare", push_node.sender_entity_uri)
     rec = _issuer_signed_revocation(
         push_node.sender_priv,
         tombstone_id=tomb_id,
@@ -1068,8 +1090,17 @@ def _proof_origin_sig(
     )
 
 
-def _seed_suppressed_tombstone_on_b(db_path: str, *, tombstone_id: str, entity_uri: str) -> None:
-    """Insert the SUPPRESSING tombstone (the one C also holds and will reinstate)."""
+def _seed_suppressed_tombstone_on_b(
+    db_path: str,
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    signed_by: str = "stigmem://a/issuer",
+) -> None:
+    """Insert the SUPPRESSING tombstone (the one C also holds and will reinstate).
+
+    ``signed_by`` is A's issuer authority — same-issuer binding requires A's revocation to be
+    signed by this for the reinstatement to apply at C."""
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
@@ -1082,7 +1113,7 @@ def _seed_suppressed_tombstone_on_b(db_path: str, *, tombstone_id: str, entity_u
                 entity_uri,
                 "*",
                 None,
-                "stigmem://a/issuer",
+                signed_by,
                 "key-1",
                 "issuer-sig",
                 "2026-06-10T00:00:00Z",
@@ -1260,8 +1291,13 @@ def _run_bc_relay(
     the one C's OWN secure relay-ingest chain wrote (origin A, received_from B)."""
     from stigmem_node.federation.federation_pull import pull_tombstones_from_peer_once
 
+    # Same-issuer binding: A's suppressing tombstone is issued by A (a.entity_uri), the same
+    # authority that signs the relayed revocation — so the reinstatement applies at C.
     _seed_suppressed_tombstone_on_b(
-        fed_node.db_path, tombstone_id=rec.tombstone_id, entity_uri=entity_x
+        fed_node.db_path,
+        tombstone_id=rec.tombstone_id,
+        entity_uri=entity_x,
+        signed_by=a.entity_uri,
     )
     _seed_relayed_revocation_on_b(
         fed_node.db_path, rec=rec, origin=origin, origin_sig=origin_sig, received_from=a.node_id
