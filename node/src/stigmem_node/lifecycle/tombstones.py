@@ -116,6 +116,57 @@ def _row_to_tombstone(row: Any) -> TombstoneRecord:
     )
 
 
+def _row_origin_fields(row: Any) -> dict[str, Any]:
+    """Surface the v2 origin columns (migration 049) from a tombstones row as a dict.
+
+    NULL for every column = self/direct tombstone (unchanged behaviour). The egress emit
+    (``build_tombstone_origin_entry``) reads ``received_from`` to decide self-originated vs
+    relayed and forwards the stored origin block verbatim for a relayed tombstone. Returned
+    as a plain dict (not on ``TombstoneRecord``, which is the wire model and must not carry
+    local-only relay columns). Missing columns (a row that predates migration 049 / a fixture
+    row from ``model_dump``) read as ``None`` via the tolerant ``_get`` below.
+    """
+
+    def _get(key: str) -> Any:
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    return {
+        "received_from": _get("received_from"),
+        "origin_node_id": _get("origin_node_id"),
+        "origin_tenant": _get("origin_tenant"),
+        "origin_entity_uri": _get("origin_entity_uri"),
+        "origin_allowed_scopes": _get("origin_allowed_scopes"),
+        "origin_allowed_tenants": _get("origin_allowed_tenants"),
+        "origin_sig": _get("origin_sig"),
+    }
+
+
+def list_tombstone_rows(
+    scope: str | None = None, since: str | None = None
+) -> list[tuple[TombstoneRecord, dict[str, Any]]]:
+    """Like ``list_tombstones`` but ALSO surfaces each row's v2 origin columns.
+
+    Returns ``(TombstoneRecord, origin_fields)`` pairs so the federation egress emit can
+    decide self-originated vs relayed and forward the stored origin block. ``SELECT *`` is
+    used so the origin_* columns are present. The filter mirrors ``list_tombstones`` exactly.
+    """
+    query = "SELECT * FROM tombstones WHERE 1=1"
+    params: list[Any] = []
+    if scope is not None and scope != "*":
+        query += " AND (scope = ? OR scope = '*')"
+        params.append(scope)
+    if since is not None:
+        query += " AND created_at > ?"
+        params.append(since)
+    query += " ORDER BY created_at"
+    with db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [(_row_to_tombstone(r), _row_origin_fields(r)) for r in rows]
+
+
 def _row_to_revocation(row: Any) -> TombstoneRevocationRecord:
     return TombstoneRevocationRecord(
         id=row["id"],

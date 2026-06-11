@@ -883,7 +883,7 @@ export interface paths {
         };
         /**
          * Federation List Tombstones
-         * @description Tombstone poll route.
+         * @description Tombstone poll route (v2 signed-origin envelope, W6.5).
          *
          *     Requires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.
          */
@@ -1905,14 +1905,31 @@ export interface components {
              */
             v: number;
         };
-        /** FederationTombstonesResponse */
-        FederationTombstonesResponse: {
+        /**
+         * FederationTombstonesResponseV2
+         * @description V2 federation tombstone poll response with per-tombstone origin envelopes.
+         *
+         *     Mirrors FederationFactsResponse; revocations stay as TombstoneRevocationRecord
+         *     for now (enveloped in a later task). Back-compat: FederationTombstonesResponse
+         *     (v1) in tombstones.py is unchanged.
+         */
+        FederationTombstonesResponseV2: {
             /** Cursor */
-            cursor: string | null;
+            cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
             /** Revocations */
             revocations: components["schemas"]["TombstoneRevocationRecord"][];
             /** Tombstones */
-            tombstones: components["schemas"]["TombstoneRecord"][];
+            tombstones: components["schemas"]["TombstoneEnvelopeEntry"][];
+            /**
+             * V
+             * @default 2
+             */
+            v: number;
         };
         /** GardenCreateRequest */
         GardenCreateRequest: {
@@ -2695,6 +2712,22 @@ export interface components {
             scope: string;
         };
         /**
+         * TombstoneEnvelopeEntry
+         * @description V2 per-tombstone envelope carrying origin attestation.
+         *
+         *     Mirrors FederationEnvelopeEntry for facts; reuses OriginBlock unchanged.
+         */
+        TombstoneEnvelopeEntry: {
+            origin: components["schemas"]["OriginBlock"];
+            /** Origin Manifest */
+            origin_manifest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Origin Sig */
+            origin_sig: string;
+            tombstone: components["schemas"]["TombstoneRecord"];
+        };
+        /**
          * TombstoneNotice
          * @description Tombstone metadata surfaced to admin callers on time-travel queries.
          *
@@ -2834,7 +2867,7 @@ export type SchemaFactRecord = components['schemas']['FactRecord'];
 export type SchemaFactValue = components['schemas']['FactValue'];
 export type SchemaFederationEnvelopeEntry = components['schemas']['FederationEnvelopeEntry'];
 export type SchemaFederationFactsResponse = components['schemas']['FederationFactsResponse'];
-export type SchemaFederationTombstonesResponse = components['schemas']['FederationTombstonesResponse'];
+export type SchemaFederationTombstonesResponseV2 = components['schemas']['FederationTombstonesResponseV2'];
 export type SchemaGardenCreateRequest = components['schemas']['GardenCreateRequest'];
 export type SchemaGardenMemberRecord = components['schemas']['GardenMemberRecord'];
 export type SchemaGardenMemberRequest = components['schemas']['GardenMemberRequest'];
@@ -2878,6 +2911,7 @@ export type SchemaSubscriptionEventsResponse = components['schemas']['Subscripti
 export type SchemaSubscriptionListResponse = components['schemas']['SubscriptionListResponse'];
 export type SchemaSubscriptionRecord = components['schemas']['SubscriptionRecord'];
 export type SchemaTombstoneCreateRequest = components['schemas']['TombstoneCreateRequest'];
+export type SchemaTombstoneEnvelopeEntry = components['schemas']['TombstoneEnvelopeEntry'];
 export type SchemaTombstoneNotice = components['schemas']['TombstoneNotice'];
 export type SchemaTombstoneRecord = components['schemas']['TombstoneRecord'];
 export type SchemaTombstoneRevocationRecord = components['schemas']['TombstoneRevocationRecord'];
@@ -4404,7 +4438,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FederationTombstonesResponse"];
+                    "application/json": components["schemas"]["FederationTombstonesResponseV2"];
                 };
             };
             /** @description Validation Error */

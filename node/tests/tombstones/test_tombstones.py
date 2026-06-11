@@ -705,8 +705,10 @@ class TestFederationTombstoneRoutes:
         )
         assert resp.status_code == 200
         data = resp.json()
+        # W6.5: poll now emits the v2 signed-origin envelope (each entry wraps the tombstone).
+        assert data["v"] == 2
         assert "tombstones" in data
-        uris = [t["entity_uri"] for t in data["tombstones"]]
+        uris = [e["tombstone"]["entity_uri"] for e in data["tombstones"]]
         assert "user:leo" in uris
 
     def test_federation_tombstones_since_filter(self, node):
@@ -1019,8 +1021,10 @@ class TestTwoNodeFederationPropagation:
             # Fetch tombstone list from node A (federation poll simulation)
             poll_resp = client_a.get("/v1/federation/tombstones", headers=_ah(admin_a))
             assert poll_resp.status_code == 200
+            # W6.5: v2 envelope — each entry wraps the tombstone under "tombstone".
+            assert poll_resp.json()["v"] == 2
             polled = poll_resp.json()["tombstones"]
-            assert any(t["entity_uri"] == "user:quinn" for t in polled)
+            assert any(e["tombstone"]["entity_uri"] == "user:quinn" for e in polled)
 
             client_a.__exit__(None, None, None)
             plugin_ctx_a.__exit__(None, None, None)

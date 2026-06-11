@@ -351,6 +351,18 @@ async def pull_tombstones_from_peer_once(
         return cursor
 
     data = resp.json()
+
+    # F-FED-2c W6.5: clean break — only the v2 signed-origin tombstone envelope is consumed
+    # (mirrors the fact pull's body.get("v") != 2 handling). A non-v2 page is dropped
+    # wholesale; advance no cursor.
+    if data.get("v") != 2:
+        logger.warning(
+            "Tombstone pull from %s returned non-v2 envelope (v=%r); dropping page",
+            peer["node_id"],
+            data.get("v"),
+        )
+        return cursor
+
     tombstones = data.get("tombstones", [])
     new_cursor: str | None = data.get("cursor")
 
@@ -395,12 +407,109 @@ async def pull_tombstones_from_peer_once(
         return cursor  # fail-closed: apply nothing from a mis-pinned peer
 
     # Ingest tombstones and revocations
+    from ..lifecycle.tombstone_signing import (
+        IssuerVerificationError,
+        resolve_and_verify_tombstone_issuer,
+        verify_tombstone_signature,
+    )
     from ..lifecycle.tombstones import apply_inbound_revocation, apply_inbound_tombstone
     from ..models.tombstones import TombstoneRecord, TombstoneRevocationRecord
+    from .origin_signature import (
+        OriginSignatureError,
+        verify_tombstone_origin_signature,
+    )
 
-    for t in tombstones:
+    sender_node_id = peer["node_id"]
+    for entry in tombstones:
+        if not isinstance(entry, dict):
+            logger.warning(
+                "Tombstone pull from %s: malformed entry (not an object)", sender_node_id
+            )
+            continue
+        tomb = entry.get("tombstone")
+        origin = entry.get("origin")
+        origin_sig = entry.get("origin_sig")
+        if not isinstance(tomb, dict) or not isinstance(origin, dict) or not origin_sig:
+            logger.warning(
+                "Tombstone pull from %s: entry missing tombstone/origin/origin_sig",
+                sender_node_id,
+            )
+            continue
         try:
-            record = TombstoneRecord(**t)
+            record = TombstoneRecord(**tomb)
+        except Exception as exc:
+            logger.warning("Tombstone pull from %s: malformed tombstone: %s", sender_node_id, exc)
+            continue
+
+        # W6.5: DIRECT-only for this task. A relayed tombstone (origin.node_id != sender) is
+        # SKIPPED — the secure relay chain (relay_trusted + fetch-on-first origin resolve)
+        # arrives in the next task. Do NOT enable relay here.
+        if origin.get("node_id") != sender_node_id:
+            logger.warning(
+                "Tombstone pull from %s: skip relayed tombstone %s (origin_not_sender; "
+                "relay not yet enabled)",
+                sender_node_id,
+                record.id,
+            )
+            continue
+
+        # Resolve the DIRECT sender's verified key set (2a peer chain).
+        try:
+            keys = resolve_origin_key(sender_node_id)
+        except OriginIdentityError as exc:
+            logger.warning(
+                "Tombstone pull from %s: skip %s (origin_unresolvable): %s",
+                sender_node_id,
+                record.id,
+                exc,
+            )
+            continue
+
+        # Verify the ORIGIN-attestation signature (binds tombstone id/entity_uri/scope +
+        # the origin's propagation grant).
+        try:
+            verify_tombstone_origin_signature(
+                origin_sig,
+                tombstone_id=record.id,
+                entity_uri=record.entity_uri,
+                scope=record.scope,
+                origin_node_id=origin["node_id"],
+                origin_tenant=origin.get("tenant", ""),
+                origin_allowed_scopes=origin.get("allowed_scopes", []),
+                origin_allowed_tenants=origin.get("allowed_tenants", []),
+                origin_entity_uri=origin.get("entity_uri", ""),
+                allowed_pubkeys=keys,
+            )
+        except OriginSignatureError as exc:
+            logger.warning(
+                "Tombstone pull from %s: skip %s (origin_sig_invalid): %s",
+                sender_node_id,
+                record.id,
+                exc,
+            )
+            continue
+
+        # W6.5: ALSO verify the ISSUER-signer signature on the pull path (closes the W6.1
+        # gap where only the push /ingest route verified the issuer). Same shared helper the
+        # push route uses, so push and pull verify the issuer identically.
+        try:
+            resolve_and_verify_tombstone_issuer(
+                record,
+                key_id=record.key_id or "",
+                signer_uri=record.signed_by,
+                verifier=verify_tombstone_signature,
+            )
+        except IssuerVerificationError as exc:
+            logger.warning(
+                "Tombstone pull from %s: skip %s (issuer_sig_invalid): %s",
+                sender_node_id,
+                record.id,
+                exc.reason,
+            )
+            continue
+
+        # Both signatures verified — apply (origin columns None for direct/self, unchanged).
+        try:
             apply_inbound_tombstone(record, tenant_id=tenant_id)
         except Exception as exc:
             logger.warning("Tombstone ingest from %s failed: %s", peer["node_id"], exc)

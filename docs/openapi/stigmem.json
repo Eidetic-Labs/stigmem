@@ -1326,7 +1326,8 @@
         "title": "FederationFactsResponse",
         "type": "object"
       },
-      "FederationTombstonesResponse": {
+      "FederationTombstonesResponseV2": {
+        "description": "V2 federation tombstone poll response with per-tombstone origin envelopes.\n\nMirrors FederationFactsResponse; revocations stay as TombstoneRevocationRecord\nfor now (enveloped in a later task). Back-compat: FederationTombstonesResponse\n(v1) in tombstones.py is unchanged.",
         "properties": {
           "cursor": {
             "anyOf": [
@@ -1339,6 +1340,11 @@
             ],
             "title": "Cursor"
           },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
           "revocations": {
             "items": {
               "$ref": "#/components/schemas/TombstoneRevocationRecord"
@@ -1348,18 +1354,22 @@
           },
           "tombstones": {
             "items": {
-              "$ref": "#/components/schemas/TombstoneRecord"
+              "$ref": "#/components/schemas/TombstoneEnvelopeEntry"
             },
             "title": "Tombstones",
             "type": "array"
+          },
+          "v": {
+            "default": 2,
+            "title": "V",
+            "type": "integer"
           }
         },
         "required": [
           "tombstones",
-          "revocations",
-          "cursor"
+          "revocations"
         ],
-        "title": "FederationTombstonesResponse",
+        "title": "FederationTombstonesResponseV2",
         "type": "object"
       },
       "GardenCreateRequest": {
@@ -3351,6 +3361,40 @@
           "entity_uri"
         ],
         "title": "TombstoneCreateRequest",
+        "type": "object"
+      },
+      "TombstoneEnvelopeEntry": {
+        "description": "V2 per-tombstone envelope carrying origin attestation.\n\nMirrors FederationEnvelopeEntry for facts; reuses OriginBlock unchanged.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/OriginBlock"
+          },
+          "origin_manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Manifest"
+          },
+          "origin_sig": {
+            "title": "Origin Sig",
+            "type": "string"
+          },
+          "tombstone": {
+            "$ref": "#/components/schemas/TombstoneRecord"
+          }
+        },
+        "required": [
+          "tombstone",
+          "origin",
+          "origin_sig"
+        ],
+        "title": "TombstoneEnvelopeEntry",
         "type": "object"
       },
       "TombstoneNotice": {
@@ -6548,7 +6592,7 @@
     },
     "/v1/federation/tombstones": {
       "get": {
-        "description": "Tombstone poll route.\n\nRequires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.",
+        "description": "Tombstone poll route (v2 signed-origin envelope, W6.5).\n\nRequires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.",
         "operationId": "federation_list_tombstones_v1_federation_tombstones_get",
         "parameters": [
           {
@@ -6599,7 +6643,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FederationTombstonesResponse"
+                  "$ref": "#/components/schemas/FederationTombstonesResponseV2"
                 }
               }
             },

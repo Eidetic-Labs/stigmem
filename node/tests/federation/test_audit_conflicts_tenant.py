@@ -38,7 +38,7 @@ from stigmem_node.hlc import node_hlc
 from stigmem_node.main import create_app
 from stigmem_node.plugins.testing import stigmem_plugins
 
-from .helpers import generate_ed25519_b64, insert_active_peer
+from .helpers import generate_ed25519_b64
 
 _TOMBSTONE_PLUGIN_SRC = Path(__file__).resolve().parents[3] / "experimental" / "tombstones" / "src"
 
@@ -258,27 +258,105 @@ class _StubClient:
 
     async def get(self, url: str, **kwargs: Any) -> _StubResponse:
         if "/tombstones" in url:
+            # W6.5: tombstone pull now consumes the v2 signed-origin envelope.
             if self._served:
-                return _StubResponse({"tombstones": [], "revocations": [], "cursor": None})
+                return _StubResponse(
+                    {"v": 2, "tombstones": [], "revocations": [], "cursor": None}
+                )
             self._served = True
             return _StubResponse(
-                {"tombstones": self._tombstones, "revocations": [], "cursor": None}
+                {"v": 2, "tombstones": self._tombstones, "revocations": [], "cursor": None}
             )
-        return _StubResponse({"facts": [], "cursor": None})
+        # W6.5: facts pull also requires the v2 envelope (v key present).
+        return _StubResponse({"v": 2, "facts": [], "cursor": None})
 
 
-def _make_tombstone(entity_uri: str) -> dict[str, Any]:
-    return {
-        "id": "tomb_" + str(uuid.uuid4()),
-        "entity_uri": entity_uri,
-        "scope": "*",
-        "reason": "rtbf",
-        "signed_by": "stigmem://node-b",
-        "key_id": "",
-        "signature": "sig",
-        "created_at": datetime.now(UTC).isoformat(),
-        "legal_hold": False,
+def _bound_peer_for_pull(fed_node: Any, *, ingest_tenant: str) -> tuple[str, str, Any, str]:
+    """Insert an active, entity_uri-bound peer (origin == issuer) pinned to *ingest_tenant*.
+
+    Returns (node_id, entity_uri, priv, manifest_key_id) so the test can sign a v2 tombstone
+    envelope the pull path will accept (resolve_origin_key + get_peer_manifest both resolve).
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from stigmem_node.db import db as _db_ctx
+    from stigmem_node.identity.key_rotation import generate_key_id
+
+    from .helpers import make_bound_peer
+
+    pub_b64, priv_b64 = generate_ed25519_b64()
+    import base64 as _b64
+
+    priv = Ed25519PrivateKey.from_private_bytes(
+        _b64.urlsafe_b64decode(priv_b64 + "=" * (-len(priv_b64) % 4))
+    )
+    node_id = f"stigmem://peer-{uuid.uuid4()}"
+    entity_uri = f"https://peer-{uuid.uuid4()}.example"
+    key_id = generate_key_id(priv.public_key())
+    with _db_ctx() as conn:
+        peer_id = make_bound_peer(
+            conn, node_id=node_id, entity_uri=entity_uri, pub_b64=pub_b64, priv=priv
+        )
+        conn.execute(
+            "UPDATE peers SET ingest_tenant = ? WHERE id = ?", (ingest_tenant, peer_id)
+        )
+        conn.commit()
+    return node_id, entity_uri, priv, key_id
+
+
+def _make_v2_tombstone_entry(
+    entity_uri: str,
+    *,
+    sender_node_id: str,
+    sender_entity_uri: str,
+    sender_priv: Any,
+    key_id: str,
+) -> dict[str, Any]:
+    """Build one v2 DIRECT tombstone envelope entry signed by the bound sender peer.
+
+    Both signatures are produced with the sender's key (origin == issuer == sender), so the
+    pull path's origin-sig AND issuer-sig checks both pass. Mirrors the W6.5 wire shape.
+    """
+    import base64 as _base64
+
+    from stigmem_node.federation.origin_signature import sign_tombstone_origin
+    from stigmem_node.lifecycle.tombstone_signing import _signing_body
+    from stigmem_node.models.tombstones import TombstoneRecord
+
+    rec = TombstoneRecord(
+        id="tomb_" + str(uuid.uuid4()),
+        entity_uri=entity_uri,
+        scope="*",
+        reason="rtbf",
+        signed_by=sender_entity_uri,  # issuer == the bound sender (manifest stored)
+        key_id=key_id,
+        signature="",
+        created_at=datetime.now(UTC).isoformat(),
+        legal_hold=False,
+    )
+    issuer_sig = (
+        _base64.urlsafe_b64encode(sender_priv.sign(_signing_body(rec))).decode().rstrip("=")
+    )
+    rec = rec.model_copy(update={"signature": issuer_sig})
+    origin = {
+        "tenant": "default",
+        "node_id": sender_node_id,
+        "allowed_scopes": ["*"],
+        "allowed_tenants": ["default"],
+        "entity_uri": sender_entity_uri,
     }
+    origin_sig = sign_tombstone_origin(
+        sender_priv,
+        tombstone_id=rec.id,
+        entity_uri=rec.entity_uri,
+        scope=rec.scope,
+        origin_node_id=sender_node_id,
+        origin_tenant="default",
+        origin_allowed_scopes=["*"],
+        origin_allowed_tenants=["default"],
+        origin_entity_uri=sender_entity_uri,
+    )
+    return {"tombstone": rec.model_dump(), "origin": origin, "origin_sig": origin_sig}
 
 
 def test_inbound_tombstone_lands_in_peer_ingest_tenant(
@@ -294,22 +372,23 @@ def test_inbound_tombstone_lands_in_peer_ingest_tenant(
 
     entity = f"rtbf:entity:{uuid.uuid4()}"
 
-    pub_b64, _priv = generate_ed25519_b64()
-    peer_node_id = f"stigmem://peer-{uuid.uuid4()}"
-    insert_active_peer(
-        fed_node.db_path,
-        peer_node_id,
-        "http://peer-a",
-        pub_b64,
-        ingest_tenant="tenant-a",
+    peer_node_id, peer_entity_uri, peer_priv, key_id = _bound_peer_for_pull(
+        fed_node, ingest_tenant="tenant-a"
     )
 
-    tombstone = _make_tombstone(entity)
+    entry = _make_v2_tombstone_entry(
+        entity,
+        sender_node_id=peer_node_id,
+        sender_entity_uri=peer_entity_uri,
+        sender_priv=peer_priv,
+        key_id=key_id,
+    )
+    tomb_id = entry["tombstone"]["id"]
 
     # Non-default pin requires the multi-tenant plugin to be honored.
     monkeypatch.setattr(mtg, "multi_tenant_plugin_registered", lambda: True)
     monkeypatch.setattr(
-        federation_pull, "_make_pull_client", lambda: _StubClient([tombstone])
+        federation_pull, "_make_pull_client", lambda: _StubClient([entry])
     )
 
     asyncio.run(federation_pull.pull_all_peers_once())
@@ -317,7 +396,7 @@ def test_inbound_tombstone_lands_in_peer_ingest_tenant(
     conn = sqlite3.connect(fed_node.db_path)
     try:
         row = conn.execute(
-            "SELECT tenant_id FROM tombstones WHERE id = ?", (tombstone["id"],)
+            "SELECT tenant_id FROM tombstones WHERE id = ?", (tomb_id,)
         ).fetchone()
     finally:
         conn.close()
@@ -344,21 +423,21 @@ def test_inbound_tombstone_does_not_retract_other_tenant_fact(
 
     entity = f"rtbf:shared:{uuid.uuid4()}"
 
-    pub_b64, _priv = generate_ed25519_b64()
-    peer_node_id = f"stigmem://peer-{uuid.uuid4()}"
-    insert_active_peer(
-        fed_node.db_path,
-        peer_node_id,
-        "http://peer-a",
-        pub_b64,
-        ingest_tenant="tenant-a",
+    peer_node_id, peer_entity_uri, peer_priv, key_id = _bound_peer_for_pull(
+        fed_node, ingest_tenant="tenant-a"
     )
 
-    tombstone = _make_tombstone(entity)
+    entry = _make_v2_tombstone_entry(
+        entity,
+        sender_node_id=peer_node_id,
+        sender_entity_uri=peer_entity_uri,
+        sender_priv=peer_priv,
+        key_id=key_id,
+    )
 
     monkeypatch.setattr(mtg, "multi_tenant_plugin_registered", lambda: True)
     monkeypatch.setattr(
-        federation_pull, "_make_pull_client", lambda: _StubClient([tombstone])
+        federation_pull, "_make_pull_client", lambda: _StubClient([entry])
     )
 
     # Enable the recall-time tombstone filter so is_tombstoned() is live.

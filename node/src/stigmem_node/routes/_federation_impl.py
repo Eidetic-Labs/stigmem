@@ -425,30 +425,46 @@ def _verify_signed_artifact_or_400(
     key-id-not-in-manifest / signature-mismatch). ``missing_manifest_detail`` is
     parameterised because the existing wire contract uses different wording for
     tombstones vs revocations.
+
+    W6.5: the manifest-lookup + key-id-resolve + verify core is the shared
+    ``resolve_and_verify_tombstone_issuer`` (also used by the pull client, closing the
+    W6.1 gap). This wrapper preserves the EXACT push-route HTTP status codes / wire-error
+    strings / audit events by mapping the helper's ``reason`` codes back to them.
     """
-    if not key_id:
-        _audit_tombstone_ingest_rejected(record, artifact_label, f"{artifact_label}_missing_key_id")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{artifact_label} missing key_id",
-        )
-    manifest = get_peer_manifest(signer_uri)
-    if manifest is None:
-        _audit_tombstone_ingest_rejected(record, artifact_label, "signer_manifest_missing")
-        raise HTTPException(status_code=401, detail=missing_manifest_detail)
-    pubkey_b64 = _resolve_pubkey_for_key_id(manifest, key_id)
-    if pubkey_b64 is None:
-        _audit_tombstone_ingest_rejected(record, artifact_label, "key_id_not_in_signer_manifest")
-        raise HTTPException(status_code=401, detail="key_id not in signer manifest")
+    from ..lifecycle.tombstone_signing import (
+        IssuerVerificationError,
+        resolve_and_verify_tombstone_issuer,
+    )
+
     try:
-        verifier(record, pubkey_b64)
-    except ValueError as exc:
+        resolve_and_verify_tombstone_issuer(
+            record, key_id=key_id, signer_uri=signer_uri, verifier=verifier
+        )
+    except IssuerVerificationError as exc:
+        reason = exc.reason
+        if reason == "missing_key_id":
+            _audit_tombstone_ingest_rejected(
+                record, artifact_label, f"{artifact_label}_missing_key_id"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{artifact_label} missing key_id",
+            ) from exc
+        if reason == "signer_manifest_missing":
+            _audit_tombstone_ingest_rejected(record, artifact_label, "signer_manifest_missing")
+            raise HTTPException(status_code=401, detail=missing_manifest_detail) from exc
+        if reason == "key_id_not_in_signer_manifest":
+            _audit_tombstone_ingest_rejected(
+                record, artifact_label, "key_id_not_in_signer_manifest"
+            )
+            raise HTTPException(status_code=401, detail="key_id not in signer manifest") from exc
+        # Signature mismatch (reason is the verifier's ValueError string).
         if on_failure is not None:
-            on_failure(record, str(exc))
-        _audit_tombstone_ingest_rejected(record, artifact_label, str(exc))
+            on_failure(record, reason)
+        _audit_tombstone_ingest_rejected(record, artifact_label, reason)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{artifact_label}_verification_failed: {exc}",
+            detail=f"{artifact_label}_verification_failed: {reason}",
         ) from exc
 
 
@@ -533,18 +549,6 @@ def federation_ingest_tombstone_impl(
     if "tombstone_id" in payload:
         return _ingest_revocation(payload, fed_settings)
     return _ingest_tombstone(payload, fed_settings)
-
-
-def _resolve_pubkey_for_key_id(manifest: Any, key_id: str) -> str | None:
-    """Return base64url public key from manifest matching key_id, or None."""
-    if manifest.key_id == key_id:
-        pk: str = manifest.public_key
-        return pk
-    for evt in getattr(manifest, "rotation_events", []):
-        if getattr(evt, "new_key_id", None) == key_id:
-            new_pk: str | None = getattr(evt, "new_public_key", None)
-            return new_pk
-    return None
 
 
 def _emit_tombstone_verification_failed(record: TombstoneRecord, reason: str) -> None:
