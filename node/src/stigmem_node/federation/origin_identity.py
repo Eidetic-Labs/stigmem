@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -42,12 +43,41 @@ class OriginIdentityError(ValueError):
     """Origin identity could not be verified (fail-closed)."""
 
 
+def _now() -> datetime:
+    """Current UTC time. Indirected through a module function so tests own the clock."""
+    return datetime.now(UTC)
+
+
+def _prior_key_within_grace(rotated_at: str) -> bool:
+    """True iff a rotation at *rotated_at* is still inside the configured grace window.
+
+    Fail-closed: a missing/unparseable/future ``rotated_at`` (or any age beyond the
+    grace) returns False, so the prior key is DROPPED rather than trusted indefinitely.
+    """
+    grace = timedelta(hours=settings.federation_key_rotation_grace_hours)
+    try:
+        rotated = datetime.fromisoformat((rotated_at or "").replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return False  # indeterminate age ⇒ fail closed on the prior key
+    if rotated.tzinfo is None:
+        rotated = rotated.replace(tzinfo=UTC)
+    return _now() - rotated <= grace
+
+
 def _keys_from_manifest(manifest: OrgManifest) -> set[str]:
-    """Current key plus the prior key inside the most recent rotation window."""
+    """Current key plus the prior key — but ONLY while inside the rotation grace window.
+
+    The current ``public_key`` is ALWAYS accepted. The prior (retiring) key from the
+    most recent rotation event is accepted as a dual-trust key ONLY while
+    ``now - rotated_at <= federation_key_rotation_grace_hours``; once that window
+    elapses the retired key is dropped, so a stale/compromised prior key can no longer
+    forge origin signatures (direct or relayed). Fail-closed on an unparseable
+    ``rotated_at`` (see ``_prior_key_within_grace``).
+    """
     keys = {manifest.public_key}
     if manifest.rotation_events:
         last = manifest.rotation_events[-1]
-        if last.previous_public_key:
+        if last.previous_public_key and _prior_key_within_grace(last.rotated_at):
             keys.add(last.previous_public_key)
     return keys
 
