@@ -547,31 +547,102 @@ def test_b_happy_path_unreachable_origin_with_pin_ingests(
 
 
 # ---------------------------------------------------------------------------
-# (c) RELAY-OFF CONTAINMENT — default-OFF safety.
+# (c) RELAY-OFF CONTAINMENT — default-OFF safety, split into two independent
+#     assertions so that stripping EITHER layer alone fails exactly one test.
 # ---------------------------------------------------------------------------
 
 
-def test_c_relay_off_drops_relayed_fact(
+def test_c_relay_off_egress_excludes_relayed_row(
     relay_topology: Any, monkeypatch: Any
 ) -> None:
-    """(c) Same topology but ``federation_relay_enabled=False`` at C → C DROPS B's relayed
-    fact (origin_not_sender) even though A is reachable + B is relay_trusted. The fact is
-    NOT at C. Proves default-OFF containment.
+    """(c-i) B's W2.3 egress gate with relay OFF excludes the relayed row entirely.
 
-    With relay OFF, B's W2.3 egress gate ALSO withholds the relayed row (received_from IS
-    NULL only), AND C's ingest would drop it (origin_not_sender). Either way C must NOT end
-    up with the fact."""
+    With ``federation_relay_enabled=False``, B's SQL egress clause is
+    ``received_from IS NULL`` — the relayed fact (received_from IS NOT NULL) is
+    withheld by B's egress gate and MUST NOT appear in B's wire body.
+
+    This assertion isolates the EGRESS layer only.  Stripping B's egress gate
+    while leaving C's ingest gate intact would let the relayed fact appear in
+    the wire body → this test fails.  Stripping C's ingest gate alone does not
+    affect B's egress → this test still passes, while (c-ii) catches the
+    regression instead.
+
+    Mirrors the ``emitted_ids`` pattern from test_e (scope/tenant propagation)."""
     fed_node, a, c = relay_topology
-    _set_relay_enabled(False)  # relay OFF at C (and at B's egress)
+    _set_relay_enabled(False)  # relay OFF — B's egress gate must apply
     _fetch_serves_a(monkeypatch, a)
 
-    entity_x = "user:relay4-carol"
+    entity_x = "user:relay4-carol-egress"
     fact = _build_fact(a, entity=entity_x, scope="public")
     origin = _origin_block(a, allowed_scopes=["public"])
     osig = _origin_sig(a, fact, origin)
 
-    _run_bc_relay(fed_node, a, c, fact, origin, osig)
-    assert _fact_row(entity_x) is None, "relay OFF must not ingest a relayed fact at C"
+    # Seed A's relayed fact on B + register C as a pull peer, then capture B's real wire body.
+    b_body = _capture_b_egress(fed_node, a, c, fact, origin, osig)
+
+    # B's egress gate (relay OFF → received_from IS NULL) must exclude the relayed row.
+    emitted_ids = {e["fact"]["id"] for e in b_body["facts"]}
+    assert fact["id"] not in emitted_ids, (
+        "relay OFF: B's egress gate must withhold the relayed fact (received_from IS NOT NULL)"
+    )
+
+    # Clean up the seed row so the shared DB is tidy for later tests.
+    _delete_fact(fed_node.db_path, fact["id"])
+
+
+def test_c_relay_off_ingest_drops_origin_not_sender(
+    relay_topology: Any, monkeypatch: Any
+) -> None:
+    """(c-ii) C's relay-ingest gate drops a relayed entry even when it reaches the wire.
+
+    This assertion bypasses B's egress gate entirely: the wire body delivered to C's
+    ``pull_from_peer_once`` is constructed to CONTAIN the relayed fact (as if B's egress
+    gate were absent or forced open).  With ``federation_relay_enabled=False`` at C, the
+    relay-ingest path should reject the entry (``origin_not_sender``) and the fact MUST
+    NOT be written at C.
+
+    This isolates the INGEST layer only.  Stripping C's ingest gate while leaving B's
+    egress gate intact would allow C to write the fact → this test fails.  Stripping B's
+    egress gate alone does not affect C's ingest-side check → this test still passes,
+    while (c-i) catches the regression instead.
+
+    Relay is OFF at C; A is reachable.  The wire body is crafted to resemble what B
+    WOULD have sent if relay were ON (the relayed entry with A's origin block + sig),
+    then delivered directly to C's real ``pull_from_peer_once``."""
+    fed_node, a, c = relay_topology
+    _set_relay_enabled(True)  # relay ON so B's egress DOES include the relayed fact
+    _fetch_serves_a(monkeypatch, a)
+
+    entity_x = "user:relay4-carol-ingest"
+    fact = _build_fact(a, entity=entity_x, scope="public")
+    origin = _origin_block(a, allowed_scopes=["public"])
+    osig = _origin_sig(a, fact, origin)
+
+    # Capture B's real wire body WITH relay ON — the relayed fact IS in the wire body.
+    b_body = _capture_b_egress(fed_node, a, c, fact, origin, osig)
+    emitted_ids = {e["fact"]["id"] for e in b_body["facts"]}
+    assert fact["id"] in emitted_ids, (
+        "precondition: relay ON must produce a wire body that includes the relayed fact"
+    )
+
+    # Clear B's seed row before C ingests so C's ingest writes its own row (if any).
+    _delete_fact(fed_node.db_path, fact["id"])
+
+    # Now switch relay OFF at C's ingest layer and drive C's real pull_from_peer_once
+    # against the wire body that DOES contain the relayed entry.
+    _set_relay_enabled(False)
+
+    from stigmem_node.federation.federation_pull import pull_from_peer_once  # noqa: PLC0415
+
+    asyncio.run(
+        pull_from_peer_once(_c_relay_peer_dict(fed_node.node_id), _BGetClient(b_body), None)
+    )
+
+    # C's relay-ingest gate (origin_not_sender, relay OFF) must have dropped the relayed entry.
+    assert _fact_row(entity_x) is None, (
+        "relay OFF: C's ingest gate must drop a relayed fact even when it reaches the wire "
+        "(origin_not_sender)"
+    )
 
 
 # ---------------------------------------------------------------------------
