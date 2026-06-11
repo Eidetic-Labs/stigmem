@@ -47,6 +47,13 @@ _TUPLE_VERSION = "2.1"
 # two tuples share the same private key and base64url framing, only the signed bytes differ).
 _TOMBSTONE_TUPLE_VERSION = "t2.1"
 
+# Hardcoded in-body tuple version for the REVOCATION origin-attestation tuple (Phase 2c Rev-1).
+# DISTINCT from both the fact tuple's "2.1" and the tombstone tuple's "t2.1" so a revocation
+# origin signature can NEVER be confused with / replayed as a tombstone or fact origin
+# signature (domain separation — all three share the same key and base64url framing, only the
+# signed bytes differ).
+_REVOCATION_TUPLE_VERSION = "r2.1"
+
 
 def _pad(s: str) -> str:
     return s + "=" * (-len(s) % 4)
@@ -286,4 +293,122 @@ def verify_tombstone_origin_signature(
             continue
     raise OriginSignatureError(
         "tombstone origin signature did not verify against any allowed key"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Revocation origin-attestation signature (Phase 2c Rev-1)
+#
+# SEPARATE from the existing revocation issuer-signer signature
+# (sign_revocation/verify_revocation_signature). That one says "this org issued this tombstone
+# REVERSAL"; this one says "this ORIGIN node relayed this revocation under THIS propagation
+# grant". A revocation has no entity_uri/scope of its own — it references a tombstone by id —
+# so the tuple binds the revocation ``id`` (as ``rid``) and the referenced ``tombstone_id``
+# instead. Binding both is the anti-relaunder property: a relay that retargets which revocation
+# or which tombstone it carries, or lies about its grant, invalidates the signature.
+# ``tv = "r2.1"`` (distinct from the fact tuple's "2.1" and the tombstone tuple's "t2.1") gives
+# hard domain separation so the three origin signatures are never interchangeable.
+# ---------------------------------------------------------------------------
+
+
+def canonical_revocation_origin_tuple(
+    *,
+    revocation_id: str,
+    tombstone_id: str,
+    origin_node_id: str,
+    origin_tenant: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    origin_entity_uri: str,
+) -> bytes:
+    """RFC 8785 JCS bytes of the signed revocation origin tuple (sets sorted for determinism).
+
+    Binds the revocation ``id`` (as ``rid``) and the referenced ``tombstone_id`` so a relay
+    cannot retarget the reversal. ``tv`` is the hardcoded constant ``"r2.1"``, distinct from
+    the fact tuple's ``"2.1"`` and the tombstone tuple's ``"t2.1"`` (domain separation, Rev-1).
+    """
+    return canonicaljson.encode_canonical_json(
+        {
+            "origin_allowed_scopes": sorted(origin_allowed_scopes),
+            "origin_allowed_tenants": sorted(origin_allowed_tenants),
+            "origin_entity_uri": origin_entity_uri,
+            "origin_node_id": origin_node_id,
+            "origin_tenant": origin_tenant,
+            "rid": revocation_id,
+            "tombstone_id": tombstone_id,
+            "tv": _REVOCATION_TUPLE_VERSION,
+        }
+    )
+
+
+def sign_revocation_origin(
+    private_key: Ed25519PrivateKey,
+    *,
+    revocation_id: str,
+    tombstone_id: str,
+    origin_node_id: str,
+    origin_tenant: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    origin_entity_uri: str,
+) -> str:
+    """Sign the revocation origin tuple; returns base64url signature (no padding)."""
+    body = canonical_revocation_origin_tuple(
+        revocation_id=revocation_id,
+        tombstone_id=tombstone_id,
+        origin_node_id=origin_node_id,
+        origin_tenant=origin_tenant,
+        origin_allowed_scopes=origin_allowed_scopes,
+        origin_allowed_tenants=origin_allowed_tenants,
+        origin_entity_uri=_require_value(origin_entity_uri, "entity_uri"),
+    )
+    return base64.urlsafe_b64encode(private_key.sign(body)).decode().rstrip("=")
+
+
+def verify_revocation_origin_signature(
+    sig_b64: str,
+    *,
+    revocation_id: str,
+    tombstone_id: str,
+    origin_node_id: str,
+    origin_tenant: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    origin_entity_uri: str,
+    allowed_pubkeys: set[str],
+) -> None:
+    """Verify a revocation origin sig against ANY key in allowed_pubkeys (rotation window).
+
+    Raises OriginSignatureError on any failure. Returning None == verified. Requires
+    ``origin_entity_uri`` to be present/non-empty BEFORE building the tuple (anti-downgrade:
+    there is no legacy field-stripped path to fall back to).
+    """
+    if not sig_b64 or not allowed_pubkeys:
+        raise OriginSignatureError("revocation origin signature or key set missing")
+    # Anti-downgrade (Rev-1): require origin_entity_uri before building the tuple.
+    origin_entity_uri = _require_value(origin_entity_uri, "entity_uri")
+    try:
+        body = canonical_revocation_origin_tuple(
+            revocation_id=revocation_id,
+            tombstone_id=tombstone_id,
+            origin_node_id=origin_node_id,
+            origin_tenant=origin_tenant,
+            origin_allowed_scopes=origin_allowed_scopes,
+            origin_allowed_tenants=origin_allowed_tenants,
+            origin_entity_uri=origin_entity_uri,
+        )
+        sig = base64.urlsafe_b64decode(_pad(sig_b64))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OriginSignatureError(
+            f"malformed revocation origin block or signature: {exc}"
+        ) from exc
+    for pub_b64 in allowed_pubkeys:
+        try:
+            pub = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(_pad(pub_b64)))
+            pub.verify(sig, body)
+            return
+        except (InvalidSignature, ValueError):
+            continue
+    raise OriginSignatureError(
+        "revocation origin signature did not verify against any allowed key"
     )
