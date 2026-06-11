@@ -285,8 +285,13 @@ def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
 
     # SSRF guard (P-CONF-2): never POST to a private/loopback/link-local/IMDS
     # address. Unsafe addresses can never become deliverable, so stop retrying.
+    # GHSA-5p3m-vhh6-9236: https-only by default; http requires the explicit
+    # operator opt-in (STIGMEM_WEBHOOK_ALLOW_INSECURE_HTTP).
     try:
-        assert_safe_url(event["delivery_address"], allow_schemes=frozenset({"https", "http"}))
+        assert_safe_url(
+            event["delivery_address"],
+            allow_schemes=_settings_pkg.settings.webhook_allowed_schemes,
+        )
     except ValueError as exc:
         logger.warning(
             "Webhook delivery blocked for subscription %s: unsafe delivery_address (%s)",

@@ -28,11 +28,32 @@ import pytest
 from fastapi.testclient import TestClient
 
 import stigmem_node.auth as auth_mod
+import stigmem_node.routes.subscriptions as subs_route
 import stigmem_node.settings as settings_module
 import stigmem_node.subscription_delivery as delivery_mod
 from stigmem_node.main import create_app
 from stigmem_node.plugins import PluginManifest
 from stigmem_node.plugins.testing import stigmem_plugins
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_creation_ssrf_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decouple this CRUD/BOLA suite from the creation-time SSRF DNS resolution.
+
+    GHSA-5p3m-vhh6-9236 added a creation-time ``assert_safe_url`` call that does a
+    real DNS lookup. These tests use non-resolving placeholder hosts (b.com /
+    a.com / *.example.com) to exercise CRUD, dedup, and BOLA — not network safety.
+    Replace the guard with a scheme-only check so the https-only contract still
+    holds while private/loopback resolution is not exercised here. Dedicated SSRF
+    coverage lives in test_subscription_webhook_ssrf_creation.py.
+    """
+    from urllib.parse import urlparse
+
+    def _scheme_only(url: str, *, allow_schemes=frozenset({"https"})) -> None:
+        if urlparse(url).scheme not in allow_schemes:
+            raise ValueError(f"Disallowed URL scheme: {urlparse(url).scheme!r}")
+
+    monkeypatch.setattr(subs_route, "assert_safe_url", _scheme_only)
 
 Settings = settings_module.Settings
 create_api_key = auth_mod.create_api_key

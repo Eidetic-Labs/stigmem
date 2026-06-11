@@ -323,6 +323,20 @@ class Settings(BaseSettings):
     # F-AVAIL-3: cap on active subscriptions per (subscriber_identity, tenant).
     # 0 disables the cap. Default is generous; raise for high-fan-out operators.
     max_subscriptions_per_principal: int = 1000
+    # GHSA-5p3m-vhh6-9236: webhook delivery_address must be https by default.
+    # When False (default), a webhook delivery_address is required to be https at
+    # both creation and delivery time. Set True ONLY for local/dev where http
+    # webhooks are needed — this is the advisory's explicit, operator-controlled
+    # opt-in for the insecure http scheme. https-only blocks plaintext exfil and
+    # narrows the SSRF surface.
+    webhook_allow_insecure_http: bool = False
+
+    @property
+    def webhook_allowed_schemes(self) -> frozenset[str]:
+        """Allowed schemes for webhook delivery_address (https-only by default)."""
+        if self.webhook_allow_insecure_http:
+            return frozenset({"https", "http"})
+        return frozenset({"https"})
 
     # -------------------------------------------------------------------------
     # mTLS Federation Transport — Phase 12 (spec §22.1)
