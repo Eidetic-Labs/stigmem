@@ -240,6 +240,15 @@ async def pull_from_peer_once(
                     "Pull from %s: skip fact (scope_not_in_origin_grant)", sender_node_id
                 )
                 continue
+            # 5b. origin.tenant must be inside the origin's OWN signed allowed_tenants
+            #     (ingest/egress symmetry — F-2c-MED-1). The signed origin tuple binds both,
+            #     so a relay can't forge them; the receiver ENFORCES the signed invariant
+            #     fail-closed before mapping the tenant through this relay's tenant_map.
+            if origin["tenant"] not in origin.get("allowed_tenants", []):
+                logger.warning(
+                    "Pull from %s: skip fact (tenant_not_in_origin_grant)", sender_node_id
+                )
+                continue
             # 6. resolve the wire-carried origin tenant to a local tenant (default-deny)
             try:
                 with db() as conn:
@@ -507,6 +516,17 @@ def ingest_tombstone_entry(
                 record.id,
             )
             return TombstoneEntryResult(False, "scope_not_in_origin_grant")
+        # Ingest-side tenant gate (ingest/egress symmetry — F-2c-MED-1): origin.tenant must be
+        # inside the origin's OWN signed allowed_tenants. Both are bound in the signed origin
+        # tuple, so a relay can't forge them; the receiver ENFORCES the signed invariant
+        # fail-closed before mapping the tenant through this relay's tenant_map.
+        if origin.get("tenant", "") not in origin.get("allowed_tenants", []):
+            logger.warning(
+                "Tombstone ingest from %s: skip relayed tombstone %s (tenant_not_in_origin_grant)",
+                sender_node_id,
+                record.id,
+            )
+            return TombstoneEntryResult(False, "tenant_not_in_origin_grant")
         # Resolve the wire-carried origin tenant to a LOCAL tenant (default-deny).
         try:
             with db() as conn:
@@ -838,6 +858,19 @@ def ingest_revocation_entry(
         return RevocationEntryResult(False, "issuer_sig_invalid")
 
     if is_relayed:
+        # Ingest-side tenant gate (ingest/egress symmetry — F-2c-MED-1): origin.tenant must be
+        # inside the origin's OWN signed allowed_tenants. A revocation has no scope, but it DOES
+        # carry origin.tenant + origin.allowed_tenants in the signed tuple — so a relay can't
+        # forge them; the receiver ENFORCES the signed invariant fail-closed before the
+        # default-deny tenant resolve below.
+        if origin.get("tenant", "") not in origin.get("allowed_tenants", []):
+            logger.warning(
+                "Revocation ingest from %s: skip relayed revocation %s "
+                "(tenant_not_in_origin_grant)",
+                sender_node_id,
+                record.id,
+            )
+            return RevocationEntryResult(False, "tenant_not_in_origin_grant")
         # Tenant gate (default-deny): the wire-carried origin tenant must resolve to a LOCAL
         # tenant under this peer's policy or the relay is refused. There is NO scope gate — a
         # revocation has no scope of its own. The resolver's value is discarded: the revocation

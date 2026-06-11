@@ -539,6 +539,8 @@ _V2_INGEST_REASON_HTTP: dict[str, int] = {
     "origin_sig_invalid": status.HTTP_400_BAD_REQUEST,
     "issuer_sig_invalid": status.HTTP_400_BAD_REQUEST,
     "scope_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
+    # F-2c-MED-1: origin.tenant ∉ origin.allowed_tenants (ingest/egress symmetry).
+    "tenant_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
     "tenant_policy_unsafe": status.HTTP_403_FORBIDDEN,
 }
 

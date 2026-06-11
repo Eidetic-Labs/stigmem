@@ -707,6 +707,14 @@ def _verify_origin_and_resolve_tenant(
     # 5. fact scope must be inside the origin's granted scopes
     if fact_scope not in origin.get("allowed_scopes", []):
         return None, {"fact_id": fact_id, "error": "scope_not_in_origin_grant"}
+    # 5b. origin.tenant must be inside the origin's OWN signed allowed_tenants
+    #     (ingest/egress symmetry — F-2c-MED-1). Both origin.tenant and
+    #     origin.allowed_tenants are bound in the signed origin tuple, so a relay can't
+    #     forge them; here the receiver ENFORCES that signed invariant fail-closed before
+    #     mapping the tenant through THIS relay's tenant_map. Without it, a narrowed-grant
+    #     origin could assert a tenant outside its own grant (cross-tenant smuggling).
+    if origin["tenant"] not in origin.get("allowed_tenants", []):
+        return None, {"fact_id": fact_id, "error": "tenant_not_in_origin_grant"}
     # 6. resolve the wire-carried origin tenant to a local tenant (default-deny);
     #    PeerPolicyError bubbles up as a 409 on the push path.
     local_tenant = resolve_origin_tenant_for_peer(peer_row, origin["tenant"], conn)
