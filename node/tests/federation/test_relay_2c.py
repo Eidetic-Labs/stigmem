@@ -13,10 +13,10 @@ from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import stigmem_node.settings as _smod
 from stigmem_node.db import db
 from stigmem_node.federation.origin_signature import sign_origin
 from stigmem_node.models.facts import FactRecord, FactValue
-from stigmem_node.settings import Settings
 
 # ---------------------------------------------------------------------------
 # W2.1 — settings flag
@@ -25,7 +25,7 @@ from stigmem_node.settings import Settings
 
 def test_federation_relay_enabled_defaults_false() -> None:
     """Settings().federation_relay_enabled must default to False (relay is OFF)."""
-    assert Settings().federation_relay_enabled is False
+    assert _smod.Settings().federation_relay_enabled is False
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +294,7 @@ def _set_relay_enabled(value: bool) -> None:
     Settings instance the fed_node fixture patched across federation modules — so
     mutating that instance is sufficient and is restored by the fixture teardown.
     """
-    import stigmem_node.settings as _settings_mod  # noqa: PLC0415
-
-    _settings_mod.settings.federation_relay_enabled = value
+    _smod.settings.federation_relay_enabled = value
 
 
 def _insert_inbound_fact(
@@ -821,10 +819,9 @@ def test_relay_resolve_https_only_rejects_http_nonloopback(client, monkeypatch) 
     """W3.2 (e) HTTPS-ONLY: a relay-origin entity_uri with http scheme (non-loopback) is
     rejected by the safety guard (assert_safe_url https-only)."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    from stigmem_node.settings import settings  # noqa: PLC0415
 
     # federation_insecure OFF (production) so the loopback-dev skip cannot apply.
-    monkeypatch.setattr(settings, "federation_insecure", False)
+    monkeypatch.setattr(_smod.settings, "federation_insecure", False)
     priv = Ed25519PrivateKey.generate()
     http_uri = "http://relay-origin.example"  # non-loopback http
     manifest = _build_manifest(priv, entity_uri=http_uri, entities=[http_uri, _RELAY_NODE])
@@ -947,7 +944,6 @@ def _push(fed_node: FedNode, sender_node_id: str, sender_priv: str, body: dict[s
 def test_relay_ingest_trusted_sender_verifying_origin_is_ingested(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """W3.2 (g): relay ON + relay_trusted sender + verifying relayed origin → INGESTED."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    import stigmem_node.settings as _smod  # noqa: PLC0415
 
     monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
     monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
@@ -977,7 +973,6 @@ def test_relay_ingest_trusted_sender_verifying_origin_is_ingested(fed_node, monk
 def test_relay_ingest_untrusted_sender_is_rejected(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """W3.2 (g): relay ON but sender NOT relay_trusted → relayed fact REJECTED (fail-closed)."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    import stigmem_node.settings as _smod  # noqa: PLC0415
 
     monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
     monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
@@ -1009,7 +1004,6 @@ def test_relay_ingest_scope_outside_origin_grant_is_rejected(fed_node, monkeypat
     """W3.2 (g) INGEST SCOPE GATE: a relayed fact whose scope ∉ origin_allowed_scopes is
     REJECTED even from a relay_trusted sender."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    import stigmem_node.settings as _smod  # noqa: PLC0415
 
     monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
     monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
@@ -1042,7 +1036,6 @@ def test_relay_off_origin_not_sender_rejected_unchanged_2b(fed_node, monkeypatch
     """W3.2 (g) regression: with relay OFF, an origin≠sender fact is REJECTED with the
     unchanged 2b error origin_not_sender (byte-identical direct path)."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    import stigmem_node.settings as _smod  # noqa: PLC0415
 
     monkeypatch.setattr(_smod.settings, "federation_relay_enabled", False)
     monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
@@ -1357,7 +1350,6 @@ def test_relay_ingest_unreachable_pinned_origin_is_ingested(fed_node, monkeypatc
     """W4.2 e2e (pinned): a relayed fact from a relay_trusted sender whose UNREACHABLE origin
     is operator-pinned (and carries a matching manifest) is INGESTED."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    import stigmem_node.settings as _smod  # noqa: PLC0415
 
     monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
     monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
@@ -1393,7 +1385,6 @@ def test_relay_ingest_unreachable_unpinned_origin_is_rejected(fed_node, monkeypa
     """W4.2 e2e (unpinned): the same relayed fact with NO pin + UNREACHABLE origin (and no
     stored binding) is REJECTED fail-closed (origin_unresolvable)."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
-    import stigmem_node.settings as _smod  # noqa: PLC0415
 
     monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
     monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)

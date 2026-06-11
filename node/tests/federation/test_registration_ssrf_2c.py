@@ -31,12 +31,10 @@ def _make_secure_fed_node(
     import stigmem_node.db as db_mod
     import stigmem_node.peer_token as token_mod
     import stigmem_node.routes.wellknown as wk_mod
-    from stigmem_node.auth import create_api_key
-    from stigmem_node.db import apply_migrations
     from stigmem_node.main import create_app
 
     db_file = str(tmp_path) + "/fed_secure_test.db"  # type: ignore[operator]
-    apply_migrations(db_path=db_file)
+    db_mod.apply_migrations(db_path=db_file)
 
     pub_b64, priv_b64 = generate_keypair()
     node_id = "stigmem://test-node-secure"
@@ -85,12 +83,13 @@ def _make_secure_fed_node(
                 mod.settings = test_settings
                 extra.append(mod)
         except ImportError:
+            # Optional modules — best-effort patch target; absence is fine in this test setup.
             pass
 
     token_mod._cached_pub = pub_b64
     token_mod._cached_priv = priv_b64
 
-    raw_key = create_api_key("agent:test-fed-secure", ["read", "write", "federate"])
+    raw_key = auth_mod.create_api_key("agent:test-fed-secure", ["read", "write", "federate"])
 
     app = create_app()
     with TestClient(app, raise_server_exceptions=True) as c:
