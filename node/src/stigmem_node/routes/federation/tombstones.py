@@ -12,7 +12,7 @@ from ...federation.origin_signature import sign_tombstone_origin
 from ...federation.peer_token import _get_privkey_obj
 from ...identity.capability import CapabilityTokenError, verify_token
 from ...identity.trust_store import get_peer_manifest
-from ...lifecycle.tombstones import list_revocations, list_tombstone_rows
+from ...lifecycle.tombstones import list_federatable_tombstones, list_revocations
 from ...models.federation import (
     FederationTombstonesResponseV2,
     OriginBlock,
@@ -159,9 +159,23 @@ def federation_list_tombstones(
             "tombstone poll: trust_mode=off — token signature verification skipped"
         )
 
-    rows = list_tombstone_rows(since=since)
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    # W6.6: gate the egress of RELAYED tombstones by the origin's signed scope/tenant grant
+    # for THIS peer, mirroring the FACT egress gate (replication.pull_facts W2.3). The gate is
+    # built ENTIRELY in SQL (list_federatable_tombstones) so LIMIT applies post-filter. Resolve
+    # the calling peer best-effort from the Authorization header to obtain its allowed_tenants;
+    # when no peer row resolves (e.g. a capability-token-only caller) the relay gate fails
+    # closed to self-only — a relayed tombstone is never re-federated without a known peer's
+    # tenant set. With relay OFF this is byte-identical to the Phase-1 self-only set.
+    peer: dict[str, Any] | None = None
+    peer_auth = _try_peer_token_auth(token_header)
+    if peer_auth is not None:
+        peer = peer_auth[0]
+    rows, has_more = list_federatable_tombstones(
+        peer=peer,
+        relay_enabled=fed_settings.federation_relay_enabled,
+        since=since,
+        limit=limit,
+    )
     revocation_list = list_revocations(since=since)[:limit]
     cursor = rows[-1][0].created_at if rows else None
 

@@ -167,6 +167,99 @@ def list_tombstone_rows(
     return [(_row_to_tombstone(r), _row_origin_fields(r)) for r in rows]
 
 
+def _json_token(value: str) -> str:
+    """Return the canonical JSON-quoted token for *value* (``foo`` → ``"foo"``).
+
+    Mirrors ``routes.federation.replication._json_token`` (W2.3). Stored
+    ``origin_allowed_scopes`` / ``origin_allowed_tenants`` are ``json.dumps(sorted([...]))``
+    TEXT, so each element appears verbatim as a JSON string literal; searching for the
+    quoted token makes a ``LIKE '%…%'`` membership test exact (the surrounding quotes
+    prevent a prefix/substring false match). Postgres-safe: a portable ``LIKE`` against the
+    canonical text, NO ``json_each``.
+    """
+    import json as _json
+
+    return _json.dumps(value)
+
+
+def list_federatable_tombstones(
+    *,
+    peer: dict[str, Any] | None,
+    relay_enabled: bool,
+    since: str | None = None,
+    limit: int,
+) -> tuple[list[tuple[TombstoneRecord, dict[str, Any]]], bool]:
+    """Federation-egress variant of ``list_tombstone_rows`` with the W6.6 relay gate.
+
+    Mirrors the FACT egress gate (``replication.pull_facts`` W2.3): a RELAYED tombstone
+    (``received_from IS NOT NULL``) may only re-federate to THIS peer when the origin's
+    signed grant permits it, enforced ENTIRELY in SQL so ``LIMIT`` applies post-filter (no
+    Python post-filtering → no short pages / skipped cursor). The egress WHERE is:
+
+    * relay OFF → ``received_from IS NULL`` (Phase-1 identical; byte-for-byte the self-only
+      set the admin path always returned).
+    * relay ON →
+      ``received_from IS NULL OR (received_from IS NOT NULL AND <scope_in_origin>
+        AND (<tenant_overlap>))`` where
+        - ``<scope_in_origin>`` = the tombstone's ``scope`` column is a member of its
+          stored ``origin_allowed_scopes`` JSON — the portable ``LIKE '%"' || scope || '"%'``
+          column-concat technique (no param, PG-safe).
+        - ``<tenant_overlap>`` = ``origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅`` — an
+          OR-of-LIKE over the peer's known tenant set, each bound as ``json.dumps(tenant)``.
+      A peer authorised for no tenant (or no resolvable peer row) ⇒ relay can never apply ⇒
+      self-only (fail-closed).
+
+    Returns ``(rows, has_more)`` where ``rows`` is at most ``limit`` ``(TombstoneRecord,
+    origin_fields)`` pairs (``has_more`` is computed by over-reading one row, mirroring the
+    fact pull route). The admin ``list_tombstones`` / ``list_tombstone_rows`` paths are
+    untouched.
+    """
+    from ..routes.federation.common import _allowed_output_tenants  # noqa: PLC0415
+
+    relay_clause: str
+    relay_params: list[Any] = []
+    if relay_enabled and peer is not None:
+        peer_tenants = _allowed_output_tenants(peer)
+        if peer_tenants:
+            # scope ∈ origin_allowed_scopes: ``scope`` is a COLUMN (not a bind value), so the
+            # JSON quotes are added in SQL via ``||`` concat (portable: SQLite + Postgres). No
+            # param. The stored grant is the canonical sorted-JSON text, so the scope appears
+            # verbatim as ``"scope"``.
+            scope_in_origin = "origin_allowed_scopes LIKE '%\"' || scope || '\"%'"
+            # origin_allowed_tenants ∩ peer.allowed_tenants ≠ ∅: OR over the peer's known
+            # tenant set (sorted for deterministic SQL + param order). Each tenant is bound
+            # as the json-quoted token ``"tenant"`` so the LIKE match is exact.
+            tenant_overlap = " OR ".join(
+                "origin_allowed_tenants LIKE '%' || ? || '%'" for _ in peer_tenants
+            )
+            relay_clause = (
+                "(received_from IS NULL"
+                f" OR (received_from IS NOT NULL AND {scope_in_origin}"
+                f" AND ({tenant_overlap})))"
+            )
+            # Params, in the EXACT order their ? appears in relay_clause: one per peer tenant
+            # for tenant_overlap (sorted to match the clause order). scope_in_origin carries
+            # NO param (column-only concat).
+            relay_params.extend(_json_token(t) for t in sorted(peer_tenants))
+        else:
+            relay_clause = "received_from IS NULL"
+    else:
+        relay_clause = "received_from IS NULL"  # do not re-federate inbound tombstones
+
+    query = f"SELECT * FROM tombstones WHERE {relay_clause}"  # noqa: S608  # nosec B608 — clause is a literal fragment; values in params
+    params: list[Any] = list(relay_params)
+    if since is not None:
+        query += " AND created_at > ?"
+        params.append(since)
+    query += " ORDER BY created_at LIMIT ?"
+    params.append(limit + 1)
+    with db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return [(_row_to_tombstone(r), _row_origin_fields(r)) for r in rows], has_more
+
+
 def _row_to_revocation(row: Any) -> TombstoneRevocationRecord:
     return TombstoneRevocationRecord(
         id=row["id"],
