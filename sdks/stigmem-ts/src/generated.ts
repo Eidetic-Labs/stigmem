@@ -2159,6 +2159,8 @@ export interface components {
             allowed_scopes: string[];
             /** Allowed Tenants */
             allowed_tenants: string[];
+            /** Entity Uri */
+            entity_uri: string;
             /** Node Id */
             node_id: string;
             /** Tenant */

@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import Header, HTTPException, Query, Request
 
-from ...db import db, get_or_create_node_id
+from ...db import db, get_node_entity_uri, get_or_create_node_id
 from ...federation.federation_ingest import (
     FederationHlcSkewError,
     FederationIntegrityError,
@@ -62,6 +62,7 @@ def build_origin_entry(
     row: Any,
     *,
     own_node_id: str,
+    own_entity_uri: str,
     pull_tenant: str,
     priv: Any,
 ) -> tuple[OriginBlock, str] | None:
@@ -71,13 +72,16 @@ def build_origin_entry(
 
     * **Self-originated** (``record.received_from is None``): sign a FRESH origin
       block from THIS node's identity — unchanged 2b behaviour. A downstream peer
-      verifies it against THIS node's manifest.
+      verifies it against THIS node's manifest. The origin block's ``entity_uri`` is
+      THIS node's own ``own_entity_uri`` (Phase 2c W3.1), bound into the signature.
     * **Relayed** (``received_from`` not None): forward the STORED origin block +
       STORED ``origin_sig`` VERBATIM. Re-signing here would destroy the original
       origin attribution — a downstream node must verify against the ORIGIN's
       manifest, not this relay's. The stored ``origin_tenant`` / ``origin_node_id``
-      / ``origin_allowed_scopes`` / ``origin_allowed_tenants`` / ``origin_sig``
-      columns are read off the DB *row* because FactRecord does not surface them.
+      / ``origin_allowed_scopes`` / ``origin_allowed_tenants`` / ``origin_entity_uri``
+      / ``origin_sig`` columns are read off the DB *row* because FactRecord does not
+      surface them. The forwarded ``entity_uri`` is the STORED origin entity_uri so the
+      forwarded signature still verifies against the ORIGIN's manifest (W3.1).
 
     Returns ``None`` (skip + warn) when the record is not emittable: a relayed fact
     with no stored ``origin_sig`` cannot be attributed and must not be forwarded.
@@ -89,6 +93,7 @@ def build_origin_entry(
             node_id=own_node_id,
             allowed_scopes=(record.origin_allowed_scopes or [record.scope]),
             allowed_tenants=[pull_tenant],
+            entity_uri=own_entity_uri,  # W3.1: bind THIS node's entity_uri into the sig
         )
         sig = sign_origin(
             priv,
@@ -106,6 +111,18 @@ def build_origin_entry(
             "federation relay skip: relayed fact %s has no stored origin_sig", record.id
         )
         return None
+    # W3.1: the forwarded entity_uri MUST be the STORED origin entity_uri (the value bound
+    # into the original signature), so the forwarded sig still verifies against the ORIGIN's
+    # manifest. A relayed fact stored without an origin_entity_uri (pre-v2.1 origin) cannot
+    # produce a v2.1 origin block — skip it (fail-safe; it is simply not relayable).
+    stored_entity_uri = row["origin_entity_uri"]
+    if not stored_entity_uri:
+        logger.warning(
+            "federation relay skip: relayed fact %s has no stored origin_entity_uri "
+            "(pre-v2.1 origin, not relayable)",
+            record.id,
+        )
+        return None
     stored_scopes_raw = row["origin_allowed_scopes"]
     stored_tenants_raw = row["origin_allowed_tenants"]
     origin = OriginBlock(
@@ -113,6 +130,7 @@ def build_origin_entry(
         node_id=(row["origin_node_id"] or record.received_from),
         allowed_scopes=(json.loads(stored_scopes_raw) if stored_scopes_raw else [record.scope]),
         allowed_tenants=(json.loads(stored_tenants_raw) if stored_tenants_raw else []),
+        entity_uri=stored_entity_uri,
     )
     return origin, stored_sig
 
@@ -304,6 +322,11 @@ def pull_facts(
     # signature over (fact_id, cid, origin, valid_until).
     priv = _get_privkey_obj()
     own_node_id = get_or_create_node_id()
+    # W3.1: this node's own entity_uri is bound into every self-originated origin block.
+    # get_node_entity_uri() returns settings.entity_uri or settings.node_url (never empty
+    # when federation is enabled, since node_url is required), so a self-originated v2.1
+    # signature is always producible.
+    own_entity_uri = get_node_entity_uri()
     # F-FED-2c W2.2: relayed facts (received_from not NULL) forward their STORED
     # origin block + origin_sig verbatim; those columns are NOT on FactRecord, so
     # look them up by id off the original row (do NOT zip(records, rows) — the
@@ -318,6 +341,7 @@ def pull_facts(
             record,
             rows_by_id[record.id],
             own_node_id=own_node_id,
+            own_entity_uri=own_entity_uri,
             pull_tenant=pull_tenant,
             priv=priv,
         )
@@ -663,6 +687,7 @@ def _push_fact_with_cap_token(
             origin_tenant=origin["tenant"],
             origin_allowed_tenants=origin["allowed_tenants"],
             origin_sig=origin_sig,
+            origin_entity_uri=origin["entity_uri"],
             identity_strength_boost=0.5,  # §19.4.2 boost for valid capability token
         )
         return True, None
@@ -760,6 +785,7 @@ def _push_fact_with_peer_token(
             origin_tenant=origin["tenant"],
             origin_allowed_tenants=origin["allowed_tenants"],
             origin_sig=origin_sig,
+            origin_entity_uri=origin["entity_uri"],
         )
         return True, None
     except FederationHlcSkewError:

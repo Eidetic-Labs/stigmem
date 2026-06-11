@@ -56,6 +56,10 @@ class OriginBlock(BaseModel):
     node_id: str
     allowed_scopes: list[str]
     allowed_tenants: list[str]
+    # Phase 2c W3.1: the origin's published entity_uri, bound INTO the signed origin
+    # tuple (v2.1). A receiver fetches/verifies the origin's manifest by this uri, so a
+    # relay cannot lie about which origin a relayed fact came from. Mandatory in v2.1.
+    entity_uri: str
 
 
 class FederationEnvelopeEntry(BaseModel):

@@ -74,7 +74,7 @@ def _keypair():
 
 def _origin_block(node_id="stigmem:node:o1", tenant="acme"):
     return {"tenant": tenant, "node_id": node_id, "allowed_scopes": ["public"],
-            "allowed_tenants": [tenant]}
+            "allowed_tenants": [tenant], "entity_uri": "https://o1.example"}
 
 
 def test_sign_and_verify_roundtrip():
@@ -151,10 +151,12 @@ def test_empty_sig_or_keyset_rejected():
 def test_canonical_tuple_is_order_insensitive():
     a = canonical_origin_tuple(fact_id=_FID, cid=_CID, origin_tenant="t", origin_node_id="n",
                                origin_allowed_scopes=["team", "public"],
-                               origin_allowed_tenants=["b", "a"], valid_until=None)
+                               origin_allowed_tenants=["b", "a"], valid_until=None,
+                               entity_uri="https://o.example")
     b = canonical_origin_tuple(fact_id=_FID, cid=_CID, origin_tenant="t", origin_node_id="n",
                                origin_allowed_scopes=["public", "team"],
-                               origin_allowed_tenants=["a", "b"], valid_until=None)
+                               origin_allowed_tenants=["a", "b"], valid_until=None,
+                               entity_uri="https://o.example")
     assert a == b
 
 
@@ -451,7 +453,8 @@ def test_bound_peer_envelope_verifies_end_to_end(client):
                 "value": {"type": "string", "v": "x"}, "source": "stigmem:node:b1",
                 "scope": "public", "timestamp": "2026-06-01T00:00:00Z", "confidence": 1.0}],
         origin={"tenant": "default", "node_id": "stigmem:node:b1",
-                "allowed_scopes": ["public"], "allowed_tenants": ["default"]},
+                "allowed_scopes": ["public"], "allowed_tenants": ["default"],
+                "entity_uri": "https://b1.example"},
     )
     assert env["v"] == 2
     entry = env["facts"][0]

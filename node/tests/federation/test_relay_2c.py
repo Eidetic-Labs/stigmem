@@ -68,6 +68,8 @@ _PULL_TENANT = "default"
 # The ORIGIN node (the upstream that first asserted the relayed fact).
 _ORIGIN_NODE_ID = "stigmem:node:upstream-origin"
 _ORIGIN_TENANT = "acme"
+_ORIGIN_ENTITY_URI = "https://upstream-origin.example"
+_OWN_ENTITY_URI = "https://relay-self.example"
 
 
 def _self_record() -> FactRecord:
@@ -115,6 +117,7 @@ def _stored_origin_row(
     origin_node_id: str | None = _ORIGIN_NODE_ID,
     origin_allowed_scopes: list[str] | None = None,
     origin_allowed_tenants: list[str] | None = None,
+    origin_entity_uri: str | None = _ORIGIN_ENTITY_URI,
 ) -> dict[str, Any]:
     """A DB-row stand-in carrying the stored origin_* columns FactRecord omits."""
     return {
@@ -128,6 +131,7 @@ def _stored_origin_row(
             json.dumps(origin_allowed_tenants) if origin_allowed_tenants is not None else None
         ),
         "origin_sig": origin_sig,
+        "origin_entity_uri": origin_entity_uri,
     }
 
 
@@ -140,13 +144,19 @@ def test_self_originated_emit_signs_fresh_with_own_identity() -> None:
     row = _stored_origin_row(record, origin_sig=None, origin_node_id=None, origin_tenant=None)
 
     result = build_origin_entry(
-        record, row, own_node_id=_OWN_NODE_ID, pull_tenant=_PULL_TENANT, priv=priv
+        record,
+        row,
+        own_node_id=_OWN_NODE_ID,
+        own_entity_uri=_OWN_ENTITY_URI,
+        pull_tenant=_PULL_TENANT,
+        priv=priv,
     )
     assert result is not None
     origin, sig = result
     assert origin.node_id == _OWN_NODE_ID  # this node, not an upstream
     assert origin.tenant == _PULL_TENANT
     assert origin.allowed_tenants == [_PULL_TENANT]
+    assert origin.entity_uri == _OWN_ENTITY_URI  # W3.1: this node's own entity_uri
     # the sig is freshly computed over THIS node's origin block
     assert record.cid is not None
     expected = sign_origin(
@@ -174,7 +184,12 @@ def test_relayed_emit_forwards_stored_origin_block_verbatim() -> None:
     )
 
     result = build_origin_entry(
-        record, row, own_node_id=_OWN_NODE_ID, pull_tenant=_PULL_TENANT, priv=priv
+        record,
+        row,
+        own_node_id=_OWN_NODE_ID,
+        own_entity_uri=_OWN_ENTITY_URI,
+        pull_tenant=_PULL_TENANT,
+        priv=priv,
     )
     assert result is not None
     origin, sig = result
@@ -184,6 +199,9 @@ def test_relayed_emit_forwards_stored_origin_block_verbatim() -> None:
     assert origin.tenant == _ORIGIN_TENANT
     assert origin.allowed_scopes == ["public"]
     assert origin.allowed_tenants == ["acme"]
+    # W3.1: forwarded entity_uri is the STORED upstream entity_uri, NOT this relay's
+    assert origin.entity_uri == _ORIGIN_ENTITY_URI
+    assert origin.entity_uri != _OWN_ENTITY_URI
     # the stored sig is forwarded verbatim (NOT re-signed by this node)
     assert sig == stored_sig
     assert record.cid is not None
@@ -209,7 +227,42 @@ def test_relayed_emit_without_stored_sig_is_skipped(caplog) -> None:  # type: ig
 
     with caplog.at_level(logging.WARNING):
         result = build_origin_entry(
-            record, row, own_node_id=_OWN_NODE_ID, pull_tenant=_PULL_TENANT, priv=priv
+            record,
+            row,
+            own_node_id=_OWN_NODE_ID,
+            own_entity_uri=_OWN_ENTITY_URI,
+            pull_tenant=_PULL_TENANT,
+            priv=priv,
+        )
+    assert result is None
+    assert any(record.id in r.getMessage() for r in caplog.records)
+
+
+def test_relayed_emit_without_stored_entity_uri_is_skipped(caplog) -> None:  # type: ignore[no-untyped-def]
+    """W3.1: a relayed fact missing its stored origin_entity_uri (pre-v2.1 origin) is
+    SKIPPED (None) + warned — it cannot produce a v2.1 origin block and is not relayable."""
+    import logging  # noqa: PLC0415
+
+    from stigmem_node.routes.federation.replication import build_origin_entry  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    record = _relayed_record()
+    row = _stored_origin_row(
+        record,
+        origin_sig="STORED-SIG",
+        origin_allowed_scopes=["public"],
+        origin_allowed_tenants=["acme"],
+        origin_entity_uri=None,  # pre-v2.1: no stored entity_uri
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = build_origin_entry(
+            record,
+            row,
+            own_node_id=_OWN_NODE_ID,
+            own_entity_uri=_OWN_ENTITY_URI,
+            pull_tenant=_PULL_TENANT,
+            priv=priv,
         )
     assert result is None
     assert any(record.id in r.getMessage() for r in caplog.records)
@@ -275,8 +328,9 @@ def _insert_inbound_fact(
                (id, entity, relation, value_type, value_v, source, timestamp,
                 confidence, scope, hlc, tenant_id, received_from,
                 origin_node_id, origin_allowed_scopes, re_federation_blocked,
-                origin_tenant, origin_allowed_tenants, origin_sig, cid)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                origin_tenant, origin_allowed_tenants, origin_sig, cid,
+                origin_entity_uri)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 entity,
@@ -297,6 +351,7 @@ def _insert_inbound_fact(
                 json.dumps(sorted(origin_allowed_tenants)),
                 f"STORED-SIG-{fact_id}",
                 f"bafycid{fact_id[:8]}",
+                _ORIGIN_ENTITY_URI,  # W3.1: stored origin entity_uri (forwarded at relay)
             ),
         )
         conn.commit()

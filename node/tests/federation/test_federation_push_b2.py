@@ -244,6 +244,7 @@ def _v2_body(issuer: str, fact: dict, *, allowed_scopes: list[str] | None = None
         "node_id": issuer,
         "allowed_scopes": allowed_scopes if allowed_scopes is not None else [fact["scope"]],
         "allowed_tenants": ["default"],
+        "entity_uri": issuer,
     }
     entry = make_v2_entry(_priv_from_settings(), fact=fact, origin=origin)
     return {"v": 2, "facts": [entry]}
@@ -404,6 +405,7 @@ class TestCapTokenFactBranches:
             "node_id": issuer,
             "allowed_scopes": ["public"],
             "allowed_tenants": ["default"],
+            "entity_uri": issuer,
         }
         entry = {"fact": fact_no_id, "origin": origin, "origin_sig": "x"}
 

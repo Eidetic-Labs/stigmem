@@ -225,6 +225,7 @@ async def pull_from_peer_once(
                     origin_tenant=origin["tenant"],
                     origin_allowed_tenants=origin["allowed_tenants"],
                     origin_sig=origin_sig,
+                    origin_entity_uri=origin["entity_uri"],
                 )
             except FederationIntegrityError as exc:
                 logger.warning(

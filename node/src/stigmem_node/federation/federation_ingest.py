@@ -263,6 +263,7 @@ def ingest_fact(
     origin_tenant: str | None = None,
     origin_allowed_tenants: list[str] | None = None,
     origin_sig: str | None = None,
+    origin_entity_uri: str | None = None,
     identity_strength_boost: float | None = None,
 ) -> bool:
     """Idempotently ingest a federated fact.
@@ -344,6 +345,10 @@ def ingest_fact(
     eff_origin_tenants: str | None = (
         json.dumps(sorted(origin_allowed_tenants)) if origin_allowed_tenants is not None else None
     )
+    # Phase 2c W3.1 (Migration 046): persist the verified origin entity_uri (the value bound
+    # into the v2.1 signed origin tuple). NULL for local-origin / pre-v2.1 facts. A relayed
+    # fact forwards this stored value so its origin_sig verifies against the ORIGIN's manifest.
+    eff_origin_entity_uri: str | None = origin_entity_uri
     # company-scope facts: re-federation is blocked by default (§6.8.2)
     re_fed_blocked = 1 if scope == "company" else 0
 
@@ -401,8 +406,8 @@ def ingest_fact(
                 origin_node_id, origin_allowed_scopes, re_federation_blocked,
                 source_trust, quarantine_garden_id, quarantine_status,
                 quarantine_reason, interpret_as, cid, tenant_id,
-                origin_tenant, origin_allowed_tenants, origin_sig)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                origin_tenant, origin_allowed_tenants, origin_sig, origin_entity_uri)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 fact["entity"],
@@ -429,6 +434,7 @@ def ingest_fact(
                 origin_tenant,
                 eff_origin_tenants,
                 origin_sig,
+                eff_origin_entity_uri,
             ),
         )
 

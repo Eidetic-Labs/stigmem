@@ -2103,6 +2103,10 @@
             "title": "Allowed Tenants",
             "type": "array"
           },
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
           "node_id": {
             "title": "Node Id",
             "type": "string"
@@ -2116,7 +2120,8 @@
           "tenant",
           "node_id",
           "allowed_scopes",
-          "allowed_tenants"
+          "allowed_tenants",
+          "entity_uri"
         ],
         "title": "OriginBlock",
         "type": "object"
