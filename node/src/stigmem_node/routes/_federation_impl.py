@@ -117,8 +117,16 @@ async def register_peer_impl(
         )
 
     # Fetch peer's /.well-known/stigmem to retrieve their published pubkey (§5.6 step 1–3)
+    # SSRF guard (NF-2): assert_safe_url runs before the GET so the connection is never
+    # opened for private/internal addresses.  Skipped only when federation_insecure=True
+    # (dev/test mode where the operator has explicitly opted out of URL safety checks).
+    # In production (federation_insecure=False) only https:// peer URLs are accepted.
+    from . import federation as _fed_mod
+
     fetched_pubkey: str | None = None
     try:
+        if not _fed_mod.settings.federation_insecure:
+            assert_safe_url(req.node_url, allow_schemes=frozenset({"https"}))
         async with _make_federation_client() as client:
             wk_resp = await client.get(f"{req.node_url}/.well-known/stigmem")
         if wk_resp.status_code == 200:
@@ -247,10 +255,10 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
         # without the skip, assert_safe_url rejects the loopback URL, the binding
         # never fires, resolve_origin_key fails, and no v2 fact federates between
         # loopback nodes. In production (federation_insecure off) the guard is
-        # always enforced. Note: the registration-time well-known fetch in
-        # _make_federation_client is unguarded (no assert_safe_url at all) — it is
-        # NOT flag+loopback-gated like this fetch, so do not treat the two as the
-        # same mechanism.
+        # always enforced. Note: the registration-time well-known fetch
+        # (register_peer_impl, NF-2) is guarded by assert_safe_url under
+        # federation_insecure ALONE (https-only) — NOT flag+loopback-gated like
+        # this fetch, so do not treat the two as the same mechanism.
         _loopback_dev = _fed.settings.federation_insecure and node_url_is_loopback(node_url)
         if not _loopback_dev:
             assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
