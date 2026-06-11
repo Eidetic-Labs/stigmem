@@ -6,9 +6,11 @@ inbound fact re-uses an id that already exists locally with a DIFFERENT cid, the
 ingest must be REJECTED (audited) and the existing row left untouched.
 
 Same-cid re-pull remains a no-op (idempotent pull; spec §5.8).
-Global guard: `facts.id` is a GLOBAL PRIMARY KEY (one fact = one tenant), so the
-collision check is global — a cross-tenant same-id/different-cid is still a collision
-and must be caught cleanly as a FederationIntegrityError (not a raw sqlite UNIQUE error).
+Global guard: `facts.id` is a GLOBAL PRIMARY KEY (one id = one row, globally across
+all tenants), so the collision check is global — a cross-tenant same-id/different-cid
+is still a collision and must be caught cleanly as a FederationIntegrityError (not a
+raw sqlite UNIQUE error).  The production dedup SELECT is ``WHERE id = ?`` with no
+tenant_id filter; the typed guard fires before the raw UNIQUE constraint does.
 """
 
 from __future__ import annotations
@@ -96,6 +98,14 @@ def _seed_row(
 
 
 def _stored_cid(fact_id: str, tenant_id: str = TENANT) -> str | None:
+    """Read back the CID of a seeded row for assertion purposes.
+
+    NOTE: this is a TEST-ONLY read-back helper, not the production dedup SELECT.
+    The production collision guard uses ``WHERE id = ?`` globally (no tenant_id
+    filter) — see ``FederationIntegrityError`` in ``federation_ingest``.  The
+    tenant_id filter here is only to disambiguate which seed row to read back in
+    the cross-tenant test scenario where the same id is attempted in two tenants.
+    """
     with db() as conn:
         row = conn.execute(
             "SELECT cid FROM facts WHERE id = ? AND tenant_id = ?",
@@ -105,6 +115,12 @@ def _stored_cid(fact_id: str, tenant_id: str = TENANT) -> str | None:
 
 
 def _stored_value(fact_id: str, tenant_id: str = TENANT) -> str | None:
+    """Read back the stored value of a seeded row for assertion purposes.
+
+    Same NOTE as ``_stored_cid``: test-only read-back helper.  The production
+    dedup SELECT is global (``WHERE id = ?``); the tenant_id filter here is only
+    for test-isolation read-back.
+    """
     with db() as conn:
         row = conn.execute(
             "SELECT value_v FROM facts WHERE id = ? AND tenant_id = ?",
