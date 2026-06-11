@@ -14,10 +14,13 @@ propagation-grant check. Static text checks (cheap, no imports of the app):
 
   2. lifecycle/tombstones.py  — tombstone + revocation federation-egress (W6.6, Rev-2):
        list_federatable_tombstones  AND  list_federatable_revocations
-       relay_enabled: bool  (the relay gate parameter present on both functions)
-       _allowed_output_tenants  AND  origin_allowed_tenants LIKE
-     Confirms both federatable-egress functions exist and carry the relay gate +
-     tenant-intersection enforcement.
+       if relay_enabled and peer is not None:  (the LIVE gate condition, not just the param)
+       _allowed_output_tenants(peer  (the CALL with argument paren, not just the import)
+       AND  origin_allowed_tenants LIKE
+     Confirms both federatable-egress functions exist, the live gate condition is
+     present, the tenant resolver is called (not merely imported), and the
+     tenant-intersection SQL enforcement is present.  All five must be present;
+     import-only + param-only remnants of a stripped gate do NOT satisfy markers 3+4.
 """
 from __future__ import annotations
 
@@ -69,11 +72,19 @@ def check_tombstones_relay_markers(text: str) -> bool:
     """Tombstone + revocation federatable-egress relay-gate invariant (W6.6, Rev-2).
 
     Five stable markers must all be present:
-    1. ``list_federatable_tombstones``  — the tombstone federation-egress function.
-    2. ``list_federatable_revocations``  — the revocation federation-egress function.
-    3. ``relay_enabled: bool``           — the relay-gate parameter on both functions.
-    4. ``_allowed_output_tenants``       — the peer tenant-set resolver import/call.
-    5. ``origin_allowed_tenants LIKE``   — the tenant-overlap SQL check.
+    1. ``list_federatable_tombstones``          — the tombstone federation-egress function.
+    2. ``list_federatable_revocations``         — the revocation federation-egress function.
+    3. ``if relay_enabled and peer is not None:`` — the LIVE gate condition (absent if gate
+       body is stripped; NOT matched by a bare param declaration or import line).
+    4. ``_allowed_output_tenants(peer``         — the peer tenant-set resolver CALL (with
+       the argument paren), so the import line ``from … import _allowed_output_tenants``
+       does NOT satisfy this marker; only the live call site does.
+    5. ``origin_allowed_tenants LIKE``          — the tenant-overlap SQL check.
+
+    Previous markers 3+4 were ``relay_enabled: bool`` (param declaration) and
+    ``_allowed_output_tenants`` (without paren) — both survive a refactor that strips the
+    gate body while leaving the import + param untouched, causing a false pass.  The new
+    markers pin the LIVE path only: a stripped gate body fails this check.
 
     Callable on stripped/fake text for the teeth tests.
     """
@@ -82,8 +93,8 @@ def check_tombstones_relay_markers(text: str) -> bool:
         [
             "list_federatable_tombstones",
             "list_federatable_revocations",
-            "relay_enabled: bool",
-            "_allowed_output_tenants",
+            "if relay_enabled and peer is not None:",
+            "_allowed_output_tenants(peer",
             "origin_allowed_tenants LIKE",
         ],
     )
@@ -121,8 +132,8 @@ def check() -> int:
             for m in [
                 "list_federatable_tombstones",
                 "list_federatable_revocations",
-                "relay_enabled: bool",
-                "_allowed_output_tenants",
+                "if relay_enabled and peer is not None:",
+                "_allowed_output_tenants(peer",
                 "origin_allowed_tenants LIKE",
             ]
             if m not in tomb

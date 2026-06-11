@@ -42,17 +42,39 @@ def test_relay_egress_detects_missing_tenant_intersection_in_replication():
     assert mod.check_replication_relay_markers(stripped) is False
 
 
-def test_relay_egress_detects_missing_relay_flag_in_tombstones():
-    """Teeth: tombstones.py text missing federation_relay_enabled must fail the guard."""
+def test_relay_egress_detects_stripped_tombstone_gate_body():
+    """Teeth: tombstones.py text with import + param intact but live gate body removed must fail.
+
+    The previous markers ``relay_enabled: bool`` (param declaration) and
+    ``_allowed_output_tenants`` (without call paren) would pass even if the gate body
+    ``if relay_enabled and peer is not None:`` + ``_allowed_output_tenants(peer)`` were
+    deleted — the import line and function signature survive a stripped body.
+
+    This test constructs EXACTLY that stripped variant (import present, param declaration
+    present, but the live gate condition and the call are absent) and asserts the guard
+    now FAILS.  The new markers ``if relay_enabled and peer is not None:`` and
+    ``_allowed_output_tenants(peer`` exist ONLY on the live path.
+    """
     mod = _load()
+    # Simulate: import line is present, param declaration is present, but the gate body
+    # (``if relay_enabled and peer is not None:`` + ``_allowed_output_tenants(peer)``) was
+    # stripped by a hypothetical refactor. The previous guard would have PASSED this.
     stripped = (
-        "list_federatable_tombstones\n"
-        "list_federatable_revocations\n"
-        "_allowed_output_tenants\n"
-        "origin_allowed_tenants\n"
-        # relay_enabled param that gates the clause is absent
+        "from ..routes.federation.common import _allowed_output_tenants  # noqa\n"
+        "def list_federatable_tombstones(*, peer, relay_enabled: bool, since, limit):\n"
+        "    '''docstring'''\n"
+        "    pass\n"
+        "def list_federatable_revocations(*, peer, relay_enabled: bool, since, limit):\n"
+        "    '''docstring'''\n"
+        "    pass\n"
+        "# origin_allowed_tenants LIKE '%'\n"
+        # Conspicuously absent: ``if relay_enabled and peer is not None:``
+        #                   and ``_allowed_output_tenants(peer``
     )
-    assert mod.check_tombstones_relay_markers(stripped) is False
+    assert mod.check_tombstones_relay_markers(stripped) is False, (
+        "A stripped gate body (import + param present, live gate condition absent) "
+        "must FAIL the guard — not pass it"
+    )
 
 
 def test_markers_present_detects_missing_marker():
