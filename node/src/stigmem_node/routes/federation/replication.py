@@ -43,6 +43,66 @@ from .common import (
 )
 
 
+def build_origin_entry(
+    record: Any,
+    row: Any,
+    *,
+    own_node_id: str,
+    pull_tenant: str,
+    priv: Any,
+) -> tuple[OriginBlock, str] | None:
+    """Build the (OriginBlock, origin_sig) pair emitted for one egress record.
+
+    Two cases (F-FED-2c W2.2):
+
+    * **Self-originated** (``record.received_from is None``): sign a FRESH origin
+      block from THIS node's identity — unchanged 2b behaviour. A downstream peer
+      verifies it against THIS node's manifest.
+    * **Relayed** (``received_from`` not None): forward the STORED origin block +
+      STORED ``origin_sig`` VERBATIM. Re-signing here would destroy the original
+      origin attribution — a downstream node must verify against the ORIGIN's
+      manifest, not this relay's. The stored ``origin_tenant`` / ``origin_node_id``
+      / ``origin_allowed_scopes`` / ``origin_allowed_tenants`` / ``origin_sig``
+      columns are read off the DB *row* because FactRecord does not surface them.
+
+    Returns ``None`` (skip + warn) when the record is not emittable: a relayed fact
+    with no stored ``origin_sig`` cannot be attributed and must not be forwarded.
+    """
+    if record.received_from is None:
+        # Self-originated: fresh origin block for THIS node + fresh signature.
+        origin = OriginBlock(
+            tenant=pull_tenant,
+            node_id=own_node_id,
+            allowed_scopes=(record.origin_allowed_scopes or [record.scope]),
+            allowed_tenants=[pull_tenant],
+        )
+        sig = sign_origin(
+            priv,
+            fact_id=record.id,
+            cid=record.cid,
+            origin=origin.model_dump(),
+            valid_until=record.valid_until,
+        )
+        return origin, sig
+
+    # Relayed: forward the stored origin block + stored sig verbatim (no re-sign).
+    stored_sig = row["origin_sig"]
+    if not stored_sig:
+        logger.warning(
+            "federation relay skip: relayed fact %s has no stored origin_sig", record.id
+        )
+        return None
+    stored_scopes_raw = row["origin_allowed_scopes"]
+    stored_tenants_raw = row["origin_allowed_tenants"]
+    origin = OriginBlock(
+        tenant=(row["origin_tenant"] or pull_tenant),
+        node_id=(row["origin_node_id"] or record.received_from),
+        allowed_scopes=(json.loads(stored_scopes_raw) if stored_scopes_raw else [record.scope]),
+        allowed_tenants=(json.loads(stored_tenants_raw) if stored_tenants_raw else []),
+    )
+    return origin, stored_sig
+
+
 @router.get("/v1/federation/facts", response_model=FederationFactsResponse)
 def pull_facts(
     peer_and_token: PeerTokenDep,
@@ -169,24 +229,26 @@ def pull_facts(
     # signature over (fact_id, cid, origin, valid_until).
     priv = _get_privkey_obj()
     own_node_id = get_or_create_node_id()
+    # F-FED-2c W2.2: relayed facts (received_from not NULL) forward their STORED
+    # origin block + origin_sig verbatim; those columns are NOT on FactRecord, so
+    # look them up by id off the original row (do NOT zip(records, rows) — the
+    # filter/sign chains reassign ``records``, which is the 2b misalignment hazard).
+    rows_by_id = {r["id"]: r for r in rows}
     entries: list[FederationEnvelopeEntry] = []
     for record in records:
         if record.cid is None:
             logger.warning("federation egress skip: fact %s has no cid", record.id)
             continue
-        origin = OriginBlock(
-            tenant=pull_tenant,
-            node_id=own_node_id,
-            allowed_scopes=(record.origin_allowed_scopes or [record.scope]),
-            allowed_tenants=[pull_tenant],
+        built = build_origin_entry(
+            record,
+            rows_by_id[record.id],
+            own_node_id=own_node_id,
+            pull_tenant=pull_tenant,
+            priv=priv,
         )
-        sig = sign_origin(
-            priv,
-            fact_id=record.id,
-            cid=record.cid,
-            origin=origin.model_dump(),
-            valid_until=record.valid_until,
-        )
+        if built is None:
+            continue
+        origin, sig = built
         entries.append(FederationEnvelopeEntry(fact=record, origin=origin, origin_sig=sig))
 
     FEDERATION_EGRESS.labels(peer_id=peer["node_id"], status="ok").inc(len(entries))
