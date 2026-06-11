@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .constants import VALID_SCOPES
 from .facts import FactRecord, FactValue
+from .tombstones import TombstoneRecord, TombstoneRevocationRecord
 
 
 class PeerRegisterRequest(BaseModel):
@@ -97,3 +98,39 @@ class ConflictResolveRequest(BaseModel):
     winning_fact_id: str | None = None
     resolution_note: str = ""
     new_value: FactValue | None = None
+
+
+# ---------------------------------------------------------------------------
+# V2 tombstone envelope models (Phase 2c W6.4)
+# Mirror FederationEnvelopeEntry / FederationFactsResponse for tombstones.
+# TombstoneRecord + TombstoneRevocationRecord imported from tombstones.py.
+# ---------------------------------------------------------------------------
+
+
+class TombstoneEnvelopeEntry(BaseModel):
+    """V2 per-tombstone envelope carrying origin attestation.
+
+    Mirrors FederationEnvelopeEntry for facts; reuses OriginBlock unchanged.
+    """
+
+    tombstone: TombstoneRecord
+    origin: OriginBlock
+    origin_sig: str
+    # Carried, self-verifying origin manifest body for RELAYED tombstones.
+    # Absent (None) for self-originated tombstones and direct (origin==sender) entries.
+    origin_manifest: dict[str, Any] | None = None
+
+
+class FederationTombstonesResponseV2(BaseModel):
+    """V2 federation tombstone poll response with per-tombstone origin envelopes.
+
+    Mirrors FederationFactsResponse; revocations stay as TombstoneRevocationRecord
+    for now (enveloped in a later task). Back-compat: FederationTombstonesResponse
+    (v1) in tombstones.py is unchanged.
+    """
+
+    v: int = 2
+    tombstones: list[TombstoneEnvelopeEntry]
+    revocations: list[TombstoneRevocationRecord]
+    cursor: str | None = None
+    has_more: bool = False
