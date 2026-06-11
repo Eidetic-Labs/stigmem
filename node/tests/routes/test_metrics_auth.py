@@ -43,22 +43,28 @@ def _make_test_settings(tmp_db: str, **overrides: object) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
-def _patch(s: Settings) -> Settings:
-    original = settings_module.settings
-    settings_module.settings = s  # type: ignore[assignment]
-    auth_mod.settings = s  # type: ignore[assignment]
-    db_mod.settings = s  # type: ignore[assignment]
-    wk_mod.settings = s  # type: ignore[assignment]
-    main_mod.settings = s  # type: ignore[assignment]
-    return original
+_PATCH_TARGETS = (settings_module, auth_mod, db_mod, wk_mod, main_mod)
 
 
-def _restore(original: Settings) -> None:
-    settings_module.settings = original  # type: ignore[assignment]
-    auth_mod.settings = original  # type: ignore[assignment]
-    db_mod.settings = original  # type: ignore[assignment]
-    wk_mod.settings = original  # type: ignore[assignment]
-    main_mod.settings = original  # type: ignore[assignment]
+def _patch(s: Settings) -> dict[object, Settings]:
+    # Snapshot each module's *own* current ``settings`` and restore them
+    # independently. Capturing a single ``settings_module.settings`` and writing
+    # it back to every module (including ``main``) is unsafe: the suite shares
+    # one process and an upstream test can leave ``settings_module.settings``
+    # pointing at unrelated federation test settings (``node_url`` not loopback).
+    # ``main`` is the only module whose ``settings`` the federation transport
+    # check reads at app startup, so propagating a polluted value into it makes
+    # every subsequent app-startup raise. Per-module snapshots keep each
+    # reference at the value it genuinely held before this fixture ran.
+    originals: dict[object, Settings] = {mod: mod.settings for mod in _PATCH_TARGETS}
+    for mod in _PATCH_TARGETS:
+        mod.settings = s  # type: ignore[attr-defined]
+    return originals
+
+
+def _restore(originals: dict[object, Settings]) -> None:
+    for mod, original in originals.items():
+        mod.settings = original  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -77,16 +83,17 @@ def metrics_authed(
     test_settings = _make_test_settings(
         tmp_db, auth_required=True, metrics_require_auth=True
     )
-    original = _patch(test_settings)
+    originals = _patch(test_settings)
 
     admin_key = create_api_key("agent:admin-scraper", ["admin"])
     reader_key = create_api_key("agent:reader", ["read", "write"])
 
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c, admin_key, reader_key
-
-    _restore(original)
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c, admin_key, reader_key
+    finally:
+        _restore(originals)
 
 
 # ---------------------------------------------------------------------------
@@ -105,13 +112,14 @@ def metrics_opt_out(
         metrics_require_auth=False,
         node_url="http://localhost:8765",
     )
-    original = _patch(test_settings)
+    originals = _patch(test_settings)
 
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
-
-    _restore(original)
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+    finally:
+        _restore(originals)
 
 
 # ---------------------------------------------------------------------------
