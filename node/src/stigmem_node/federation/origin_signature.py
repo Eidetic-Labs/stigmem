@@ -41,6 +41,12 @@ class OriginSignatureError(ValueError):
 # confused with a 2.1 signature. Bump in lockstep with any change to the signed field set.
 _TUPLE_VERSION = "2.1"
 
+# Hardcoded in-body tuple version for the TOMBSTONE origin-attestation tuple (Phase 2c W6.3).
+# DISTINCT from the fact tuple's "2.1" so a tombstone origin signature can NEVER be confused
+# with / replayed as a fact origin signature (domain separation is a security property — the
+# two tuples share the same private key and base64url framing, only the signed bytes differ).
+_TOMBSTONE_TUPLE_VERSION = "t2.1"
+
 
 def _pad(s: str) -> str:
     return s + "=" * (-len(s) % 4)
@@ -151,3 +157,133 @@ def verify_origin_signature(
         except (InvalidSignature, ValueError):
             continue
     raise OriginSignatureError("origin signature did not verify against any allowed key")
+
+
+# ---------------------------------------------------------------------------
+# Tombstone origin-attestation signature (Phase 2c W6.3)
+#
+# SEPARATE from the existing tombstone issuer-signer signature
+# (lifecycle/tombstone_signing.py). That one says "this org issued this RTBF tombstone"; this
+# one says "this ORIGIN node relayed this tombstone under THIS propagation grant". Binding the
+# tombstone ``id``, ``entity_uri`` and ``scope`` into the signed tuple is the anti-relaunder
+# property: a relay that widens ``scope`` ("local" -> "*"), retargets ``entity_uri``, or lies
+# about its grant invalidates the signature. ``tv = "t2.1"`` (distinct from the fact tuple's
+# "2.1") gives hard domain separation so the two origin signatures are never interchangeable.
+# ---------------------------------------------------------------------------
+
+
+def canonical_tombstone_origin_tuple(
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    scope: str,
+    origin_node_id: str,
+    origin_tenant: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    origin_entity_uri: str,
+) -> bytes:
+    """RFC 8785 JCS bytes of the signed tombstone origin tuple (sets sorted for determinism).
+
+    Binds the tombstone ``id`` (as ``tid``), subject ``entity_uri`` and ``scope`` so a relay
+    cannot relaunder or re-scope the suppression. ``tv`` is the hardcoded constant ``"t2.1"``,
+    distinct from the fact tuple's ``"2.1"`` (domain separation, W6.3).
+    """
+    return canonicaljson.encode_canonical_json(
+        {
+            "entity_uri": entity_uri,
+            "origin_allowed_scopes": sorted(origin_allowed_scopes),
+            "origin_allowed_tenants": sorted(origin_allowed_tenants),
+            "origin_entity_uri": origin_entity_uri,
+            "origin_node_id": origin_node_id,
+            "origin_tenant": origin_tenant,
+            "scope": scope,
+            "tid": tombstone_id,
+            "tv": _TOMBSTONE_TUPLE_VERSION,
+        }
+    )
+
+
+def _require_value(value: str, name: str) -> str:
+    """Return a non-empty value or raise (anti-downgrade, W6.3)."""
+    if not value:
+        raise OriginSignatureError(f"tombstone origin {name} missing or empty")
+    return value
+
+
+def sign_tombstone_origin(
+    private_key: Ed25519PrivateKey,
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    scope: str,
+    origin_node_id: str,
+    origin_tenant: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    origin_entity_uri: str,
+) -> str:
+    """Sign the tombstone origin tuple; returns base64url signature (no padding)."""
+    body = canonical_tombstone_origin_tuple(
+        tombstone_id=tombstone_id,
+        entity_uri=_require_value(entity_uri, "entity_uri"),
+        scope=scope,
+        origin_node_id=origin_node_id,
+        origin_tenant=origin_tenant,
+        origin_allowed_scopes=origin_allowed_scopes,
+        origin_allowed_tenants=origin_allowed_tenants,
+        origin_entity_uri=_require_value(origin_entity_uri, "entity_uri"),
+    )
+    return base64.urlsafe_b64encode(private_key.sign(body)).decode().rstrip("=")
+
+
+def verify_tombstone_origin_signature(
+    sig_b64: str,
+    *,
+    tombstone_id: str,
+    entity_uri: str,
+    scope: str,
+    origin_node_id: str,
+    origin_tenant: str,
+    origin_allowed_scopes: list[str],
+    origin_allowed_tenants: list[str],
+    origin_entity_uri: str,
+    allowed_pubkeys: set[str],
+) -> None:
+    """Verify a tombstone origin sig against ANY key in allowed_pubkeys (rotation window).
+
+    Raises OriginSignatureError on any failure. Returning None == verified. Requires both the
+    subject ``entity_uri`` and the ``origin_entity_uri`` to be present/non-empty BEFORE building
+    the tuple (anti-downgrade: there is no legacy field-stripped path to fall back to).
+    """
+    if not sig_b64 or not allowed_pubkeys:
+        raise OriginSignatureError("tombstone origin signature or key set missing")
+    # Anti-downgrade (W6.3): require both entity_uri fields before building the tuple.
+    entity_uri = _require_value(entity_uri, "entity_uri")
+    origin_entity_uri = _require_value(origin_entity_uri, "entity_uri")
+    try:
+        body = canonical_tombstone_origin_tuple(
+            tombstone_id=tombstone_id,
+            entity_uri=entity_uri,
+            scope=scope,
+            origin_node_id=origin_node_id,
+            origin_tenant=origin_tenant,
+            origin_allowed_scopes=origin_allowed_scopes,
+            origin_allowed_tenants=origin_allowed_tenants,
+            origin_entity_uri=origin_entity_uri,
+        )
+        sig = base64.urlsafe_b64decode(_pad(sig_b64))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OriginSignatureError(
+            f"malformed tombstone origin block or signature: {exc}"
+        ) from exc
+    for pub_b64 in allowed_pubkeys:
+        try:
+            pub = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(_pad(pub_b64)))
+            pub.verify(sig, body)
+            return
+        except (InvalidSignature, ValueError):
+            continue
+    raise OriginSignatureError(
+        "tombstone origin signature did not verify against any allowed key"
+    )
