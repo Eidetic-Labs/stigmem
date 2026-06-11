@@ -354,7 +354,7 @@ def ingest_fact(
 
     with db() as conn:
         existing = conn.execute(
-            "SELECT id, valid_until FROM facts WHERE id = ?",
+            "SELECT id, valid_until, cid FROM facts WHERE id = ?",
             (fact_id,),
         ).fetchone()
         if existing is not None:
@@ -370,6 +370,23 @@ def ingest_fact(
                 _audit_valid_until_extension(conn=conn, exc=violation)
                 conn.commit()
                 raise violation
+            # F-1 residual (Phase 2c W5.1): a wire id that already exists locally
+            # with a DIFFERENT cid is either a relay pre-occupation attempt or a bug
+            # in the sender.  Fail closed: reject and audit; do NOT overwrite or
+            # silently treat as a duplicate.  Same-cid = legitimate idempotent re-pull
+            # (spec §5.8) — fall through to the existing no-op path below.
+            existing_cid = existing["cid"]
+            if existing_cid is not None and inbound_cid is not None and existing_cid != inbound_cid:
+                collision = FederationIntegrityError(
+                    fact_id=fact_id,
+                    sender_node_id=sender_node_id,
+                    reason="wire_id_collision",
+                    stored_cid=existing_cid,
+                    computed_cid=inbound_cid,
+                )
+                _audit_peer_integrity_failure(conn=conn, exc=collision)
+                conn.commit()
+                raise collision
             return False  # already ingested; silent no-op per spec §5.8
 
         # Advance HLC (spec §6.3)
