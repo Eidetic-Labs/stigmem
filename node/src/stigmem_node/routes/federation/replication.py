@@ -69,8 +69,8 @@ def build_origin_entry(
     own_entity_uri: str,
     pull_tenant: str,
     priv: Any,
-) -> tuple[OriginBlock, str] | None:
-    """Build the (OriginBlock, origin_sig) pair emitted for one egress record.
+) -> tuple[OriginBlock, str, dict[str, Any] | None] | None:
+    """Build the (OriginBlock, origin_sig, origin_manifest) triple for one egress record.
 
     Two cases (F-FED-2c W2.2):
 
@@ -86,6 +86,11 @@ def build_origin_entry(
       / ``origin_sig`` columns are read off the DB *row* because FactRecord does not
       surface them. The forwarded ``entity_uri`` is the STORED origin entity_uri so the
       forwarded signature still verifies against the ORIGIN's manifest (W3.1).
+
+    W4.2: for a RELAYED fact, ATTACH the origin's stored manifest body as
+    ``origin_manifest`` (best-effort) so an UNREACHABLE downstream has a candidate to
+    anchor-match against its operator pin / stored binding. It is only the self-verifying
+    manifest BODY — no proof/STH/Merkle. Self-originated facts carry no manifest (None).
 
     Returns ``None`` (skip + warn) when the record is not emittable: a relayed fact
     with no stored ``origin_sig`` cannot be attributed and must not be forwarded.
@@ -106,7 +111,7 @@ def build_origin_entry(
             origin=origin.model_dump(),
             valid_until=record.valid_until,
         )
-        return origin, sig
+        return origin, sig, None
 
     # Relayed: forward the stored origin block + stored sig verbatim (no re-sign).
     stored_sig = row["origin_sig"]
@@ -136,7 +141,28 @@ def build_origin_entry(
         allowed_tenants=(json.loads(stored_tenants_raw) if stored_tenants_raw else []),
         entity_uri=stored_entity_uri,
     )
-    return origin, stored_sig
+    # W4.2: attach the origin's stored manifest body (best-effort) so an unreachable
+    # downstream can anchor-match it against its pin / stored binding. Absent if we have
+    # no stored manifest for the origin entity_uri (the downstream then relies on its own
+    # pin/binding/fetch; the manifest is an optimisation, not a trust grant).
+    carried_manifest: dict[str, Any] | None = None
+    try:
+        stored_manifest = get_peer_manifest(
+            stored_entity_uri,
+            refresh_if_expired=False,
+            trust_mode=_public_module().settings.trust_mode,
+        )
+        if stored_manifest is not None:
+            from ...identity.manifest import manifest_to_dict
+
+            carried_manifest = manifest_to_dict(stored_manifest)
+    except Exception as exc:  # noqa: BLE001 — manifest attach is an optimisation, never blocks emit
+        logger.debug(
+            "federation relay: could not attach origin_manifest for %s: %s",
+            stored_entity_uri,
+            exc,
+        )
+    return origin, stored_sig, carried_manifest
 
 
 @router.get("/v1/federation/facts", response_model=FederationFactsResponse)
@@ -351,8 +377,12 @@ def pull_facts(
         )
         if built is None:
             continue
-        origin, sig = built
-        entries.append(FederationEnvelopeEntry(fact=record, origin=origin, origin_sig=sig))
+        origin, sig, origin_manifest = built
+        entries.append(
+            FederationEnvelopeEntry(
+                fact=record, origin=origin, origin_sig=sig, origin_manifest=origin_manifest
+            )
+        )
 
     FEDERATION_EGRESS.labels(peer_id=peer["node_id"], status="ok").inc(len(entries))
     return FederationFactsResponse(facts=entries, cursor=new_cursor, has_more=has_more)
@@ -534,6 +564,11 @@ def push_facts(
         fact = entry.get("fact")
         origin = entry.get("origin")
         origin_sig = entry.get("origin_sig")
+        # W4.2: OPTIONAL carried origin manifest body — lets an unreachable receiver
+        # anchor-match a relayed origin against its operator pin / stored binding.
+        origin_manifest = entry.get("origin_manifest")
+        if not isinstance(origin_manifest, dict):
+            origin_manifest = None
         if not isinstance(fact, dict) or not isinstance(origin, dict) or not origin_sig:
             rejected += 1
             errors.append(
@@ -549,12 +584,13 @@ def push_facts(
         if using_cap_token:
             assert cap_token is not None
             ok, err = _push_fact_with_cap_token(
-                fact, fact_scope, origin, origin_sig, cap_token, relay_cache
+                fact, fact_scope, origin, origin_sig, cap_token, relay_cache, origin_manifest
             )
         else:
             assert peer is not None and token_payload is not None
             ok, err = _push_fact_with_peer_token(
-                fact, fact_scope, origin, origin_sig, peer, token_payload, relay_cache
+                fact, fact_scope, origin, origin_sig, peer, token_payload, relay_cache,
+                origin_manifest,
             )
 
         if ok:
@@ -577,6 +613,7 @@ def _verify_origin_and_resolve_tenant(
     conn: Any,
     *,
     relay_cache: dict[str, set[str]] | None = None,
+    origin_manifest: dict[str, Any] | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Run the fail-closed ordered origin checks; return (local_tenant, error).
 
@@ -622,6 +659,7 @@ def _verify_origin_and_resolve_tenant(
                 origin["node_id"],
                 origin.get("entity_uri", ""),
                 cache=relay_cache if relay_cache is not None else {},
+                origin_manifest=origin_manifest,
             )
         else:
             keys = resolve_origin_key(origin["node_id"])
@@ -655,6 +693,7 @@ def _push_fact_with_cap_token(
     origin_sig: str,
     cap_token: dict[str, Any],
     relay_cache: dict[str, set[str]] | None = None,
+    origin_manifest: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single v2 fact under capability-token auth.
 
@@ -692,7 +731,7 @@ def _push_fact_with_cap_token(
         try:
             local_tenant, err = _verify_origin_and_resolve_tenant(
                 fact, fact_scope, origin, origin_sig, sender_node_id, peer_row, conn,
-                relay_cache=relay_cache,
+                relay_cache=relay_cache, origin_manifest=origin_manifest,
             )
         except PeerPolicyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -755,6 +794,7 @@ def _push_fact_with_peer_token(
     peer: dict[str, Any],
     token_payload: dict[str, Any],
     relay_cache: dict[str, set[str]] | None = None,
+    origin_manifest: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Validate + ingest a single v2 fact under peer-JWT auth.
 
@@ -798,7 +838,7 @@ def _push_fact_with_peer_token(
         try:
             local_tenant, err = _verify_origin_and_resolve_tenant(
                 fact, fact_scope, origin, origin_sig, sender_node_id, peer, conn,
-                relay_cache=relay_cache,
+                relay_cache=relay_cache, origin_manifest=origin_manifest,
             )
         except PeerPolicyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

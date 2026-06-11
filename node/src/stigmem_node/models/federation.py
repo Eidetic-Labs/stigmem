@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 from .constants import VALID_SCOPES
@@ -66,6 +68,12 @@ class FederationEnvelopeEntry(BaseModel):
     fact: FactRecord
     origin: OriginBlock
     origin_sig: str
+    # Phase 2c W4.2: the carried, self-verifying origin manifest BODY the relay attaches
+    # for RELAYED facts. It lets an UNREACHABLE downstream match the relayed origin's key
+    # against its operator pin / stored binding (offline trust). It is NOT itself trusted
+    # without a first-party anchor match — no proof/STH/Merkle fields, just the manifest
+    # body. Absent (None) for self-originated facts and for direct (origin==sender) entries.
+    origin_manifest: dict[str, Any] | None = None
 
 
 class FederationFactsResponse(BaseModel):

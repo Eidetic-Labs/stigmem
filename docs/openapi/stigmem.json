@@ -1263,6 +1263,18 @@
           "origin": {
             "$ref": "#/components/schemas/OriginBlock"
           },
+          "origin_manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Manifest"
+          },
           "origin_sig": {
             "title": "Origin Sig",
             "type": "string"

@@ -150,7 +150,8 @@ def test_self_originated_emit_signs_fresh_with_own_identity() -> None:
         priv=priv,
     )
     assert result is not None
-    origin, sig = result
+    origin, sig, origin_manifest = result
+    assert origin_manifest is None  # self-originated facts carry no relay manifest
     assert origin.node_id == _OWN_NODE_ID  # this node, not an upstream
     assert origin.tenant == _PULL_TENANT
     assert origin.allowed_tenants == [_PULL_TENANT]
@@ -190,7 +191,7 @@ def test_relayed_emit_forwards_stored_origin_block_verbatim() -> None:
         priv=priv,
     )
     assert result is not None
-    origin, sig = result
+    origin, sig, _origin_manifest = result
     # origin attribution is the UPSTREAM origin, NOT this relay node
     assert origin.node_id == _ORIGIN_NODE_ID
     assert origin.node_id != _OWN_NODE_ID
@@ -1002,3 +1003,351 @@ def test_relay_off_origin_not_sender_rejected_unchanged_2b(fed_node, monkeypatch
     # NEVER ingested. This proves the relay-OFF path stays byte-identical to 2b.
     assert r.json()["accepted"] == 0
     assert any(e["error"] == "source_not_owned" for e in r.json()["errors"]), r.json()
+
+
+# ---------------------------------------------------------------------------
+# W4.2 — OFFLINE relay trust: operator-pin (tier 1) + stored-binding (tier 2) +
+# fetch-on-first TOFU (tier 3), with cross-check + fail-closed. Zero transitive
+# trust — a relayed origin's key is accepted ONLY against a first-party/human
+# anchor; a stronger reachable anchor that disagrees is an ATTACK (reject+audit).
+#
+# resolve_origin_key_for_relay gains an OPTIONAL ``origin_manifest`` (the carried,
+# self-verifying manifest body the relay attaches for relayed facts) so an
+# UNREACHABLE receiver has a candidate to match against its pin/stored binding.
+# ---------------------------------------------------------------------------
+
+from stigmem_node.federation.origin_pins import (  # noqa: E402
+    fingerprint_from_pubkey,
+    put_origin_pin,
+)
+
+
+def _put_pin(*, entity_uri: str, node_id: str, key_fingerprint: str) -> None:
+    """Operator-pin an (entity_uri, node_id) → key_fingerprint triple (W4.1 store)."""
+    with db() as conn:
+        put_origin_pin(
+            conn,
+            entity_uri=entity_uri,
+            node_id=node_id,
+            key_fingerprint=key_fingerprint,
+            pinned_by="operator:test",
+        )
+        conn.commit()
+
+
+def _store_binding(priv: Ed25519PrivateKey, *, entity_uri: str, node_id: str) -> None:
+    """Store a first-party manifest binding (entity_uri ↔ key) via the trust store."""
+    from stigmem_node.identity.trust_store import store_peer_manifest  # noqa: PLC0415
+
+    manifest = _build_manifest(priv, entity_uri=entity_uri, entities=[entity_uri, node_id])
+    store_peer_manifest(entity_uri, manifest, None, trust_mode="relaxed")
+
+
+def _spy_audit(monkeypatch) -> list[tuple[str, dict]]:  # type: ignore[no-untyped-def]
+    """Capture audit_event.emit_nofail calls; returns the (event_type, kwargs) list."""
+    seen: list[tuple[str, dict]] = []
+    import stigmem_node.observability.audit_event as ae  # noqa: PLC0415
+
+    monkeypatch.setattr(ae, "emit_nofail", lambda et, **kw: seen.append((et, kw)))
+    return seen
+
+
+def test_relay_offline_tier1_pin_match_unreachable_accepts(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (a) TIER-1 PIN MATCH: origin UNREACHABLE, an operator pin matches the carried
+    manifest's key → ACCEPTED (offline trust via the human anchor)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    carried = _build_manifest(priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE])
+    # Origin UNREACHABLE: the fetch stub serves nothing (404 / None).
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))
+    _neutralize_ssrf_dns(monkeypatch)
+    _put_pin(
+        entity_uri=_RELAY_ENTITY,
+        node_id=_RELAY_NODE,
+        key_fingerprint=fingerprint_from_pubkey(_pub_b64(priv)),
+    )
+
+    keys = oi.resolve_origin_key_for_relay(
+        _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+    )
+    assert _pub_b64(priv) in keys
+
+
+def test_relay_offline_tier1_pin_mismatch_rejects(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (b) TIER-1 PIN MISMATCH: the carried manifest's key ≠ the operator pin →
+    REJECTED + ``relay_origin_pin_mismatch`` audit; the carried key is NOT trusted."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    pinned_priv = Ed25519PrivateKey.generate()
+    impostor_priv = Ed25519PrivateKey.generate()
+    carried = _build_manifest(
+        impostor_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # unreachable
+    _neutralize_ssrf_dns(monkeypatch)
+    _put_pin(
+        entity_uri=_RELAY_ENTITY,
+        node_id=_RELAY_NODE,
+        key_fingerprint=fingerprint_from_pubkey(_pub_b64(pinned_priv)),
+    )
+    seen = _spy_audit(monkeypatch)
+
+    try:
+        oi.resolve_origin_key_for_relay(
+            _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+        )
+        raise AssertionError("expected OriginIdentityError (pin mismatch)")
+    except oi.OriginIdentityError:
+        pass
+    assert "relay_origin_pin_mismatch" in [e for e, _ in seen]
+
+
+def test_relay_offline_tier1_fetch_disagrees_pin_rejects(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (c) TIER-1 CROSS-CHECK: a pin exists AND the origin is REACHABLE but the FETCHED
+    key ≠ the pin → REJECTED + ``relay_origin_fetch_disagrees_pin`` (a reachable fetch that
+    disagrees with the human anchor is a MITM/compromise signal)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    pinned_priv = Ed25519PrivateKey.generate()
+    served_priv = Ed25519PrivateKey.generate()  # the live endpoint serves a DIFFERENT key
+    served = _build_manifest(
+        served_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(served))  # REACHABLE
+    _neutralize_ssrf_dns(monkeypatch)
+    _put_pin(
+        entity_uri=_RELAY_ENTITY,
+        node_id=_RELAY_NODE,
+        key_fingerprint=fingerprint_from_pubkey(_pub_b64(pinned_priv)),
+    )
+    seen = _spy_audit(monkeypatch)
+
+    # The carried manifest happens to match the pin, but the live fetch disagrees: ATTACK.
+    carried = _build_manifest(
+        pinned_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    try:
+        oi.resolve_origin_key_for_relay(
+            _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+        )
+        raise AssertionError("expected OriginIdentityError (fetch disagrees pin)")
+    except oi.OriginIdentityError:
+        pass
+    assert "relay_origin_fetch_disagrees_pin" in [e for e, _ in seen]
+
+
+def test_relay_offline_tier2_stored_binding_match_unreachable_accepts(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (d) TIER-2 STORED BINDING: no pin, but a stored manifest for entity_uri with the
+    SAME key exists and the origin is UNREACHABLE → ACCEPTED against the stored binding."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    _store_binding(priv, entity_uri=_RELAY_ENTITY, node_id=_RELAY_NODE)
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # unreachable
+    _neutralize_ssrf_dns(monkeypatch)
+
+    carried = _build_manifest(priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE])
+    keys = oi.resolve_origin_key_for_relay(
+        _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+    )
+    assert _pub_b64(priv) in keys
+
+
+def test_relay_offline_tier2_stored_binding_mismatch_rejects(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (e) TIER-2 MISMATCH: the carried key ≠ the stored binding's key (a key change for
+    a known origin) → REJECTED + ``relay_origin_key_changed`` (never a silent update)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    stored_priv = Ed25519PrivateKey.generate()
+    changed_priv = Ed25519PrivateKey.generate()
+    _store_binding(stored_priv, entity_uri=_RELAY_ENTITY, node_id=_RELAY_NODE)
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # unreachable
+    _neutralize_ssrf_dns(monkeypatch)
+    seen = _spy_audit(monkeypatch)
+
+    carried = _build_manifest(
+        changed_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    try:
+        oi.resolve_origin_key_for_relay(
+            _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+        )
+        raise AssertionError("expected OriginIdentityError (stored binding key changed)")
+    except oi.OriginIdentityError:
+        pass
+    assert "relay_origin_key_changed" in [e for e, _ in seen]
+
+
+def test_relay_offline_tier3_tofu_unchanged(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (f) TIER-3 TOFU UNCHANGED: no pin, no stored binding, REACHABLE, never-seen →
+    fetch-on-first ACCEPTS + stores + emits first-contact (the existing W3.2 behaviour)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    from stigmem_node.identity.trust_store import get_peer_manifest  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    manifest = _build_manifest(
+        priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(manifest))  # REACHABLE
+    _neutralize_ssrf_dns(monkeypatch)
+    seen = _spy_audit(monkeypatch)
+
+    keys = oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
+    assert _pub_b64(priv) in keys
+    # tier-3 stores the manifest + emits the first-contact audit (regression guard).
+    assert get_peer_manifest(_RELAY_ENTITY, trust_mode="relaxed") is not None
+    assert "relay_origin_first_contact" in [e for e, _ in seen]
+
+
+def test_relay_offline_fail_closed_unanchored_rejects(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (g) FAIL-CLOSED: no pin, no stored binding, UNREACHABLE (the unknown-AND-
+    unreachable case) → REJECTED + ``relay_origin_unanchored``."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    carried = _build_manifest(priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE])
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # unreachable
+    _neutralize_ssrf_dns(monkeypatch)
+    seen = _spy_audit(monkeypatch)
+
+    try:
+        oi.resolve_origin_key_for_relay(
+            _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+        )
+        raise AssertionError("expected OriginIdentityError (unanchored, unreachable)")
+    except oi.OriginIdentityError:
+        pass
+    assert "relay_origin_unanchored" in [e for e, _ in seen]
+
+
+def test_relay_offline_candidate_must_self_verify_even_with_pin(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 (h) CANDIDATE GATING: a carried manifest that FAILS the W3.2 checks (here:
+    node_id ∉ entities) is REJECTED even when a matching pin exists — the candidate must
+    pass self-verify + node_id ∈ entities + entity-authority BEFORE any anchor acceptance."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+
+    priv = Ed25519PrivateKey.generate()
+    # Carried manifest does NOT list _RELAY_NODE among its entities → must be rejected.
+    carried = _build_manifest(priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY])
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # unreachable
+    _neutralize_ssrf_dns(monkeypatch)
+    _put_pin(
+        entity_uri=_RELAY_ENTITY,
+        node_id=_RELAY_NODE,
+        key_fingerprint=fingerprint_from_pubkey(_pub_b64(priv)),  # pin matches the key
+    )
+
+    try:
+        oi.resolve_origin_key_for_relay(
+            _RELAY_NODE, _RELAY_ENTITY, cache={}, origin_manifest=manifest_to_dict(carried)
+        )
+        raise AssertionError("expected OriginIdentityError (candidate fails node∈entities)")
+    except oi.OriginIdentityError:
+        pass
+
+
+# ---- W4.2 end-to-end ingest: unreachable origin, pinned vs unpinned ----------
+
+
+def _relayed_push_body_with_manifest(
+    origin_priv: Ed25519PrivateKey,
+    *,
+    scope: str,
+    origin_allowed_scopes: list[str],
+    origin_manifest: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """A v2 push envelope (origin.node_id != sender) carrying an OPTIONAL origin_manifest
+    body on each entry, so an unreachable receiver has a candidate to anchor-match."""
+    from .helpers import make_v2_entry  # noqa: PLC0415
+
+    fact = {
+        "id": str(uuid.uuid4()),
+        "entity": "stigmem://t/relayed-offline",
+        "relation": "r",
+        "value": {"type": "string", "v": "x"},
+        "source": _RELAY_NODE,
+        "scope": scope,
+        "timestamp": "2026-06-01T00:00:00Z",
+        "confidence": 1.0,
+        "valid_until": None,
+    }
+    origin = {
+        "tenant": "default",
+        "node_id": _RELAY_NODE,
+        "allowed_scopes": origin_allowed_scopes,
+        "allowed_tenants": ["default"],
+        "entity_uri": _RELAY_ENTITY,
+    }
+    entry = make_v2_entry(origin_priv, fact=fact, origin=origin)
+    if origin_manifest is not None:
+        entry["origin_manifest"] = origin_manifest
+    return {"v": 2, "facts": [entry], "cursor": None, "has_more": False}
+
+
+def test_relay_ingest_unreachable_pinned_origin_is_ingested(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 e2e (pinned): a relayed fact from a relay_trusted sender whose UNREACHABLE origin
+    is operator-pinned (and carries a matching manifest) is INGESTED."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    import stigmem_node.settings as _smod  # noqa: PLC0415
+
+    monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
+    monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
+
+    origin_priv = Ed25519PrivateKey.generate()
+    carried = _build_manifest(
+        origin_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # origin UNREACHABLE
+    _neutralize_ssrf_dns(monkeypatch)
+    _put_pin(
+        entity_uri=_RELAY_ENTITY,
+        node_id=_RELAY_NODE,
+        key_fingerprint=fingerprint_from_pubkey(_pub_b64(origin_priv)),
+    )
+
+    sender_pub, sender_priv = generate_ed25519_b64()
+    sender_node = "stigmem:node:relay-sender-pinned"
+    _make_sender_peer(fed_node.db_path, node_id=sender_node, pub_b64=sender_pub, relay_trusted=1)
+
+    body = _relayed_push_body_with_manifest(
+        origin_priv,
+        scope="public",
+        origin_allowed_scopes=["public"],
+        origin_manifest=manifest_to_dict(carried),
+    )
+    r = _push(fed_node, sender_node, sender_priv, body)
+    assert r.status_code == 202, r.text
+    assert r.json()["accepted"] == 1, r.json()
+
+
+def test_relay_ingest_unreachable_unpinned_origin_is_rejected(fed_node, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """W4.2 e2e (unpinned): the same relayed fact with NO pin + UNREACHABLE origin (and no
+    stored binding) is REJECTED fail-closed (origin_unresolvable)."""
+    import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
+    import stigmem_node.settings as _smod  # noqa: PLC0415
+
+    monkeypatch.setattr(_smod.settings, "federation_relay_enabled", True)
+    monkeypatch.setattr(_smod.settings, "federation_push_enabled", True)
+
+    origin_priv = Ed25519PrivateKey.generate()
+    carried = _build_manifest(
+        origin_priv, entity_uri=_RELAY_ENTITY, entities=[_RELAY_ENTITY, _RELAY_NODE]
+    )
+    monkeypatch.setattr(oi.httpx, "get", _FetchStub(None))  # origin UNREACHABLE
+    _neutralize_ssrf_dns(monkeypatch)
+
+    sender_pub, sender_priv = generate_ed25519_b64()
+    sender_node = "stigmem:node:relay-sender-unpinned"
+    _make_sender_peer(fed_node.db_path, node_id=sender_node, pub_b64=sender_pub, relay_trusted=1)
+
+    body = _relayed_push_body_with_manifest(
+        origin_priv,
+        scope="public",
+        origin_allowed_scopes=["public"],
+        origin_manifest=manifest_to_dict(carried),
+    )
+    r = _push(fed_node, sender_node, sender_priv, body)
+    assert r.status_code == 202, r.text
+    assert r.json()["accepted"] == 0
+    assert any(e["error"] == "origin_unresolvable" for e in r.json()["errors"]), r.json()

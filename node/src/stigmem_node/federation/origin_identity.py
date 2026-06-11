@@ -30,6 +30,7 @@ from ..identity.manifest import (
 from ..identity.trust_store import get_peer_manifest, store_peer_manifest
 from ..net_util import assert_safe_url, node_url_is_loopback
 from ..settings import settings
+from .origin_pins import fingerprint_from_pubkey, get_origin_pin
 
 if TYPE_CHECKING:
     pass
@@ -151,27 +152,69 @@ def _fetch_relay_manifest(entity_uri: str) -> OrgManifest | None:
         return None
 
 
+def _audit_relay(event_type: str, *, node_id: str, entity_uri: str, **detail: object) -> None:
+    """Best-effort relay-origin audit emit (never blocks resolution)."""
+    from ..observability.audit_event import emit_nofail
+
+    emit_nofail(
+        event_type,
+        entity_uri=entity_uri,
+        source="federation_relay",
+        detail={"node_id": node_id, "entity_uri": entity_uri, **detail},
+    )
+
+
+def _candidate_manifest_from_carried(
+    origin_manifest: dict[str, object] | None,
+) -> OrgManifest | None:
+    """Parse + self-verify a CARRIED origin manifest body, or return None if unusable.
+
+    The carried manifest is OPTIONAL and is only a manifest BODY — parsing + self-sig
+    verification here is the same W3.2 self-verify gate the fetch path applies; it does
+    NOT confer trust (that requires a first-party anchor match in the tier logic).
+    """
+    if not isinstance(origin_manifest, dict):
+        return None
+    try:
+        m = manifest_from_dict(origin_manifest)
+        verify_manifest(m, trust_mode=settings.trust_mode)
+        return m
+    except Exception as exc:  # noqa: BLE001 — a malformed/invalid body is simply unusable
+        logger.debug("carried relay origin manifest unusable: %s", exc)
+        return None
+
+
 def resolve_origin_key_for_relay(
     node_id: str,
     entity_uri: str,
     *,
     cache: dict[str, set[str]],
+    origin_manifest: dict[str, object] | None = None,
 ) -> set[str]:
-    """Resolve the signing key set for a RELAYED origin (fetch-on-first).
+    """Resolve the signing key set for a RELAYED origin (offline-safe, zero transitive trust).
 
-    Resolution order (fail-closed at every step):
+    Precedence (fail-closed at every step):
 
-    1. **Peer path first.** If *node_id* is already a bound, active peer,
-       ``resolve_origin_key(node_id)`` resolves it with NO network fetch.
-    2. **Fetch-on-first.** Otherwise FETCH the origin's manifest from *entity_uri*
-       (HTTPS-only, ``_fetch_relay_manifest``), verify its self-signature + expiry +
-       rotation chain (``verify_manifest`` inside the fetch), and require
-       ``node_id ∈ manifest.entities`` (the manifest must vouch for the node).
-    3. **Entity-authority / uniqueness.** If *node_id* is ALREADY bound locally to a
-       DIFFERENT entity_uri, REJECT — a registered-but-hostile org cannot vouch for a
-       node_id owned by a different entity (anti-substitution). For a never-seen
-       node_id this is first-contact TOFU: accept, store the manifest, and emit a
-       ``relay_origin_first_contact`` audit event so an operator sees the new origin.
+    1. **Peer path** — if the origin is an active bound peer, ``resolve_origin_key`` resolves
+       it with NO fetch (a first-party verified 2a binding, the highest tier).
+    2. **Candidate manifest** — obtain a candidate from: a fetch-on-first (HTTPS-only,
+       ``fetched`` — may be None if unreachable), the carried ``origin_manifest`` body, or a
+       stored manifest for ``entity_uri``. The candidate MUST pass the W3.2 checks (self-sig,
+       ``node_id ∈ entities``, entity-authority/uniqueness) before ANY acceptance.
+    3. **Anchor + cross-check** (the offline core, by descending anchor strength):
+
+       * **Tier 1 — operator pin** (W4.1 ``get_origin_pin``): the candidate fingerprint MUST
+         equal the pin, ELSE reject (``relay_origin_pin_mismatch``). If the origin is also
+         REACHABLE (``fetched`` not None) the fetched key must ALSO equal the pin, ELSE reject
+         (``relay_origin_fetch_disagrees_pin`` — a reachable fetch that disagrees with the human
+         anchor is a MITM/compromise signal). On match → accept.
+       * **Tier 2 — stored binding** (``get_peer_manifest``): the candidate fingerprint MUST
+         equal the stored manifest's key, ELSE reject (``relay_origin_key_changed`` — never a
+         silent key update). On match → accept.
+       * **Tier 3 — fetch-on-first TOFU**: reachable, never-seen, unpinned — the EXISTING W3.2
+         behaviour: store the manifest + emit ``relay_origin_first_contact`` + accept.
+       * **Fail-closed**: no pin, no stored binding, not reachable → raise
+         (``relay_origin_unanchored``). The unknown-AND-unreachable case is correctly refused.
 
     *cache* is a per-request dict threaded through the page loop, keyed by *entity_uri*
     → verified key set, so the fetch + rotation check happen ONCE per page rather than
@@ -190,13 +233,13 @@ def resolve_origin_key_for_relay(
     if not (entity_uri or "").strip():
         raise OriginIdentityError(f"relayed origin {node_id!r} carries no entity_uri")
 
-    # Cache hit: this entity_uri was already fetched + verified earlier this page.
+    # Cache hit: this entity_uri was already anchored + verified earlier this page.
     cached = cache.get(entity_uri)
     if cached is not None:
         return cached
 
-    # 3a. Entity-authority uniqueness: enforce BEFORE the fetch so a hostile manifest
-    # cannot even be fetched/stored under a node_id owned by a different entity.
+    # Entity-authority uniqueness: enforce BEFORE anything else so a hostile manifest
+    # cannot be considered under a node_id owned by a different entity.
     existing = _existing_entity_uri_for_node(node_id)
     if existing is not None and existing != entity_uri:
         raise OriginIdentityError(
@@ -204,36 +247,88 @@ def resolve_origin_key_for_relay(
             f"a relayed manifest from {entity_uri!r} may not re-claim it"
         )
 
-    # 2. Fetch-on-first: pull + verify the origin's manifest from its entity_uri.
-    manifest = _fetch_relay_manifest(entity_uri)
-    if manifest is None:
+    # 2. Obtain a CANDIDATE manifest. Try a fetch-on-first (https-only; None if unreachable);
+    # the fetched manifest, if any, doubles as the strongest candidate AND the reachable
+    # cross-check key for tier 1. Else fall back to the carried body, else a stored manifest.
+    fetched = _fetch_relay_manifest(entity_uri)
+    candidate = (
+        fetched
+        or _candidate_manifest_from_carried(origin_manifest)
+        or get_peer_manifest(entity_uri, refresh_if_expired=False, trust_mode=settings.trust_mode)
+    )
+    if candidate is None:
+        # No candidate from any source AND no stored binding ⇒ unknown + unreachable.
+        _audit_relay("relay_origin_unanchored", node_id=node_id, entity_uri=entity_uri)
         raise OriginIdentityError(
-            f"could not fetch/verify relay origin manifest from {entity_uri!r}"
+            f"relayed origin {node_id!r} ({entity_uri!r}) is unanchored and unreachable"
         )
-    if node_id not in manifest.entities:
+
+    # 3. W3.2 self-verify gate: the candidate must vouch for node_id. (verify_manifest already
+    # ran on the fetch/carried/stored paths; node_id ∈ entities is the remaining W3.2 check.)
+    if node_id not in candidate.entities:
         raise OriginIdentityError(
             f"relay origin manifest {entity_uri!r} does not list node_id {node_id!r}"
         )
 
-    keys = _keys_from_manifest(manifest)
+    candidate_fp = fingerprint_from_pubkey(candidate.public_key)
 
-    # First-contact TOFU bind: persist the manifest + emit an audit event so the new
-    # (node_id, entity_uri) origin is operator-visible. Best-effort store/audit must
-    # not block a verified resolution.
-    is_first_contact = existing is None
-    try:
-        store_peer_manifest(entity_uri, manifest, trust_mode=settings.trust_mode)
-    except ManifestError as exc:
-        logger.debug("relay first-contact manifest store rejected for %s: %s", entity_uri, exc)
-    if is_first_contact:
-        from ..observability.audit_event import emit_nofail
+    # 4. ANCHOR + CROSS-CHECK, by descending anchor strength.
+    with db() as conn:
+        pin = get_origin_pin(conn, entity_uri=entity_uri, node_id=node_id)
 
-        emit_nofail(
-            "relay_origin_first_contact",
-            entity_uri=entity_uri,
-            source="federation_relay",
-            detail={"node_id": node_id, "entity_uri": entity_uri},
-        )
+    if pin is not None:
+        # Tier 1 — operator pin (human anchor). Two checks, both required:
+        # Cross-check FIRST: a REACHABLE fetch that disagrees with the pin is a MITM /
+        # compromise signal (the live endpoint serves a key the operator never confirmed).
+        # This is the strongest attack signal, so it is reported ahead of a stale candidate.
+        if fetched is not None and fingerprint_from_pubkey(fetched.public_key) != pin[
+            "key_fingerprint"
+        ]:
+            _audit_relay(
+                "relay_origin_fetch_disagrees_pin", node_id=node_id, entity_uri=entity_uri
+            )
+            raise OriginIdentityError(
+                f"relayed origin {node_id!r} reachable fetch disagrees with the operator pin"
+            )
+        # The candidate (fetched / carried / stored) MUST itself match the pin.
+        if candidate_fp != pin["key_fingerprint"]:
+            _audit_relay("relay_origin_pin_mismatch", node_id=node_id, entity_uri=entity_uri)
+            raise OriginIdentityError(
+                f"relayed origin {node_id!r} candidate key does not match the operator pin"
+            )
+        keys = _keys_from_manifest(candidate)
+        cache[entity_uri] = keys
+        return keys
 
-    cache[entity_uri] = keys
-    return keys
+    stored = get_peer_manifest(
+        entity_uri, refresh_if_expired=False, trust_mode=settings.trust_mode
+    )
+    if stored is not None:
+        # Tier 2 — stored first-party binding. The candidate MUST match the stored key.
+        if candidate_fp != fingerprint_from_pubkey(stored.public_key):
+            _audit_relay("relay_origin_key_changed", node_id=node_id, entity_uri=entity_uri)
+            raise OriginIdentityError(
+                f"relayed origin {node_id!r} candidate key differs from the stored binding"
+            )
+        keys = _keys_from_manifest(candidate)
+        cache[entity_uri] = keys
+        return keys
+
+    if fetched is not None:
+        # Tier 3 — fetch-on-first TOFU (reachable, never-seen, unpinned): the EXISTING W3.2
+        # first-contact behaviour. Persist the manifest + emit the first-contact audit.
+        try:
+            store_peer_manifest(entity_uri, fetched, trust_mode=settings.trust_mode)
+        except ManifestError as exc:
+            logger.debug("relay first-contact manifest store rejected for %s: %s", entity_uri, exc)
+        _audit_relay("relay_origin_first_contact", node_id=node_id, entity_uri=entity_uri)
+        keys = _keys_from_manifest(fetched)
+        cache[entity_uri] = keys
+        return keys
+
+    # Fail-closed: a candidate existed (carried/stored) but there is no pin, no stored binding,
+    # and the origin is unreachable ⇒ no first-party anchor to accept it against.
+    _audit_relay("relay_origin_unanchored", node_id=node_id, entity_uri=entity_uri)
+    raise OriginIdentityError(
+        f"relayed origin {node_id!r} ({entity_uri!r}) is unanchored and unreachable"
+    )

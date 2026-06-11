@@ -165,6 +165,11 @@ async def pull_from_peer_once(
             fact = entry.get("fact")
             origin = entry.get("origin")
             origin_sig = entry.get("origin_sig")
+            # W4.2: OPTIONAL carried origin manifest body — lets an unreachable receiver
+            # anchor-match a relayed origin against its operator pin / stored binding.
+            origin_manifest = entry.get("origin_manifest")
+            if not isinstance(origin_manifest, dict):
+                origin_manifest = None
             if not isinstance(fact, dict) or not isinstance(origin, dict) or not origin_sig:
                 logger.warning(
                     "Pull from %s: entry missing fact/origin/origin_sig", sender_node_id
@@ -201,7 +206,10 @@ async def pull_from_peer_once(
             try:
                 if is_relayed:
                     keys = resolve_origin_key_for_relay(
-                        origin["node_id"], origin.get("entity_uri", ""), cache=relay_cache
+                        origin["node_id"],
+                        origin.get("entity_uri", ""),
+                        cache=relay_cache,
+                        origin_manifest=origin_manifest,
                     )
                 else:
                     keys = resolve_origin_key(origin["node_id"])

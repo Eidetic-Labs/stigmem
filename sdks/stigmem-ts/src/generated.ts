@@ -1884,6 +1884,10 @@ export interface components {
         FederationEnvelopeEntry: {
             fact: components["schemas"]["FactRecord"];
             origin: components["schemas"]["OriginBlock"];
+            /** Origin Manifest */
+            origin_manifest?: {
+                [key: string]: unknown;
+            } | null;
             /** Origin Sig */
             origin_sig: string;
         };
