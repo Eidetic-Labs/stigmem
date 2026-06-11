@@ -24,6 +24,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -33,7 +34,7 @@ from .db import db
 from .garden_acl import get_member_role
 from .lifecycle.tombstone_cache import is_tombstoned as _is_tombstoned
 from .memory_garden_acl_gate import garden_acl_enforced
-from .net_util import assert_safe_url
+from .net_util import resolve_pinned_address
 from .recall.recall_pipeline import apply_recall_pipeline
 
 logger = logging.getLogger("stigmem.subscriptions")
@@ -276,6 +277,34 @@ def _sanitize_payload(event: Any, payload: dict[str, Any]) -> dict[str, Any] | N
         return payload
 
 
+def _build_pinned_request(address: str, pinned_ip: str) -> tuple[str, str]:
+    """Return ``(pinned_url, host_header)`` for connecting to *pinned_ip*.
+
+    The returned URL swaps the original hostname for the validated *pinned_ip*
+    literal (IPv6 bracketed) while preserving scheme/port/path/query, so the
+    socket connects to the pinned IP and cannot be re-resolved by a rebinder.
+    The ``host_header`` carries the ORIGINAL hostname (+ explicit port) so the
+    webhook receiver still sees the name it was registered under.
+
+    The caller also passes ``extensions={"sni_hostname": <hostname>}`` so the TLS
+    SNI and certificate verification run against the original hostname, NOT the
+    IP literal (proven against httpx 0.28.1 in test_webhook_dns_rebind.py).
+    """
+    parts = urlsplit(address)
+    hostname = parts.hostname or ""
+    port = parts.port
+    # Bracket IPv6 literals for a valid authority.
+    ip_authority = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    if port is not None:
+        netloc = f"{ip_authority}:{port}"
+        host_header = f"{hostname}:{port}"
+    else:
+        netloc = ip_authority
+        host_header = hostname
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return pinned_url, host_header
+
+
 def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
     sanitized = _sanitize_payload(event, payload)
     if sanitized is None:
@@ -283,13 +312,19 @@ def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
         _mark_delivered(event["id"], event["subscription_id"])
         return True
 
-    # SSRF guard (P-CONF-2): never POST to a private/loopback/link-local/IMDS
-    # address. Unsafe addresses can never become deliverable, so stop retrying.
+    # SSRF guard (P-CONF-2 + H9/F-SSRF-1): never POST to a private/loopback/
+    # link-local/IMDS address. Resolve the hostname ONCE and PIN the connection to
+    # that validated IP — assert_safe_url's resolved-then-reconnect pattern left a
+    # DNS-rebind TOCTOU window (httpx re-resolved the hostname at connect time).
+    # resolve_pinned_address rejects the whole URL if ANY resolved record is
+    # private (the rebinder picks which record is served) and returns one safe IP.
+    # Unsafe/unresolvable addresses can never become deliverable, so stop retrying.
     # GHSA-5p3m-vhh6-9236: https-only by default; http requires the explicit
     # operator opt-in (STIGMEM_WEBHOOK_ALLOW_INSECURE_HTTP).
+    address = event["delivery_address"]
     try:
-        assert_safe_url(
-            event["delivery_address"],
+        pinned_ip = resolve_pinned_address(
+            address,
             allow_schemes=_settings_pkg.settings.webhook_allowed_schemes,
         )
     except ValueError as exc:
@@ -300,6 +335,14 @@ def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
         )
         _mark_delivered(event["id"], event["subscription_id"])
         return True
+
+    # Connect to the pinned IP literal (no re-resolution) while verifying the TLS
+    # cert against the ORIGINAL hostname via the sni_hostname extension, and carry
+    # the original Host header. Proven against httpx 0.28.1 in
+    # tests/routes/test_webhook_dns_rebind.py (a real TLS handshake verifies the
+    # cert against the hostname, not the IP).
+    pinned_url, host_header = _build_pinned_request(address, pinned_ip)
+    hostname = urlsplit(address).hostname or ""
 
     body = {
         "event_id": event["id"],
@@ -312,12 +355,14 @@ def _deliver_webhook(event: Any, payload: dict[str, Any]) -> bool:
     try:
         with httpx.Client(timeout=10.0, follow_redirects=False) as client:
             resp = client.post(
-                event["delivery_address"],
+                pinned_url,
                 json=body,
                 headers={
                     "Content-Type": "application/json",
                     "X-Stigmem-Event-Id": event["id"],
+                    "Host": host_header,
                 },
+                extensions={"sni_hostname": hostname},
             )
 
         if resp.status_code == 410:
