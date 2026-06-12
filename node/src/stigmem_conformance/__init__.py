@@ -11,4 +11,4 @@ behavioral contract and emits a Markdown report suitable for embedding
 in operator documentation.
 """
 
-__version__ = "0.9.0a10"
+__version__ = "0.9.0a11"

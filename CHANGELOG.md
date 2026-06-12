@@ -9,8 +9,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ## [Unreleased]
 
+## [0.9.0a11] — 2026-06-11
+
+### Added
+
+- **Federation Multi-Tenancy Phase 2c — multi-hop relay** (#724), default-OFF
+  behind `federation_relay_enabled`. A node may re-federate inbound facts,
+  tombstones, and revocations to its peers under a zero-transitive-trust key
+  resolver (operator-pin → stored-binding → fetch-on-first → fail-closed);
+  per-fact origin signatures are carried verbatim across hops (never re-signed),
+  and relay is additionally gated per peer by `relay_trusted`. The capability is
+  inert unless explicitly enabled with trusted peers — egress stays self-only
+  and ingest fail-closes for a default node. Migrations 045–050 are additive.
+
 ### Changed
 
+- **`/metrics` now requires admin authentication by default** (#726).
+  **Breaking:** set `STIGMEM_METRICS_REQUIRE_AUTH=false` to restore the previous
+  unauthenticated Prometheus scrape for trusted-network deployments.
+- Terminal `subscription_events` past the retention window are now pruned,
+  bounding table growth on the delivery path (#726).
 - Tightened the a11 eval-harness quality gate documentation and release
   readiness posture around `make eval-fast`, path-filtered CI, recall baseline
   behavior, and generated eval result artifacts.
@@ -41,6 +59,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ### Security
 
+- **GHSA-5p3m-vhh6-9236 — blind SSRF via webhook `delivery_address`.**
+  Completed remediation of the webhook delivery SSRF. `delivery_address` is now
+  validated at subscription-creation time (https-only by default), and webhook
+  delivery resolves the host once and pins the connection to the validated IP,
+  closing a DNS-rebinding TOCTOU window while preserving the `Host` header and
+  TLS SNI so certificate verification still binds to the original hostname.
+  Reported by [@chaitanyagarware](https://github.com/chaitanyagarware) — thank
+  you for the responsible disclosure. (#726)
+- Hardened the outbound SSRF address filter to classify IPv4-in-IPv6 embeddings
+  (IPv4-mapped `::ffff:`, 6to4, NAT64) and RFC 6598 CGNAT space as non-public,
+  closing a bypass where an attacker-controlled `AAAA` record could smuggle a
+  blocked IPv4 (loopback, cloud IMDS, or RFC 1918) past the guard. Classification
+  now uses the stdlib address flags in addition to the explicit denylist.
 - Bumped the `hono` workspace override from `>=4.12.18` to `>=4.12.23`
   (resolving `hono@4.12.18` → `4.12.23`), clearing the four moderate Hono
   advisories surfaced by `pnpm audit` (IP-restriction static-deny bypass,

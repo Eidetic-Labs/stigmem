@@ -33,6 +33,7 @@ ALLOWED_RELEASE_MILESTONE_LABELS = {
     "v0.9.0a8",
     "v0.9.0a9",
     "v0.9.0a10",
+    "v0.9.0a11",
 }
 
 FORBIDDEN_RELEASE_TOKENS = {

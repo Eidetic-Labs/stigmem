@@ -8,7 +8,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Discord](https://img.shields.io/discord/1502847943118684331?label=discord&logo=discord&logoColor=white&color=5865F2)](https://discord.gg/Z47Re7FjjV)
 
-> **Status: `v0.9.0a10` - Apache-2.0**
+> **Status: `v0.9.0a11` - Apache-2.0**
 > **Repository:** [github.com/eidetic-labs/stigmem](https://github.com/eidetic-labs/stigmem)
 > **Single-org, single-node, audit-first memory.** Cross-organizational federation is on the roadmap. See [LIMITATIONS.md](LIMITATIONS.md) for current scope.
 
@@ -61,7 +61,7 @@ docker compose up -d
 ```
 
 `docker compose up` pulls pre-built multi-arch images from GHCR
-(`ghcr.io/eidetic-labs/stigmem-node:0.9.0a10`, signed via Sigstore cosign with
+(`ghcr.io/eidetic-labs/stigmem-node:0.9.0a11`, signed via Sigstore cosign with
 attached SBOMs). The recipe pins to the version tag for reproducibility; use
 `docker compose up --build -d` when you are contributing local code changes.
 
@@ -94,7 +94,7 @@ uv run python -m stigmem_node
 
 ### Pre-release via pip
 
-Because `v0.9.0a10` is a PEP 440 pre-release, `pip install stigmem` will not
+Because `v0.9.0a11` is a PEP 440 pre-release, `pip install stigmem` will not
 pick it up by default. Use `--pre` and choose the scope:
 
 ```bash
@@ -330,7 +330,7 @@ Maintainers and contributors are listed in [MAINTAINERS.md](MAINTAINERS.md).
 
 ## Security
 
-To report a vulnerability, use GitHub's private advisory process — **do not open a public issue**. See [SECURITY.md](SECURITY.md) for the full disclosure policy and the v0.9.0a10 security posture statement.
+To report a vulnerability, use GitHub's private advisory process — **do not open a public issue**. See [SECURITY.md](SECURITY.md) for the full disclosure policy and the v0.9.0a11 security posture statement.
 
 The full STRIDE threat model with per-release risk-register status lives at [`spec/security/threat-model.md`](spec/security/threat-model.md). See also [Security posture](#security-posture) above.
 
