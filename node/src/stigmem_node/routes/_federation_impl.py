@@ -117,8 +117,16 @@ async def register_peer_impl(
         )
 
     # Fetch peer's /.well-known/stigmem to retrieve their published pubkey (§5.6 step 1–3)
+    # SSRF guard (NF-2): assert_safe_url runs before the GET so the connection is never
+    # opened for private/internal addresses.  Skipped only when federation_insecure=True
+    # (dev/test mode where the operator has explicitly opted out of URL safety checks).
+    # In production (federation_insecure=False) only https:// peer URLs are accepted.
+    from . import federation as _fed_mod
+
     fetched_pubkey: str | None = None
     try:
+        if not _fed_mod.settings.federation_insecure:
+            assert_safe_url(req.node_url, allow_schemes=frozenset({"https"}))
         async with _make_federation_client() as client:
             wk_resp = await client.get(f"{req.node_url}/.well-known/stigmem")
         if wk_resp.status_code == 200:
@@ -247,10 +255,10 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
         # without the skip, assert_safe_url rejects the loopback URL, the binding
         # never fires, resolve_origin_key fails, and no v2 fact federates between
         # loopback nodes. In production (federation_insecure off) the guard is
-        # always enforced. Note: the registration-time well-known fetch in
-        # _make_federation_client is unguarded (no assert_safe_url at all) — it is
-        # NOT flag+loopback-gated like this fetch, so do not treat the two as the
-        # same mechanism.
+        # always enforced. Note: the registration-time well-known fetch
+        # (register_peer_impl, NF-2) is guarded by assert_safe_url under
+        # federation_insecure ALONE (https-only) — NOT flag+loopback-gated like
+        # this fetch, so do not treat the two as the same mechanism.
         _loopback_dev = _fed.settings.federation_insecure and node_url_is_loopback(node_url)
         if not _loopback_dev:
             assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
@@ -362,10 +370,13 @@ def _authenticate_tombstone_caller(
     try_peer_token_auth: Any,
     get_mtls_peer_cert: Any,
     fed_settings: Any,
-) -> None:
+) -> dict[str, Any] | None:
     """F-1 fix: caller must present a valid peer-JWT OR a tombstone-write capability token.
 
-    Raises HTTPException on any auth failure. Returns None on success.
+    Raises HTTPException on any auth failure. On success returns the authenticated peer
+    row (when authed by peer-JWT) or None (capability-token caller). W6.8: the peer is
+    RETURNED rather than re-resolved by the v2 path — peer tokens carry a single-use nonce,
+    so calling ``try_peer_token_auth`` twice on the same token fails the second nonce check.
     """
     peer_auth = try_peer_token_auth(authorization)
     if peer_auth is not None:
@@ -376,7 +387,8 @@ def _authenticate_tombstone_caller(
                     status_code=401,
                     detail="peer certificate URI SAN does not match node_id",
                 )
-        return
+        peer_row: dict[str, Any] = peer_auth[0]
+        return peer_row
 
     if x_stigmem_capability is None:
         raise HTTPException(status_code=401, detail="peer token or capability token required")
@@ -399,6 +411,7 @@ def _authenticate_tombstone_caller(
         ) from exc
     if cap_token.get("verb", "") not in ("tombstone:write", "write"):
         raise HTTPException(status_code=403, detail="capability token missing tombstone:write verb")
+    return None
 
 
 def _verify_signed_artifact_or_400(
@@ -417,37 +430,53 @@ def _verify_signed_artifact_or_400(
     key-id-not-in-manifest / signature-mismatch). ``missing_manifest_detail`` is
     parameterised because the existing wire contract uses different wording for
     tombstones vs revocations.
+
+    W6.5: the manifest-lookup + key-id-resolve + verify core is the shared
+    ``resolve_and_verify_tombstone_issuer`` (also used by the pull client, closing the
+    W6.1 gap). This wrapper preserves the EXACT push-route HTTP status codes / wire-error
+    strings / audit events by mapping the helper's ``reason`` codes back to them.
     """
-    if not key_id:
-        _audit_tombstone_ingest_rejected(record, artifact_label, f"{artifact_label}_missing_key_id")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{artifact_label} missing key_id",
-        )
-    manifest = get_peer_manifest(signer_uri)
-    if manifest is None:
-        _audit_tombstone_ingest_rejected(record, artifact_label, "signer_manifest_missing")
-        raise HTTPException(status_code=401, detail=missing_manifest_detail)
-    pubkey_b64 = _resolve_pubkey_for_key_id(manifest, key_id)
-    if pubkey_b64 is None:
-        _audit_tombstone_ingest_rejected(record, artifact_label, "key_id_not_in_signer_manifest")
-        raise HTTPException(status_code=401, detail="key_id not in signer manifest")
+    from ..lifecycle.tombstone_signing import (
+        IssuerVerificationError,
+        resolve_and_verify_tombstone_issuer,
+    )
+
     try:
-        verifier(record, pubkey_b64)
-    except ValueError as exc:
+        resolve_and_verify_tombstone_issuer(
+            record, key_id=key_id, signer_uri=signer_uri, verifier=verifier
+        )
+    except IssuerVerificationError as exc:
+        reason = exc.reason
+        if reason == "missing_key_id":
+            _audit_tombstone_ingest_rejected(
+                record, artifact_label, f"{artifact_label}_missing_key_id"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{artifact_label} missing key_id",
+            ) from exc
+        if reason == "signer_manifest_missing":
+            _audit_tombstone_ingest_rejected(record, artifact_label, "signer_manifest_missing")
+            raise HTTPException(status_code=401, detail=missing_manifest_detail) from exc
+        if reason == "key_id_not_in_signer_manifest":
+            _audit_tombstone_ingest_rejected(
+                record, artifact_label, "key_id_not_in_signer_manifest"
+            )
+            raise HTTPException(status_code=401, detail="key_id not in signer manifest") from exc
+        # Signature mismatch (reason is the verifier's ValueError string).
         if on_failure is not None:
-            on_failure(record, str(exc))
-        _audit_tombstone_ingest_rejected(record, artifact_label, str(exc))
+            on_failure(record, reason)
+        _audit_tombstone_ingest_rejected(record, artifact_label, reason)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{artifact_label}_verification_failed: {exc}",
+            detail=f"{artifact_label}_verification_failed: {reason}",
         ) from exc
 
 
 def _ingest_revocation(payload: dict[str, Any], fed_settings: Any) -> dict[str, Any]:
     """Parse + verify + apply an inbound revocation. Returns the success response dict."""
     from ..lifecycle.tombstone_signing import verify_revocation_signature
-    from ..lifecycle.tombstones import apply_inbound_revocation
+    from ..lifecycle.tombstones import RevocationAuthorityMismatch, apply_inbound_revocation
 
     try:
         rev = TombstoneRevocationRecord(**payload)
@@ -464,7 +493,17 @@ def _ingest_revocation(payload: dict[str, Any], fed_settings: Any) -> dict[str, 
         verifier=verify_revocation_signature,
     )
 
-    apply_inbound_revocation(rev)
+    # Same-issuer binding (RTBF integrity): even the bare/back-compat push path must NOT let an
+    # authenticated peer revoke ANOTHER org's tombstone. apply_inbound_revocation is the shared
+    # chokepoint; a signer ≠ tombstone-issuer mismatch fails closed → 403.
+    try:
+        apply_inbound_revocation(rev)
+    except RevocationAuthorityMismatch as exc:
+        _audit_tombstone_payload_rejected(payload, "revocation", RevocationAuthorityMismatch.reason)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"revocation_rejected: {RevocationAuthorityMismatch.reason}",
+        ) from exc
     return {"status": "ok", "type": "revocation"}
 
 
@@ -493,6 +532,148 @@ def _ingest_tombstone(payload: dict[str, Any], fed_settings: Any) -> dict[str, A
     return {"status": "ok", "written": written}
 
 
+# W6.8: reason codes emitted by the SHARED ``ingest_tombstone_entry`` (the v2 secure chain)
+# mapped to the PUSH route's HTTP contract. The pull loop logs+continues on these reasons;
+# the push route surfaces them as 4xx so a posting peer learns its envelope was rejected.
+_V2_INGEST_REASON_HTTP: dict[str, int] = {
+    "malformed_entry": status.HTTP_400_BAD_REQUEST,
+    "missing_tombstone_origin_or_sig": status.HTTP_400_BAD_REQUEST,
+    "malformed_tombstone": status.HTTP_400_BAD_REQUEST,
+    # Rev-3: revocation envelope parse reasons (mirror the tombstone shapes).
+    "missing_revocation_origin_or_sig": status.HTTP_400_BAD_REQUEST,
+    "malformed_revocation": status.HTTP_400_BAD_REQUEST,
+    # origin != sender with relay OFF — the push route is not a weaker path than pull.
+    "origin_not_sender": status.HTTP_403_FORBIDDEN,
+    "relay_sender_not_trusted": status.HTTP_403_FORBIDDEN,
+    "origin_unresolvable": status.HTTP_401_UNAUTHORIZED,
+    "origin_sig_invalid": status.HTTP_400_BAD_REQUEST,
+    "issuer_sig_invalid": status.HTTP_400_BAD_REQUEST,
+    "scope_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
+    # F-2c-MED-2: fact.scope ∉ VALID_SCOPES (non-enum/wildcard scope rejected on ingest).
+    "invalid_scope": status.HTTP_400_BAD_REQUEST,
+    # F-2c-MED-1: origin.tenant ∉ origin.allowed_tenants (ingest/egress symmetry).
+    "tenant_not_in_origin_grant": status.HTTP_403_FORBIDDEN,
+    "tenant_policy_unsafe": status.HTTP_403_FORBIDDEN,
+    # Same-issuer binding: revocation.signed_by != held tombstone's issuer (RTBF integrity).
+    "revocation_authority_mismatch": status.HTTP_403_FORBIDDEN,
+}
+
+
+def _ingest_revocation_v2(
+    entry: dict[str, Any], peer: dict[str, Any] | None, fed_settings: Any
+) -> dict[str, Any]:
+    """Push-ingest ONE v2 revocation envelope entry through the SHARED secure chain (Rev-3).
+
+    Routes the posted envelope through ``ingest_revocation_entry`` — the EXACT verify+apply
+    code path the pull loop uses — so the push surface can never be weaker than pull. A relayed
+    (origin != sender) revocation requires relay ON + the SENDER peer relay_trusted (same
+    fail-closed gate). On a skip/reject the helper's ``reason`` is mapped to the push route's
+    HTTP contract; on success returns ``{"status": "ok", "type": "revocation"}``.
+    """
+    from ..federation.federation_pull import ingest_revocation_entry
+
+    if peer is None:
+        # A v2 envelope needs the authenticated peer (relay_trusted + node_id). Fail closed.
+        _audit_tombstone_payload_rejected(
+            entry.get("revocation", entry), "revocation", "v2_envelope_requires_peer_identity"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="v2 revocation envelope requires an authenticated peer identity",
+        )
+
+    sender_node_id = str(peer["node_id"])
+    try:
+        relay_trusted = bool(peer["relay_trusted"])
+    except (KeyError, IndexError, TypeError):
+        relay_trusted = bool(dict(peer).get("relay_trusted"))
+
+    result = ingest_revocation_entry(
+        entry=entry,
+        sender_node_id=sender_node_id,
+        peer=peer,
+        relay_enabled=fed_settings.federation_relay_enabled,
+        relay_trusted=relay_trusted,
+        relay_cache={},
+    )
+    if result.applied:
+        return {"status": "ok", "type": "revocation"}
+
+    reason = result.reason or "revocation_verification_failed"
+    _audit_tombstone_payload_rejected(entry.get("revocation", entry), "revocation", reason)
+    raise HTTPException(
+        status_code=_V2_INGEST_REASON_HTTP.get(reason, status.HTTP_400_BAD_REQUEST),
+        detail=f"revocation_rejected: {reason}",
+    )
+
+
+def _ingest_tombstone_v2(
+    entry: dict[str, Any], peer: dict[str, Any] | None, fed_settings: Any
+) -> dict[str, Any]:
+    """Push-ingest ONE v2 tombstone envelope entry through the SHARED secure chain.
+
+    Routes the posted envelope through ``ingest_tombstone_entry`` — the EXACT verify+apply
+    code path the pull loop uses (W6.8) — so the push surface can never be weaker than pull.
+    A relayed (origin != sender) tombstone requires relay ON + the SENDER peer relay_trusted
+    (same fail-closed gate). On a skip/reject the helper's ``reason`` is mapped to the push
+    route's HTTP contract; on success returns the existing ``{"status": "ok", "written": ...}``.
+    """
+    from ..federation.federation_pull import ingest_tombstone_entry
+
+    if peer is None:
+        # The shared chain needs the authenticated peer (relay_trusted + tenant policy +
+        # node_id). A capability-token-only caller cannot post a v2 envelope: there is no peer
+        # identity to gate relay/tenant against. Fail closed.
+        _audit_tombstone_payload_rejected(
+            entry.get("tombstone", entry), "tombstone", "v2_envelope_requires_peer_identity"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="v2 tombstone envelope requires an authenticated peer identity",
+        )
+
+    sender_node_id = str(peer["node_id"])
+    try:
+        relay_trusted = bool(peer["relay_trusted"])
+    except (KeyError, IndexError, TypeError):
+        relay_trusted = bool(dict(peer).get("relay_trusted"))
+
+    # Resolve the page-level (direct) ingest tenant fail-closed — same resolver the pull loop
+    # uses for a DIRECT tombstone. A mis-pinned peer ⇒ 403 rather than mis-landing the tombstone.
+    from ..db import db as _db
+    from ..federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
+
+    try:
+        with _db() as conn:
+            direct_tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+    except PeerPolicyError as exc:
+        _audit_tombstone_payload_rejected(
+            entry.get("tombstone", entry), "tombstone", f"tenant_policy_unsafe: {exc}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=f"tenant policy unsafe: {exc}"
+        ) from exc
+
+    result = ingest_tombstone_entry(
+        entry=entry,
+        sender_node_id=sender_node_id,
+        peer=peer,
+        relay_enabled=fed_settings.federation_relay_enabled,
+        relay_trusted=relay_trusted,
+        direct_tenant_id=direct_tenant_id,
+        relay_cache={},
+    )
+    if result.applied:
+        return {"status": "ok", "written": True}
+
+    reason = result.reason or "tombstone_verification_failed"
+    _audit_tombstone_payload_rejected(entry.get("tombstone", entry), "tombstone", reason)
+    raise HTTPException(
+        status_code=_V2_INGEST_REASON_HTTP.get(reason, status.HTTP_400_BAD_REQUEST),
+        detail=f"tombstone_rejected: {reason}",
+    )
+
+
 def federation_ingest_tombstone_impl(
     request: Request,
     payload: dict[str, Any],
@@ -504,7 +685,16 @@ def federation_ingest_tombstone_impl(
     """Inbound tombstone push from a federation peer (§23.4.2).
 
     Auth: peer JWT or capability token with tombstone:write verb (mirrors push_facts).
-    Verifies signature against org manifest, writes to local tombstones table.
+
+    Body shapes (W6.8):
+      * ``{"tombstone_id": ...}``  → revocation ingest (unchanged; later task).
+      * v2 envelope — a single ``{"tombstone", "origin", "origin_sig"}`` entry OR a
+        ``{"v": 2, "tombstones": [...]}`` page → routed through the SHARED secure chain
+        (``ingest_tombstone_entry``) so push and pull verify identically. A relayed
+        (origin != sender) tombstone requires relay ON + sender relay_trusted.
+      * bare ``TombstoneRecord`` (pre-v2) → accepted as a DIRECT, issuer-verified tombstone
+        (received_from=None, origin==self semantics) for back-compat with single-node callers.
+        A relayed tombstone MUST use the v2 envelope (a bare body carries no origin block).
     """
     # Lazy lookup: tests monkey-patch ``federation.settings``.
     from typing import cast as _cast
@@ -513,7 +703,7 @@ def federation_ingest_tombstone_impl(
 
     fed_settings = _cast(Any, _fed_mod).settings
 
-    _authenticate_tombstone_caller(
+    peer = _authenticate_tombstone_caller(
         request,
         authorization,
         x_stigmem_capability,
@@ -522,21 +712,30 @@ def federation_ingest_tombstone_impl(
         fed_settings,
     )
 
+    # v2 enveloped revocation — a single ``{"revocation", "origin", "origin_sig"}`` entry routed
+    # through the SHARED secure chain (Rev-3) so push and pull verify identically. A relayed
+    # (origin != sender) revocation requires relay ON + sender relay_trusted. Checked BEFORE the
+    # bare-revocation path: a v2 entry carries ``tombstone_id`` nested under ``revocation``.
+    if "revocation" in payload and "origin" in payload:
+        return _ingest_revocation_v2(payload, peer, fed_settings)
+
     if "tombstone_id" in payload:
         return _ingest_revocation(payload, fed_settings)
+
+    # v2 enveloped tombstone — a single entry, or a full v2 page of entries. ``peer`` is the
+    # peer already resolved by the auth step (the peer-JWT nonce is single-use, so it is not
+    # re-verified here).
+    if "tombstone" in payload and "origin" in payload:
+        return _ingest_tombstone_v2(payload, peer, fed_settings)
+    if payload.get("v") == 2 and isinstance(payload.get("tombstones"), list):
+        written_any = False
+        for sub_entry in payload["tombstones"]:
+            res = _ingest_tombstone_v2(sub_entry, peer, fed_settings)
+            written_any = written_any or bool(res.get("written"))
+        return {"status": "ok", "written": written_any}
+
+    # Bare (pre-v2) tombstone — back-compat DIRECT issuer-verified path (unchanged).
     return _ingest_tombstone(payload, fed_settings)
-
-
-def _resolve_pubkey_for_key_id(manifest: Any, key_id: str) -> str | None:
-    """Return base64url public key from manifest matching key_id, or None."""
-    if manifest.key_id == key_id:
-        pk: str = manifest.public_key
-        return pk
-    for evt in getattr(manifest, "rotation_events", []):
-        if getattr(evt, "new_key_id", None) == key_id:
-            new_pk: str | None = getattr(evt, "new_public_key", None)
-            return new_pk
-    return None
 
 
 def _emit_tombstone_verification_failed(record: TombstoneRecord, reason: str) -> None:

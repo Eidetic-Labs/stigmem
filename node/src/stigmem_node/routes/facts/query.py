@@ -71,11 +71,15 @@ def _validate_as_of(as_of: str) -> datetime:
 def _legal_hold_blocks_query(conn: Any, entity: str) -> bool:
     """F-14 §24.3.2: True if a legal-hold tombstone covers *entity* (no active revocation)."""
     legal_hold_row = conn.execute(
+        # Same-issuer binding: only a revocation from the tombstone's OWN issuer
+        # (r.signed_by = t.signed_by) lifts the suppression — a forged/cross-issuer
+        # revocation can never clear a legal-hold tombstone (RTBF integrity).
         """SELECT 1 FROM tombstones t
            WHERE t.entity_uri = ?
            AND t.legal_hold = 1
            AND NOT EXISTS (
-               SELECT 1 FROM tombstone_revocations r WHERE r.tombstone_id = t.id
+               SELECT 1 FROM tombstone_revocations r
+               WHERE r.tombstone_id = t.id AND r.signed_by = t.signed_by
            )
            LIMIT 1""",
         (entity,),

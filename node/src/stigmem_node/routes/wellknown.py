@@ -55,7 +55,7 @@ def node_metadata() -> dict[str, object]:
         from ..db import get_node_entity_uri
 
         result["entity_uri"] = get_node_entity_uri()
-        result["federation_version"] = "2.0"
+        result["federation_version"] = "2.1"
         result["federation_endpoints"] = {
             "peers": "/v1/federation/peers",
             "facts": "/v1/federation/facts",

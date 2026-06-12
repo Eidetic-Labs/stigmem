@@ -1263,6 +1263,18 @@
           "origin": {
             "$ref": "#/components/schemas/OriginBlock"
           },
+          "origin_manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Manifest"
+          },
           "origin_sig": {
             "title": "Origin Sig",
             "type": "string"
@@ -1314,7 +1326,8 @@
         "title": "FederationFactsResponse",
         "type": "object"
       },
-      "FederationTombstonesResponse": {
+      "FederationTombstonesResponseV2": {
+        "description": "V2 federation tombstone poll response with per-tombstone origin envelopes.\n\nMirrors FederationFactsResponse; revocations are now ALSO enveloped (Rev-2) so a\nrelayed revocation carries its origin attestation on the wire. Back-compat:\nFederationTombstonesResponse (v1) in tombstones.py is unchanged.",
         "properties": {
           "cursor": {
             "anyOf": [
@@ -1327,27 +1340,36 @@
             ],
             "title": "Cursor"
           },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
           "revocations": {
             "items": {
-              "$ref": "#/components/schemas/TombstoneRevocationRecord"
+              "$ref": "#/components/schemas/RevocationEnvelopeEntry"
             },
             "title": "Revocations",
             "type": "array"
           },
           "tombstones": {
             "items": {
-              "$ref": "#/components/schemas/TombstoneRecord"
+              "$ref": "#/components/schemas/TombstoneEnvelopeEntry"
             },
             "title": "Tombstones",
             "type": "array"
+          },
+          "v": {
+            "default": 2,
+            "title": "V",
+            "type": "integer"
           }
         },
         "required": [
           "tombstones",
-          "revocations",
-          "cursor"
+          "revocations"
         ],
-        "title": "FederationTombstonesResponse",
+        "title": "FederationTombstonesResponseV2",
         "type": "object"
       },
       "GardenCreateRequest": {
@@ -2103,6 +2125,10 @@
             "title": "Allowed Tenants",
             "type": "array"
           },
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
           "node_id": {
             "title": "Node Id",
             "type": "string"
@@ -2116,9 +2142,34 @@
           "tenant",
           "node_id",
           "allowed_scopes",
-          "allowed_tenants"
+          "allowed_tenants",
+          "entity_uri"
         ],
         "title": "OriginBlock",
+        "type": "object"
+      },
+      "OriginPinRequest": {
+        "description": "Body for POST /v1/federation/origin-pins.",
+        "properties": {
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
+          "key_fingerprint": {
+            "title": "Key Fingerprint",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_uri",
+          "node_id",
+          "key_fingerprint"
+        ],
+        "title": "OriginPinRequest",
         "type": "object"
       },
       "PeerApprovalRequest": {
@@ -2954,6 +3005,40 @@
         "title": "RegisterKeyResponse",
         "type": "object"
       },
+      "RevocationEnvelopeEntry": {
+        "description": "V2 per-revocation envelope carrying origin attestation (Phase 2c Rev-2).\n\nMirrors TombstoneEnvelopeEntry for tombstone REVOCATIONS; reuses OriginBlock\nunchanged. A revocation has no entity_uri/scope of its own \u2014 it references a\ntombstone by ``tombstone_id`` \u2014 so its origin attestation binds the revocation\n``id`` + the referenced ``tombstone_id`` + the origin grant (Rev-1's\n``canonical_revocation_origin_tuple``), and the egress gate is TENANT-only.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/OriginBlock"
+          },
+          "origin_manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Manifest"
+          },
+          "origin_sig": {
+            "title": "Origin Sig",
+            "type": "string"
+          },
+          "revocation": {
+            "$ref": "#/components/schemas/TombstoneRevocationRecord"
+          }
+        },
+        "required": [
+          "revocation",
+          "origin",
+          "origin_sig"
+        ],
+        "title": "RevocationEnvelopeEntry",
+        "type": "object"
+      },
       "ScoreBreakdown": {
         "properties": {
           "graph": {
@@ -3310,6 +3395,40 @@
           "entity_uri"
         ],
         "title": "TombstoneCreateRequest",
+        "type": "object"
+      },
+      "TombstoneEnvelopeEntry": {
+        "description": "V2 per-tombstone envelope carrying origin attestation.\n\nMirrors FederationEnvelopeEntry for facts; reuses OriginBlock unchanged.",
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/OriginBlock"
+          },
+          "origin_manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Manifest"
+          },
+          "origin_sig": {
+            "title": "Origin Sig",
+            "type": "string"
+          },
+          "tombstone": {
+            "$ref": "#/components/schemas/TombstoneRecord"
+          }
+        },
+        "required": [
+          "tombstone",
+          "origin",
+          "origin_sig"
+        ],
+        "title": "TombstoneEnvelopeEntry",
         "type": "object"
       },
       "TombstoneNotice": {
@@ -6182,6 +6301,139 @@
         ]
       }
     },
+    "/v1/federation/origin-pins": {
+      "delete": {
+        "description": "Remove an operator pin for (entity_uri, node_id). Requires admin:federation.\n\n``entity_uri`` and ``node_id`` are passed as query parameters to avoid\npath-encoding complications with ``://`` URIs.  Returns 404 when no such\npin exists.",
+        "operationId": "delete_pin_v1_federation_origin_pins_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "entity_uri",
+            "required": true,
+            "schema": {
+              "title": "Entity Uri",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Pin V1 Federation Origin Pins Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Pin",
+        "tags": [
+          "federation"
+        ]
+      },
+      "get": {
+        "description": "List all operator-pinned origins. Requires admin:federation.",
+        "operationId": "list_pins_v1_federation_origin_pins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Pins V1 Federation Origin Pins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Pins",
+        "tags": [
+          "federation"
+        ]
+      },
+      "post": {
+        "description": "Pin an origin's (entity_uri, node_id, key_fingerprint) out-of-band.\n\nIdempotent: re-pinning the same key is a no-op update; re-pinning a\ndifferent key replaces the previous fingerprint (explicit operator action).\nRequires admin:federation.",
+        "operationId": "create_origin_pin_v1_federation_origin_pins_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginPinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Origin Pin V1 Federation Origin Pins Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Origin Pin",
+        "tags": [
+          "federation"
+        ]
+      }
+    },
     "/v1/federation/peers": {
       "get": {
         "operationId": "list_peers_v1_federation_peers_get",
@@ -6374,7 +6626,7 @@
     },
     "/v1/federation/tombstones": {
       "get": {
-        "description": "Tombstone poll route.\n\nRequires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.",
+        "description": "Tombstone poll route (v2 signed-origin envelope, W6.5).\n\nRequires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.",
         "operationId": "federation_list_tombstones_v1_federation_tombstones_get",
         "parameters": [
           {
@@ -6425,7 +6677,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FederationTombstonesResponse"
+                  "$ref": "#/components/schemas/FederationTombstonesResponseV2"
                 }
               }
             },

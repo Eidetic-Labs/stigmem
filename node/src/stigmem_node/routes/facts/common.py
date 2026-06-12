@@ -76,11 +76,15 @@ def _get_tombstone_filter(
                 rollback_exc,
             )
     rows = conn.execute(
+        # Same-issuer binding: only a revocation from the tombstone's OWN issuer
+        # (r.signed_by = t.signed_by) lifts the suppression — a forged/cross-issuer
+        # revocation can never un-suppress content another org tombstoned (RTBF integrity).
         f"""SELECT t.id, t.entity_uri, t.scope, t.created_at, t.legal_hold
             FROM tombstones t
             WHERE t.entity_uri IN ({placeholders})
             AND NOT EXISTS (
-                SELECT 1 FROM tombstone_revocations r WHERE r.tombstone_id = t.id
+                SELECT 1 FROM tombstone_revocations r
+                WHERE r.tombstone_id = t.id AND r.signed_by = t.signed_by
             )""",  # noqa: S608  # nosec B608 - dynamic SQL is generated placeholders only; entity values are bound params.
         entity_uris,
     ).fetchall()

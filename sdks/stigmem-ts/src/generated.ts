@@ -777,6 +777,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/federation/origin-pins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pins
+         * @description List all operator-pinned origins. Requires admin:federation.
+         */
+        get: operations["list_pins_v1_federation_origin_pins_get"];
+        put?: never;
+        /**
+         * Create Origin Pin
+         * @description Pin an origin's (entity_uri, node_id, key_fingerprint) out-of-band.
+         *
+         *     Idempotent: re-pinning the same key is a no-op update; re-pinning a
+         *     different key replaces the previous fingerprint (explicit operator action).
+         *     Requires admin:federation.
+         */
+        post: operations["create_origin_pin_v1_federation_origin_pins_post"];
+        /**
+         * Delete Pin
+         * @description Remove an operator pin for (entity_uri, node_id). Requires admin:federation.
+         *
+         *     ``entity_uri`` and ``node_id`` are passed as query parameters to avoid
+         *     path-encoding complications with ``://`` URIs.  Returns 404 when no such
+         *     pin exists.
+         */
+        delete: operations["delete_pin_v1_federation_origin_pins_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/federation/peers": {
         parameters: {
             query?: never;
@@ -847,7 +883,7 @@ export interface paths {
         };
         /**
          * Federation List Tombstones
-         * @description Tombstone poll route.
+         * @description Tombstone poll route (v2 signed-origin envelope, W6.5).
          *
          *     Requires tombstone:read capability token. Covered by Spec-X2-RTBF-Tombstones.
          */
@@ -1848,6 +1884,10 @@ export interface components {
         FederationEnvelopeEntry: {
             fact: components["schemas"]["FactRecord"];
             origin: components["schemas"]["OriginBlock"];
+            /** Origin Manifest */
+            origin_manifest?: {
+                [key: string]: unknown;
+            } | null;
             /** Origin Sig */
             origin_sig: string;
         };
@@ -1865,14 +1905,31 @@ export interface components {
              */
             v: number;
         };
-        /** FederationTombstonesResponse */
-        FederationTombstonesResponse: {
+        /**
+         * FederationTombstonesResponseV2
+         * @description V2 federation tombstone poll response with per-tombstone origin envelopes.
+         *
+         *     Mirrors FederationFactsResponse; revocations are now ALSO enveloped (Rev-2) so a
+         *     relayed revocation carries its origin attestation on the wire. Back-compat:
+         *     FederationTombstonesResponse (v1) in tombstones.py is unchanged.
+         */
+        FederationTombstonesResponseV2: {
             /** Cursor */
-            cursor: string | null;
+            cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
             /** Revocations */
-            revocations: components["schemas"]["TombstoneRevocationRecord"][];
+            revocations: components["schemas"]["RevocationEnvelopeEntry"][];
             /** Tombstones */
-            tombstones: components["schemas"]["TombstoneRecord"][];
+            tombstones: components["schemas"]["TombstoneEnvelopeEntry"][];
+            /**
+             * V
+             * @default 2
+             */
+            v: number;
         };
         /** GardenCreateRequest */
         GardenCreateRequest: {
@@ -2159,10 +2216,24 @@ export interface components {
             allowed_scopes: string[];
             /** Allowed Tenants */
             allowed_tenants: string[];
+            /** Entity Uri */
+            entity_uri: string;
             /** Node Id */
             node_id: string;
             /** Tenant */
             tenant: string;
+        };
+        /**
+         * OriginPinRequest
+         * @description Body for POST /v1/federation/origin-pins.
+         */
+        OriginPinRequest: {
+            /** Entity Uri */
+            entity_uri: string;
+            /** Key Fingerprint */
+            key_fingerprint: string;
+            /** Node Id */
+            node_id: string;
         };
         /** PeerApprovalRequest */
         PeerApprovalRequest: {
@@ -2482,6 +2553,26 @@ export interface components {
             /** Tenant Id */
             tenant_id: string;
         };
+        /**
+         * RevocationEnvelopeEntry
+         * @description V2 per-revocation envelope carrying origin attestation (Phase 2c Rev-2).
+         *
+         *     Mirrors TombstoneEnvelopeEntry for tombstone REVOCATIONS; reuses OriginBlock
+         *     unchanged. A revocation has no entity_uri/scope of its own — it references a
+         *     tombstone by ``tombstone_id`` — so its origin attestation binds the revocation
+         *     ``id`` + the referenced ``tombstone_id`` + the origin grant (Rev-1's
+         *     ``canonical_revocation_origin_tuple``), and the egress gate is TENANT-only.
+         */
+        RevocationEnvelopeEntry: {
+            origin: components["schemas"]["OriginBlock"];
+            /** Origin Manifest */
+            origin_manifest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Origin Sig */
+            origin_sig: string;
+            revocation: components["schemas"]["TombstoneRevocationRecord"];
+        };
         /** ScoreBreakdown */
         ScoreBreakdown: {
             /**
@@ -2641,6 +2732,22 @@ export interface components {
             scope: string;
         };
         /**
+         * TombstoneEnvelopeEntry
+         * @description V2 per-tombstone envelope carrying origin attestation.
+         *
+         *     Mirrors FederationEnvelopeEntry for facts; reuses OriginBlock unchanged.
+         */
+        TombstoneEnvelopeEntry: {
+            origin: components["schemas"]["OriginBlock"];
+            /** Origin Manifest */
+            origin_manifest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Origin Sig */
+            origin_sig: string;
+            tombstone: components["schemas"]["TombstoneRecord"];
+        };
+        /**
          * TombstoneNotice
          * @description Tombstone metadata surfaced to admin callers on time-travel queries.
          *
@@ -2780,7 +2887,7 @@ export type SchemaFactRecord = components['schemas']['FactRecord'];
 export type SchemaFactValue = components['schemas']['FactValue'];
 export type SchemaFederationEnvelopeEntry = components['schemas']['FederationEnvelopeEntry'];
 export type SchemaFederationFactsResponse = components['schemas']['FederationFactsResponse'];
-export type SchemaFederationTombstonesResponse = components['schemas']['FederationTombstonesResponse'];
+export type SchemaFederationTombstonesResponseV2 = components['schemas']['FederationTombstonesResponseV2'];
 export type SchemaGardenCreateRequest = components['schemas']['GardenCreateRequest'];
 export type SchemaGardenMemberRecord = components['schemas']['GardenMemberRecord'];
 export type SchemaGardenMemberRequest = components['schemas']['GardenMemberRequest'];
@@ -2797,6 +2904,7 @@ export type SchemaMemoryCardResponse = components['schemas']['MemoryCardResponse
 export type SchemaNeighborItem = components['schemas']['NeighborItem'];
 export type SchemaNeighborsResponse = components['schemas']['NeighborsResponse'];
 export type SchemaOriginBlock = components['schemas']['OriginBlock'];
+export type SchemaOriginPinRequest = components['schemas']['OriginPinRequest'];
 export type SchemaPeerApprovalRequest = components['schemas']['PeerApprovalRequest'];
 export type SchemaPeerApprovalResponse = components['schemas']['PeerApprovalResponse'];
 export type SchemaPeerPolicyPatch = components['schemas']['PeerPolicyPatch'];
@@ -2815,6 +2923,7 @@ export type SchemaRecallResponse = components['schemas']['RecallResponse'];
 export type SchemaRecallWeights = components['schemas']['RecallWeights'];
 export type SchemaRegisterKeyRequest = components['schemas']['RegisterKeyRequest'];
 export type SchemaRegisterKeyResponse = components['schemas']['RegisterKeyResponse'];
+export type SchemaRevocationEnvelopeEntry = components['schemas']['RevocationEnvelopeEntry'];
 export type SchemaScoreBreakdown = components['schemas']['ScoreBreakdown'];
 export type SchemaScoredFact = components['schemas']['ScoredFact'];
 export type SchemaSubscriptionCreateRequest = components['schemas']['SubscriptionCreateRequest'];
@@ -2823,6 +2932,7 @@ export type SchemaSubscriptionEventsResponse = components['schemas']['Subscripti
 export type SchemaSubscriptionListResponse = components['schemas']['SubscriptionListResponse'];
 export type SchemaSubscriptionRecord = components['schemas']['SubscriptionRecord'];
 export type SchemaTombstoneCreateRequest = components['schemas']['TombstoneCreateRequest'];
+export type SchemaTombstoneEnvelopeEntry = components['schemas']['TombstoneEnvelopeEntry'];
 export type SchemaTombstoneNotice = components['schemas']['TombstoneNotice'];
 export type SchemaTombstoneRecord = components['schemas']['TombstoneRecord'];
 export type SchemaTombstoneRevocationRecord = components['schemas']['TombstoneRevocationRecord'];
@@ -4111,6 +4221,97 @@ export interface operations {
             };
         };
     };
+    list_pins_v1_federation_origin_pins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    create_origin_pin_v1_federation_origin_pins_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OriginPinRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_pin_v1_federation_origin_pins_delete: {
+        parameters: {
+            query: {
+                entity_uri: string;
+                node_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_peers_v1_federation_peers_get: {
         parameters: {
             query?: never;
@@ -4258,7 +4459,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FederationTombstonesResponse"];
+                    "application/json": components["schemas"]["FederationTombstonesResponseV2"];
                 };
             };
             /** @description Validation Error */

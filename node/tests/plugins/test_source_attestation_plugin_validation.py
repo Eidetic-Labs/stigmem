@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import importlib
 import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -84,6 +85,7 @@ def _bound_v2_federated_fact(
         "node_id": node_id,
         "allowed_scopes": [scope],
         "allowed_tenants": ["default"],
+        "entity_uri": f"https://{node_id.split('/')[-1]}.example",
     }
     entry = make_v2_entry(priv, fact=fact, origin=origin)
     return entry["fact"], entry["origin"], entry["origin_sig"]
@@ -155,7 +157,7 @@ def test_plugin_loaded_allows_normalized_assert_source_match(
     assert response.status_code == 201, response.text
 
 
-def test_recall_rank_hook_site_is_inert_until_plugin_gate_enabled(monkeypatch) -> None:
+def test_recall_rank_hook_site_is_inert_until_plugin_gate_enabled(migrated_db, monkeypatch) -> None:
     record = _fact_record()
     identity = Identity("stigmem://example.test/agent/caller", ["read"])
     weights = RecallWeights(lexical=0.0, semantic=0.0, graph=0.0, source_trust=1.0, recency=0.0)
@@ -188,7 +190,7 @@ def test_recall_rank_hook_site_is_inert_until_plugin_gate_enabled(monkeypatch) -
     assert plugin_scores[0].score > default_scores[0].score
 
 
-def test_default_install_ignores_recall_rank_environment_gates(monkeypatch) -> None:
+def test_default_install_ignores_recall_rank_environment_gates(migrated_db, monkeypatch) -> None:
     record = _fact_record()
     identity = Identity("stigmem://example.test/agent/caller", ["read"])
     weights = RecallWeights(lexical=0.0, semantic=0.0, graph=0.0, source_trust=1.0, recency=0.0)
@@ -213,7 +215,9 @@ def test_default_install_ignores_recall_rank_environment_gates(monkeypatch) -> N
     assert default_scores[0].score == 0.0
 
 
-def test_plugin_loaded_ignores_recall_rank_when_source_weight_disabled(monkeypatch) -> None:
+def test_plugin_loaded_ignores_recall_rank_when_source_weight_disabled(
+    migrated_db, monkeypatch
+) -> None:
     record = _fact_record()
     identity = Identity("stigmem://example.test/agent/caller", ["read"])
     weights = RecallWeights(
@@ -353,6 +357,10 @@ def _fact_record() -> FactRecord:
 
 class _FederationIngestStub:
     ingested_facts: list[dict[str, object]] = []
+    # Provide the settings namespace the 2c push path reads via
+    # _public_module().settings.federation_relay_enabled.  Relay is OFF so
+    # these non-relay tests exercise the direct (origin==sender) path unchanged.
+    settings: object = types.SimpleNamespace(federation_relay_enabled=False)
 
     def ingest_fact(self, fact: dict[str, object], *_args, **_kwargs) -> None:
         self.ingested_facts.append(fact)

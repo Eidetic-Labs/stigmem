@@ -91,6 +91,7 @@ def _v2_body(issuer: str, fact: dict[str, Any]) -> dict[str, Any]:
         "node_id": issuer,
         "allowed_scopes": [fact["scope"]],
         "allowed_tenants": ["default"],
+        "entity_uri": issuer,
     }
     sig = sign_origin(
         _priv_from_settings(),

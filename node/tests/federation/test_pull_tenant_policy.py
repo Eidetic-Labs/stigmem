@@ -209,6 +209,7 @@ def test_pull_pinned_peer_stamps_tenant_on_pulled_facts(
         "node_id": peer_node_id,
         "allowed_scopes": ["public"],
         "allowed_tenants": ["tenant-a"],
+        "entity_uri": peer_node_id,
     }
     envelope = make_v2_envelope(priv, facts=[fact], origin=origin)
 

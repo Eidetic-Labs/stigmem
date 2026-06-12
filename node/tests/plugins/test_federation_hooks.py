@@ -66,6 +66,7 @@ def _bound_v2_fact(
         "node_id": node_id,
         "allowed_scopes": [scope],
         "allowed_tenants": ["default"],
+        "entity_uri": f"https://{node_id.split(':')[-1]}.example",
     }
     entry = make_v2_entry(priv, fact=fact, origin=origin)
     return entry["fact"], entry["origin"], entry["origin_sig"]

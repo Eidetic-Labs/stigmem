@@ -72,9 +72,19 @@ class Settings(BaseSettings):
     # wider archival bound and may be set to 0 for one-off historical backfills.
     federation_hlc_max_future_skew_s: int = 300
     federation_hlc_max_past_skew_s: int = 2_592_000
+    # Dual-trust grace window (hours) for an origin's PRIOR (retired) signing key.
+    # After a key rotation, the retiring key is accepted alongside the current key
+    # only while now - rotation_event.rotated_at <= this window; past it the prior
+    # key is DROPPED (a stale/compromised retired key can no longer forge origin
+    # signatures, direct or relayed). Generous 7-day default so legitimate
+    # in-progress rotations are never disrupted; the current key is always accepted.
+    federation_key_rotation_grace_hours: int = 168
     # Allow team-scoped facts to cross federation boundaries
     # (must be explicitly enabled; audit-logged).
     federation_allow_team: bool = False
+    # Relay re-federates inbound facts only when ON, subject to origin
+    # scope/tenant propagation (Phase 2c). Default OFF = today's behaviour.
+    federation_relay_enabled: bool = False
 
     # Decay sweeper (Phase 6, spec §decay)
     # 0 = disabled; positive = decay non-expiring facts older than N seconds

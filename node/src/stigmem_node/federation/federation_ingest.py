@@ -263,6 +263,7 @@ def ingest_fact(
     origin_tenant: str | None = None,
     origin_allowed_tenants: list[str] | None = None,
     origin_sig: str | None = None,
+    origin_entity_uri: str | None = None,
     identity_strength_boost: float | None = None,
 ) -> bool:
     """Idempotently ingest a federated fact.
@@ -344,12 +345,16 @@ def ingest_fact(
     eff_origin_tenants: str | None = (
         json.dumps(sorted(origin_allowed_tenants)) if origin_allowed_tenants is not None else None
     )
+    # Phase 2c W3.1 (Migration 046): persist the verified origin entity_uri (the value bound
+    # into the v2.1 signed origin tuple). NULL for local-origin / pre-v2.1 facts. A relayed
+    # fact forwards this stored value so its origin_sig verifies against the ORIGIN's manifest.
+    eff_origin_entity_uri: str | None = origin_entity_uri
     # company-scope facts: re-federation is blocked by default (§6.8.2)
     re_fed_blocked = 1 if scope == "company" else 0
 
     with db() as conn:
         existing = conn.execute(
-            "SELECT id, valid_until FROM facts WHERE id = ?",
+            "SELECT id, valid_until, cid FROM facts WHERE id = ?",
             (fact_id,),
         ).fetchone()
         if existing is not None:
@@ -365,6 +370,23 @@ def ingest_fact(
                 _audit_valid_until_extension(conn=conn, exc=violation)
                 conn.commit()
                 raise violation
+            # F-1 residual (Phase 2c W5.1): a wire id that already exists locally
+            # with a DIFFERENT cid is either a relay pre-occupation attempt or a bug
+            # in the sender.  Fail closed: reject and audit; do NOT overwrite or
+            # silently treat as a duplicate.  Same-cid = legitimate idempotent re-pull
+            # (spec §5.8) — fall through to the existing no-op path below.
+            existing_cid = existing["cid"]
+            if existing_cid is not None and inbound_cid is not None and existing_cid != inbound_cid:
+                collision = FederationIntegrityError(
+                    fact_id=fact_id,
+                    sender_node_id=sender_node_id,
+                    reason="wire_id_collision",
+                    stored_cid=existing_cid,
+                    computed_cid=inbound_cid,
+                )
+                _audit_peer_integrity_failure(conn=conn, exc=collision)
+                conn.commit()
+                raise collision
             return False  # already ingested; silent no-op per spec §5.8
 
         # Advance HLC (spec §6.3)
@@ -401,8 +423,8 @@ def ingest_fact(
                 origin_node_id, origin_allowed_scopes, re_federation_blocked,
                 source_trust, quarantine_garden_id, quarantine_status,
                 quarantine_reason, interpret_as, cid, tenant_id,
-                origin_tenant, origin_allowed_tenants, origin_sig)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                origin_tenant, origin_allowed_tenants, origin_sig, origin_entity_uri)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fact_id,
                 fact["entity"],
@@ -429,6 +451,7 @@ def ingest_fact(
                 origin_tenant,
                 eff_origin_tenants,
                 origin_sig,
+                eff_origin_entity_uri,
             ),
         )
 

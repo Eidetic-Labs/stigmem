@@ -102,6 +102,74 @@ def verify_tombstone_signature(record: TombstoneRecord, public_key_b64: str) -> 
         raise ValueError(f"tombstone signature error: {exc}") from exc
 
 
+class IssuerVerificationError(ValueError):
+    """The tombstone/revocation ISSUER-signer signature could not be verified (fail-closed).
+
+    ``reason`` is a short machine-stable code so callers (push route HTTP wrapper, pull
+    client log line) can branch / report consistently without parsing the message.
+    """
+
+    def __init__(self, reason: str, message: str | None = None) -> None:
+        self.reason = reason
+        super().__init__(message or reason)
+
+
+def _resolve_pubkey_for_key_id(manifest: Any, key_id: str) -> str | None:
+    """Return base64url public key from *manifest* matching *key_id*, or None.
+
+    Matches the manifest's current key, else scans rotation_events for a matching
+    ``new_key_id`` (dual-trust rotation window). Shared by the push route and the pull
+    client so both resolve the issuer key identically.
+    """
+    if manifest.key_id == key_id:
+        pk: str = manifest.public_key
+        return pk
+    for evt in getattr(manifest, "rotation_events", []):
+        if getattr(evt, "new_key_id", None) == key_id:
+            new_pk: str | None = getattr(evt, "new_public_key", None)
+            return new_pk
+    return None
+
+
+def resolve_and_verify_tombstone_issuer(
+    record: Any,
+    *,
+    key_id: str,
+    signer_uri: str,
+    verifier: Any,
+) -> None:
+    """Resolve the signer manifest, pick the signing key, and verify the issuer signature.
+
+    The single shared issuer-signer verification used by BOTH the push ingest route
+    (``routes/_federation_impl._verify_signed_artifact_or_400`` wraps this into HTTP
+    errors + audit) and the pull client (``federation_pull.pull_tombstones_from_peer_once``,
+    which closes the W6.1 gap where pull did NOT verify the issuer). Keeping it in one place
+    means push and pull can never drift.
+
+    Raises ``IssuerVerificationError(reason=...)`` on any failure. ``reason`` is one of:
+    ``missing_key_id`` / ``signer_manifest_missing`` / ``key_id_not_in_signer_manifest`` /
+    a verifier ValueError string (signature mismatch). Returns None == verified.
+    """
+    from ..identity.trust_store import get_peer_manifest
+
+    if not key_id:
+        raise IssuerVerificationError("missing_key_id", "tombstone missing key_id")
+    manifest = get_peer_manifest(signer_uri)
+    if manifest is None:
+        raise IssuerVerificationError(
+            "signer_manifest_missing", f"no manifest for signer {signer_uri!r}"
+        )
+    pubkey_b64 = _resolve_pubkey_for_key_id(manifest, key_id)
+    if pubkey_b64 is None:
+        raise IssuerVerificationError(
+            "key_id_not_in_signer_manifest", "key_id not in signer manifest"
+        )
+    try:
+        verifier(record, pubkey_b64)
+    except ValueError as exc:
+        raise IssuerVerificationError(str(exc), str(exc)) from exc
+
+
 def _revocation_signing_body(record: TombstoneRevocationRecord) -> bytes:
     """JCS-canonical bytes over TombstoneRevocationRecord with 'signature' and 'reason' excluded."""
     doc: dict[str, Any] = {
