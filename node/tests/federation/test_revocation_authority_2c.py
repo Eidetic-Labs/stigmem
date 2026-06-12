@@ -172,7 +172,7 @@ def test_a_relayed_cross_issuer_revocation_rejected(relay_nodes: Any, monkeypatc
 
     asyncio.run(
         pull_tombstones_from_peer_once(
-            _peer_dict(sender_node_id, relay_trusted=1), _FakeClient(page), None
+            _peer_dict(sender_node_id, relay_ok=1), _FakeClient(page), None
         )
     )
     # Rejected: no revocation row written.
@@ -220,7 +220,7 @@ def test_b_relayed_same_issuer_revocation_applied(relay_nodes: Any, monkeypatch:
 
     asyncio.run(
         pull_tombstones_from_peer_once(
-            _peer_dict(sender_node_id, relay_trusted=1), _FakeClient(page), None
+            _peer_dict(sender_node_id, relay_ok=1), _FakeClient(page), None
         )
     )
     # Applied: revocation row written + entity reinstated.
@@ -317,7 +317,7 @@ def test_e_unknown_tombstone_forged_revocation_inert(
     page = _v2_page([entry], cursor="auth-e")
     asyncio.run(
         pull_tombstones_from_peer_once(
-            _peer_dict(sender_node_id, relay_trusted=1), _FakeClient(page), None
+            _peer_dict(sender_node_id, relay_ok=1), _FakeClient(page), None
         )
     )
 
