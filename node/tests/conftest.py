@@ -374,10 +374,12 @@ def client(tmp_db: str, backend: str, encrypt: str) -> Generator[TestClient, Non
         tmp_db, backend, encrypt, auth_required=False, node_url="http://testnode"
     )
     extra = _patch_settings(test_settings)
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
-    _restore_settings(original, extra)
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+    finally:
+        _restore_settings(original, extra)
 
 
 def _time_travel_plugin_manifest() -> PluginManifest:
@@ -409,11 +411,13 @@ def time_travel_client(
         tmp_db, backend, encrypt, auth_required=False, node_url="http://testnode"
     )
     extra = _patch_settings(test_settings)
-    with stigmem_plugins([_time_travel_plugin_manifest(), _tombstone_plugin_manifest()]):
-        app = create_app()
-        with TestClient(app, raise_server_exceptions=True) as c:
-            yield c
-    _restore_settings(original, extra)
+    try:
+        with stigmem_plugins([_time_travel_plugin_manifest(), _tombstone_plugin_manifest()]):
+            app = create_app()
+            with TestClient(app, raise_server_exceptions=True) as c:
+                yield c
+    finally:
+        _restore_settings(original, extra)
 
 
 @pytest.fixture()
@@ -431,10 +435,12 @@ def client_async_threshold(
         async_job_threshold=0,
     )
     extra = _patch_settings(test_settings)
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
-    _restore_settings(original, extra)
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+    finally:
+        _restore_settings(original, extra)
 
 
 @pytest.fixture()
@@ -448,10 +454,12 @@ def authed_client(
     )
     extra = _patch_settings(test_settings)
     raw_key = create_api_key("agent:test", ["read", "write"])
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c, raw_key
-    _restore_settings(original, extra)
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c, raw_key
+    finally:
+        _restore_settings(original, extra)
 
 
 # ---------------------------------------------------------------------------
@@ -512,20 +520,22 @@ def fed_node(tmp_path: object) -> Generator[FedNode, None, None]:
 
     raw_key = create_api_key("agent:test-fed", ["read", "write", "federate"])
 
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield FedNode(
-            client=c,
-            db_path=db_file,
-            node_id=node_id,
-            pub_b64=pub_b64,
-            priv_b64=priv_b64,
-            federate_key=raw_key,
-            node_url=node_url,
-        )
-    _restore_settings(original, extra)
-    token_mod._cached_pub = None
-    token_mod._cached_priv = None
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield FedNode(
+                client=c,
+                db_path=db_file,
+                node_id=node_id,
+                pub_b64=pub_b64,
+                priv_b64=priv_b64,
+                federate_key=raw_key,
+                node_url=node_url,
+            )
+    finally:
+        _restore_settings(original, extra)
+        token_mod._cached_pub = None
+        token_mod._cached_priv = None
 
 
 @pytest.fixture()
@@ -569,17 +579,19 @@ def fed_node_a(tmp_path: object) -> Generator[FedNode, None, None]:
 
     raw_key = create_api_key("agent:test-fed", ["read", "write", "federate"])
 
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield FedNode(
-            client=c,
-            db_path=db_file,
-            node_id=node_id,
-            pub_b64=pub_b64,
-            priv_b64=priv_b64,
-            federate_key=raw_key,
-            node_url=node_url,
-        )
-    _restore_settings(original, extra)
-    token_mod._cached_pub = None
-    token_mod._cached_priv = None
+    try:
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield FedNode(
+                client=c,
+                db_path=db_file,
+                node_id=node_id,
+                pub_b64=pub_b64,
+                priv_b64=priv_b64,
+                federate_key=raw_key,
+                node_url=node_url,
+            )
+    finally:
+        _restore_settings(original, extra)
+        token_mod._cached_pub = None
+        token_mod._cached_priv = None

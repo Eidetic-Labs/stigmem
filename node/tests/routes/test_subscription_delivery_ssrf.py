@@ -45,7 +45,9 @@ def test_webhook_blocks_loopback(monkeypatch):
 
 def test_webhook_sends_to_safe_url_without_following_redirects(monkeypatch):
     monkeypatch.setattr(sd, "_sanitize_payload", lambda e, p: {"ok": 1})
-    monkeypatch.setattr(sd, "assert_safe_url", lambda *a, **k: None)  # treat as safe
+    # H9: a safe URL resolves to a pinned public IP; delivery POSTs to that IP
+    # literal (no re-resolution) while preserving the hostname for Host/SNI.
+    monkeypatch.setattr(sd, "resolve_pinned_address", lambda *a, **k: "203.0.113.4")
 
     resp = MagicMock()
     resp.status_code = 200
@@ -60,4 +62,8 @@ def test_webhook_sends_to_safe_url_without_following_redirects(monkeypatch):
 
     assert result is True
     client.post.assert_called_once()
+    # Pinned to the validated IP, not the re-resolvable hostname.
+    assert client.post.call_args.args[0] == "https://203.0.113.4/hook"
+    assert client.post.call_args.kwargs["headers"]["Host"] == "example.com"
+    assert client.post.call_args.kwargs["extensions"]["sni_hostname"] == "example.com"
     assert client_ctor.call_args.kwargs.get("follow_redirects") is False

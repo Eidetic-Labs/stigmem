@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # When True (default), every request must carry a valid Bearer token.
     # Set to False only for local development / single-operator installs.
     auth_required: bool = True
+    # /metrics (Prometheus) leaks per-principal entity_uri/tenant/peer labels and
+    # enables unbounded-cardinality DoS, so it requires the admin capability by
+    # default (M11 / F-AVAIL-1).  Set False only where /metrics is otherwise
+    # access-controlled, e.g. behind a private scrape interface or a sidecar proxy.
+    metrics_require_auth: bool = True
     # Static API-key lifecycle controls. 0 disables max-age enforcement.
     api_key_max_age_days: int = 90
     api_key_expiring_soon_days: int = 30
@@ -323,6 +328,25 @@ class Settings(BaseSettings):
     # F-AVAIL-3: cap on active subscriptions per (subscriber_identity, tenant).
     # 0 disables the cap. Default is generous; raise for high-fan-out operators.
     max_subscriptions_per_principal: int = 1000
+    # M12 / F-AVAIL-2: terminal (delivered/failed) subscription_events older than
+    # this are pruned by the delivery sweep so the table cannot grow unbounded.
+    # Clamped to >= subscription_replay_s at prune time so the replay window is
+    # never truncated.  0 disables pruning entirely.
+    subscription_event_retention_s: int = 604800  # 7 days
+    # GHSA-5p3m-vhh6-9236: webhook delivery_address must be https by default.
+    # When False (default), a webhook delivery_address is required to be https at
+    # both creation and delivery time. Set True ONLY for local/dev where http
+    # webhooks are needed — this is the advisory's explicit, operator-controlled
+    # opt-in for the insecure http scheme. https-only blocks plaintext exfil and
+    # narrows the SSRF surface.
+    webhook_allow_insecure_http: bool = False
+
+    @property
+    def webhook_allowed_schemes(self) -> frozenset[str]:
+        """Allowed schemes for webhook delivery_address (https-only by default)."""
+        if self.webhook_allow_insecure_http:
+            return frozenset({"https", "http"})
+        return frozenset({"https"})
 
     # -------------------------------------------------------------------------
     # mTLS Federation Transport — Phase 12 (spec §22.1)

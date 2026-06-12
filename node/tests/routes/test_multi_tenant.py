@@ -616,9 +616,25 @@ def test_recall_trace_span_uses_resolved_tenant(two_tenants: tuple) -> None:
     assert tracer.last_span.attributes["stigmem.tenant"] == "tenant-a"
 
 
-def test_subscription_fan_out_scoped_by_tenant(two_tenants: tuple) -> None:
+def test_subscription_fan_out_scoped_by_tenant(
+    two_tenants: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Background subscription fan-out does not enqueue cross-tenant events."""
     client, key_a, key_b = two_tenants
+
+    # GHSA-5p3m-vhh6-9236 added a creation-time SSRF guard that does a real DNS
+    # lookup; this test's placeholder host (tenant-a.example) does not resolve.
+    # Neutralize resolution to a scheme-only check — this test exercises tenant
+    # fan-out scoping, not network safety (covered in test_subscription_webhook_ssrf_creation).
+    from urllib.parse import urlparse
+
+    import stigmem_node.routes.subscriptions as _subs_route
+
+    def _scheme_only(url: str, *, allow_schemes=frozenset({"https"})) -> None:
+        if urlparse(url).scheme not in allow_schemes:
+            raise ValueError(f"Disallowed URL scheme: {urlparse(url).scheme!r}")
+
+    monkeypatch.setattr(_subs_route, "assert_safe_url", _scheme_only)
 
     sub_resp = client.post(
         "/v1/subscriptions",

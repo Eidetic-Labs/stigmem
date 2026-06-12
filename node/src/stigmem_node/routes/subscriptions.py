@@ -28,6 +28,7 @@ from ..models.subscriptions import (
     SubscriptionListResponse,
     SubscriptionRecord,
 )
+from ..net_util import assert_safe_url
 from ..subscription_delivery import _sanitize_payload as _sanitize_event_payload
 
 router = APIRouter(prefix="/v1/subscriptions", tags=["subscriptions"])
@@ -109,6 +110,23 @@ def create_subscription(
         if garden is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garden not found")
         require_garden_read(garden, identity)
+
+    # GHSA-5p3m-vhh6-9236: validate a webhook delivery_address BEFORE persisting,
+    # so an unsafe URL is rejected (400) rather than stored-then-blocked-at-delivery.
+    # https-only by default; http requires the explicit operator opt-in. A `wake`
+    # subscription's delivery_address is an identity URI (not a fetchable URL), so
+    # it is deliberately NOT subjected to the SSRF guard.
+    if req.on_change == "webhook":
+        try:
+            assert_safe_url(
+                req.delivery_address,
+                allow_schemes=_settings_pkg.settings.webhook_allowed_schemes,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unsafe webhook delivery_address: {exc}",
+            ) from exc
 
     # Idempotency key: return existing subscription if key matches THIS caller.
     # Scoped to subscriber and tenant to prevent cross-entity metadata leakage (R2).

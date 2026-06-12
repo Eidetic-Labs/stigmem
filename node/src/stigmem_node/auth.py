@@ -322,6 +322,22 @@ def resolve_identity(
     return _apply_identity_hooks(identity, raw_credentials=creds.credentials)
 
 
+def resolve_identity_optional(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(BEARER)],
+) -> Identity | None:
+    """Dependency: resolve identity from Bearer token without the auth_required gate.
+
+    Returns None when no credential is supplied or the credential is invalid/expired.
+    Used by routes that handle auth themselves (e.g. /metrics with metrics_require_auth).
+    """
+    if creds is None:
+        return None
+    identity = _lookup(creds.credentials)
+    if identity is None:
+        return None
+    return _apply_identity_hooks(identity, raw_credentials=creds.credentials)
+
+
 def _apply_identity_hooks(identity: Identity, raw_credentials: str | None) -> Identity:
     registry = get_registry()
     resolved = registry.fire_filter_chain(

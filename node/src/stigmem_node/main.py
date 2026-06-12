@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import uvicorn
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from .auth import Identity, resolve_identity
+from .auth import Identity, resolve_identity, resolve_identity_optional
 from .body_limit import BodySizeLimitMiddleware
 from .db import apply_migrations
 from .net_util import node_url_is_loopback
@@ -359,7 +359,26 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/metrics", include_in_schema=False, tags=["ops"])
-    def prometheus_metrics() -> Response:
+    def prometheus_metrics(
+        identity: Annotated[Identity | None, Depends(resolve_identity_optional)],
+    ) -> Response:
+        # M11 / F-AVAIL-1: /metrics leaks per-principal labels + enables cardinality
+        # DoS, so require the admin capability by default.  Set
+        # STIGMEM_METRICS_REQUIRE_AUTH=false only where /metrics is otherwise
+        # access-controlled (e.g. a private scrape interface or sidecar proxy).
+        if settings.metrics_require_auth:
+            if identity is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authorization required to scrape /metrics",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            if not identity.is_admin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="admin capability required to scrape /metrics",
+                )
+
         from .observability.metrics import make_metrics_response
 
         resp = make_metrics_response()
