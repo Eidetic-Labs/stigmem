@@ -20,8 +20,8 @@ import stigmem_node.db as db_mod
 import stigmem_node.main as main_mod
 import stigmem_node.routes.wellknown as wk_mod
 import stigmem_node.settings as settings_module
-from stigmem_node.main import create_app
 
+create_app = main_mod.create_app
 create_api_key = auth_mod.create_api_key
 apply_migrations = db_mod.apply_migrations
 Settings = settings_module.Settings

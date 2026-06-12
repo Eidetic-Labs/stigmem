@@ -28,7 +28,8 @@ import pytest
 import stigmem_node.db as db_mod
 import stigmem_node.settings as settings_mod
 import stigmem_node.subscription_delivery as delivery_mod
-from stigmem_node.settings import Settings
+
+Settings = settings_mod.Settings
 
 # ---------------------------------------------------------------------------
 # Helpers

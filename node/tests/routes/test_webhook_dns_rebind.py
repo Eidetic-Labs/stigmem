@@ -36,8 +36,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+import stigmem_node.net_util as nu
 import stigmem_node.subscription_delivery as sd
-from stigmem_node.net_util import resolve_pinned_address
 
 TEST_HOST = "webhook.test"
 
@@ -101,6 +101,7 @@ def _serve_https(cert_path: str, key_path: str, recorder: _Recorder) -> tuple[HT
 
     srv = HTTPServer(("127.0.0.1", 0), Handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2  # refuse legacy TLSv1/TLSv1.1
     ctx.load_cert_chain(cert_path, key_path)
     srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -247,40 +248,32 @@ class TestLiveTLSPinnedConnect:
 
 class TestResolvePinnedAddress:
     def test_returns_validated_public_ip(self, monkeypatch) -> None:
-        import stigmem_node.net_util as nu
-
         def fake_gai(host, *a, **k):  # noqa: ANN001, ANN002, ANN003
             return [(2, 1, 6, "", ("203.0.113.10", 0))]
 
         monkeypatch.setattr(nu.socket, "getaddrinfo", fake_gai)
-        result = resolve_pinned_address(
+        result = nu.resolve_pinned_address(
             "https://ok.example/x", allow_schemes=frozenset({"https"})
         )
         assert result == "203.0.113.10"
 
     def test_loopback_rejected(self, monkeypatch) -> None:
-        import stigmem_node.net_util as nu
-
         monkeypatch.setattr(
             nu.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("127.0.0.1", 0))]
         )
         with pytest.raises(ValueError, match="Blocked private/loopback"):
-            resolve_pinned_address("https://evil.example/x", allow_schemes=frozenset({"https"}))
+            nu.resolve_pinned_address("https://evil.example/x", allow_schemes=frozenset({"https"}))
 
     def test_imds_rejected(self, monkeypatch) -> None:
-        import stigmem_node.net_util as nu
-
         monkeypatch.setattr(
             nu.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("169.254.169.254", 0))]
         )
         with pytest.raises(ValueError, match="Blocked private/loopback"):
-            resolve_pinned_address("https://evil.example/x", allow_schemes=frozenset({"https"}))
+            nu.resolve_pinned_address("https://evil.example/x", allow_schemes=frozenset({"https"}))
 
     def test_mixed_public_and_private_records_rejected(self, monkeypatch) -> None:
         """Rebinder controls which record is served — reject the WHOLE url if ANY
         resolved record is private; do NOT cherry-pick the public one."""
-        import stigmem_node.net_util as nu
-
         monkeypatch.setattr(
             nu.socket,
             "getaddrinfo",
@@ -290,28 +283,24 @@ class TestResolvePinnedAddress:
             ],
         )
         with pytest.raises(ValueError, match="Blocked private/loopback"):
-            resolve_pinned_address("https://evil.example/x", allow_schemes=frozenset({"https"}))
+            nu.resolve_pinned_address("https://evil.example/x", allow_schemes=frozenset({"https"}))
 
     def test_disallowed_scheme_rejected(self, monkeypatch) -> None:
-        import stigmem_node.net_util as nu
-
         monkeypatch.setattr(
             nu.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("203.0.113.10", 0))]
         )
         with pytest.raises(ValueError, match="Disallowed URL scheme"):
-            resolve_pinned_address("http://ok.example/x", allow_schemes=frozenset({"https"}))
+            nu.resolve_pinned_address("http://ok.example/x", allow_schemes=frozenset({"https"}))
 
     def test_unresolvable_host_rejected(self, monkeypatch) -> None:
         import socket as real_socket
-
-        import stigmem_node.net_util as nu
 
         def boom(*a, **k):  # noqa: ANN002, ANN003
             raise real_socket.gaierror("nope")
 
         monkeypatch.setattr(nu.socket, "getaddrinfo", boom)
         with pytest.raises(ValueError, match="Cannot resolve"):
-            resolve_pinned_address("https://nx.example/x", allow_schemes=frozenset({"https"}))
+            nu.resolve_pinned_address("https://nx.example/x", allow_schemes=frozenset({"https"}))
 
     def test_ipv6_literal_bracketing(self, monkeypatch) -> None:
         """An IPv6 pinned address must round-trip into a valid bracketed URL.
@@ -319,13 +308,11 @@ class TestResolvePinnedAddress:
         ``::1`` is itself blocked, so prove bracketing via the resolver returning
         a (public) IPv6 literal and the delivery path constructing ``https://[...]``.
         """
-        import stigmem_node.net_util as nu
-
         # 2001:db8::1 is documentation space, not in any blocked net.
         monkeypatch.setattr(
             nu.socket, "getaddrinfo", lambda *a, **k: [(10, 1, 6, "", ("2001:db8::1", 0, 0, 0))]
         )
-        assert resolve_pinned_address(
+        assert nu.resolve_pinned_address(
             "https://v6.example/x", allow_schemes=frozenset({"https"})
         ) == "2001:db8::1"
 
