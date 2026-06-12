@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
-from stigmem_node.net_util import assert_safe_url
+from stigmem_node.net_util import assert_safe_url, resolve_pinned_address
+from stigmem_node.utility.net_util import _ip_is_blocked
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -174,6 +175,56 @@ def test_ipv6_link_local_blocked():
         pytest.raises(ValueError, match="Blocked private/loopback"),
     ):
         assert_safe_url("https://ll-host/", allow_schemes=frozenset({"https", "http"}))
+
+
+# ---------------------------------------------------------------------------
+# F-SSRF-3: IPv4-mapped IPv6 / CGNAT / NAT64 must NOT bypass the blocklist.
+#
+# The guard checked membership in explicit IPv4/IPv6 nets, which an attacker
+# sidesteps by serving a AAAA record whose address EMBEDS a blocked IPv4 —
+# e.g. ::ffff:169.254.169.254 routes to cloud IMDS on a dual-stack host, yet
+# is neither in the IPv4 nets (wrong version) nor the IPv6 nets. Both
+# assert_safe_url (creation) and resolve_pinned_address (delivery) share the
+# guard, so both were bypassable.
+# ---------------------------------------------------------------------------
+
+_EMBEDDED_OR_SHARED_BLOCKED = [
+    "::ffff:127.0.0.1",        # IPv4-mapped loopback
+    "::ffff:169.254.169.254",  # IPv4-mapped AWS/GCP IMDS
+    "::ffff:10.0.0.5",         # IPv4-mapped RFC1918
+    "::ffff:192.168.1.1",      # IPv4-mapped RFC1918
+    "100.64.0.1",              # RFC 6598 CGNAT shared address space
+    "64:ff9b::7f00:1",         # NAT64 well-known prefix embedding 127.0.0.1
+]
+
+
+@pytest.mark.parametrize("ip", _EMBEDDED_OR_SHARED_BLOCKED)
+def test_ip_is_blocked_catches_embedded_and_shared(ip: str) -> None:
+    assert _ip_is_blocked(ipaddress.ip_address(ip)) is True
+
+
+@pytest.mark.parametrize("ip", _EMBEDDED_OR_SHARED_BLOCKED)
+def test_assert_safe_url_blocks_embedded_and_shared(ip: str) -> None:
+    with (
+        patch("socket.getaddrinfo", _fake_getaddrinfo(ip)),
+        pytest.raises(ValueError, match="Blocked private/loopback"),
+    ):
+        assert_safe_url("https://attacker-dns/", allow_schemes=frozenset({"https", "http"}))
+
+
+@pytest.mark.parametrize("ip", _EMBEDDED_OR_SHARED_BLOCKED)
+def test_resolve_pinned_address_blocks_embedded_and_shared(ip: str) -> None:
+    with (
+        patch("socket.getaddrinfo", _fake_getaddrinfo(ip)),
+        pytest.raises(ValueError, match="Blocked private/loopback"),
+    ):
+        resolve_pinned_address("https://attacker-dns/", allow_schemes=frozenset({"https"}))
+
+
+def test_public_ipv6_still_allowed() -> None:
+    """A genuinely public IPv6 must still pass (no over-blocking)."""
+    with patch("socket.getaddrinfo", _fake_getaddrinfo("2606:4700:4700::1111")):
+        assert_safe_url("https://public-v6/")  # Cloudflare DNS — must not raise
 
 
 # ---------------------------------------------------------------------------

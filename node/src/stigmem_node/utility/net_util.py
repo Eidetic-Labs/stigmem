@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 # RFC 1918, loopback, link-local, and IPv6 equivalents.
 # Cloud IMDS (169.254.169.254) is covered by 169.254.0.0/16.
+# Most of these are also covered by the is_* classification flags below; they
+# are kept as an explicit, auditable denylist (defense in depth).
 _BLOCKED_NETS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -15,14 +17,55 @@ _BLOCKED_NETS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("100.64.0.0/10"),  # RFC 6598 CGNAT — not flagged is_private
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
 )
 
+# NAT64 well-known prefix (RFC 6052): the low 32 bits embed an IPv4 address.
+_NAT64_WKP = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _embedded_ipv4(
+    ip: ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | None:
+    """Return the IPv4 address embedded in an IPv4-mapped / 6to4 / NAT64 IPv6.
+
+    A blocked IPv4 (loopback, IMDS, RFC1918) can be smuggled past a v6-blind
+    check as ``::ffff:169.254.169.254``, ``2002:a9fe:a9fe::`` (6to4), or
+    ``64:ff9b::a9fe:a9fe`` (NAT64). Unwrap so the embedded v4 is classified.
+    """
+    if ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    if ip.sixtofour is not None:
+        return ip.sixtofour
+    if ip in _NAT64_WKP:
+        return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return None
+
 
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Return True iff *ip* falls in a private/loopback/link-local/IMDS range."""
+    """Return True iff *ip* is unsafe to connect to (SSRF target).
+
+    Unwraps IPv4-in-IPv6 embeddings first (F-SSRF-3), then rejects any
+    private / loopback / link-local / reserved / multicast / unspecified
+    address (covers IMDS, RFC1918, CGNAT, etc.) via both the stdlib
+    classification flags and the explicit denylist.
+    """
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = _embedded_ipv4(ip)
+        if embedded is not None:
+            ip = embedded
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    ):
+        return True
     return any(ip in net for net in _BLOCKED_NETS)
 
 
