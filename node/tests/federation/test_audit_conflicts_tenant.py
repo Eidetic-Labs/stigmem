@@ -279,8 +279,11 @@ def _bound_peer_for_pull(fed_node: Any, *, ingest_tenant: str) -> tuple[str, str
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    from stigmem_node.db import db as _db_ctx
     from stigmem_node.identity.key_rotation import generate_key_id
+
+    # Single import style for stigmem_node.db: the module alias (db_mod) is required
+    # because this test monkeypatches db_mod.settings, so bind db() from it.
+    _db_ctx = db_mod.db
 
     from .helpers import make_bound_peer
 

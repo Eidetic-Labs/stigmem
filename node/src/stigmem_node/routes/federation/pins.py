@@ -16,7 +16,6 @@ from ...auth import Identity, resolve_identity
 from ...db import db
 from ...federation.origin_pins import (
     delete_origin_pin,
-    fingerprint_from_pubkey,  # noqa: F401 — re-exported for resolver convenience
     get_origin_pin,
     list_origin_pins,
     put_origin_pin,

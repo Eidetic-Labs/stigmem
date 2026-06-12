@@ -756,6 +756,7 @@ def test_relay_resolve_fails_closed_when_node_not_in_entities(client, monkeypatc
         oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
         raise AssertionError("expected OriginIdentityError")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
 
 
@@ -787,6 +788,7 @@ def test_relay_resolve_rejects_entity_authority_substitution(client, monkeypatch
         oi.resolve_origin_key_for_relay(_RELAY_NODE, _RELAY_ENTITY, cache={})
         raise AssertionError("expected OriginIdentityError (entity-authority substitution)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
     # The uniqueness check fires BEFORE the fetch — the hostile manifest is never pulled.
     assert stub.calls == 0
@@ -831,6 +833,7 @@ def test_relay_resolve_https_only_rejects_http_nonloopback(client, monkeypatch) 
         oi.resolve_origin_key_for_relay(_RELAY_NODE, http_uri, cache={})
         raise AssertionError("expected OriginIdentityError (http rejected)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
 
 
@@ -1160,6 +1163,7 @@ def test_relay_offline_tier1_pin_mismatch_rejects(client, monkeypatch) -> None: 
         )
         raise AssertionError("expected OriginIdentityError (pin mismatch)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
     assert "relay_origin_pin_mismatch" in [e for e, _ in seen]
 
@@ -1194,6 +1198,7 @@ def test_relay_offline_tier1_fetch_disagrees_pin_rejects(client, monkeypatch) ->
         )
         raise AssertionError("expected OriginIdentityError (fetch disagrees pin)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
     assert "relay_origin_fetch_disagrees_pin" in [e for e, _ in seen]
 
@@ -1236,6 +1241,7 @@ def test_relay_offline_tier2_stored_binding_mismatch_rejects(client, monkeypatch
         )
         raise AssertionError("expected OriginIdentityError (stored binding key changed)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
     assert "relay_origin_key_changed" in [e for e, _ in seen]
 
@@ -1278,6 +1284,7 @@ def test_relay_offline_fail_closed_unanchored_rejects(client, monkeypatch) -> No
         )
         raise AssertionError("expected OriginIdentityError (unanchored, unreachable)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
     assert "relay_origin_unanchored" in [e for e, _ in seen]
 
@@ -1305,6 +1312,7 @@ def test_relay_offline_candidate_must_self_verify_even_with_pin(client, monkeypa
         )
         raise AssertionError("expected OriginIdentityError (candidate fails node∈entities)")
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
 
 
@@ -1454,6 +1462,7 @@ def test_relay_resolve_cache_node_scoped_entity_authority(client, monkeypatch) -
             "cache collision: node_b (∉ entities) inherited node_a's cached key set"
         )
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass
 
 
@@ -1497,4 +1506,5 @@ def test_relay_resolve_cache_node_scoped_per_node_pin(client, monkeypatch) -> No
             "cache collision: node_b's per-node operator pin was bypassed via the shared cache"
         )
     except oi.OriginIdentityError:
+        # Expected: the resolver rejected this case (the AssertionError above did not fire).
         pass

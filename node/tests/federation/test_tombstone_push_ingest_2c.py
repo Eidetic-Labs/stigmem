@@ -45,7 +45,6 @@ import stigmem_node.lifecycle.tombstones as tombstones_mod
 import stigmem_node.routes.federation as fed_mod
 import stigmem_node.routes.tombstones as tomb_routes_mod
 import stigmem_node.settings as settings_module
-from stigmem_node.db import db as _db_ctx
 from stigmem_node.federation.origin_signature import sign_tombstone_origin
 from stigmem_node.identity.key_rotation import generate_key_id
 from stigmem_node.lifecycle.tombstone_signing import _signing_body
@@ -55,6 +54,10 @@ from stigmem_node.plugins.discovery import DiscoveredPlugin
 from stigmem_node.plugins.testing import stigmem_plugins
 
 from .helpers import generate_ed25519_b64, make_bound_peer
+
+# Single import style for stigmem_node.db: the module alias (db_mod) is required
+# because tests monkeypatch db_mod.settings, so bind the db() context manager from it.
+_db_ctx = db_mod.db
 
 _TENANT = "default"
 

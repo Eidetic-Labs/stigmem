@@ -263,6 +263,7 @@ def resolve_origin_key_for_relay(
     try:
         return resolve_origin_key(node_id)
     except OriginIdentityError:
+        # Not an already-bound peer — fall through to the relay-resolution path below.
         pass
 
     if not (entity_uri or "").strip():
