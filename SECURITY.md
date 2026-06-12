@@ -153,6 +153,45 @@ path is reachable through a supported Stigmem runtime endpoint (Hono affects
 the MCP adapter's HTTP surface, mitigated by the version bump; pip is
 build-time tooling only). Both fixes landed via PR #702.
 
+## Security Posture — v0.9.0a11 (2026-06-11)
+
+`v0.9.0a11` is a federation-relay and webhook-hardening alpha. It lands
+Federation Multi-Tenancy Phase 2c (multi-hop relay) **disabled by default** and
+completes remediation of a reported webhook SSRF.
+
+Phase 2c relay is gated behind `federation_relay_enabled` (default `false`) and,
+per peer, `relay_trusted` (default `0`). With the defaults — `federation_enabled`,
+`federation_push_enabled`, and `federation_relay_enabled` all `false`, no
+approved peers — every relay path is inert: federation egress stays self-only,
+inbound federation requests fail closed before any database write, and the new
+operator pin store is admin-gated, audited, and empty. The release introduces no
+new default-on setting, background task, or unauthenticated endpoint; migrations
+045–050 are additive (nullable / zero-default columns).
+
+**GHSA-5p3m-vhh6-9236 (blind SSRF via webhook `delivery_address`).** Remediation
+of the reported webhook delivery SSRF is complete. A subscription's
+`delivery_address` is validated at creation time (https-only by default), and
+delivery resolves the host once and pins the connection to the validated IP —
+closing a DNS-rebinding TOCTOU window — while preserving the `Host` header and
+TLS SNI so certificate verification binds to the original hostname. As
+defense-in-depth, the outbound address filter now classifies IPv4-in-IPv6
+embeddings (IPv4-mapped, 6to4, NAT64) and RFC 6598 CGNAT space as non-public,
+closing a bypass where an attacker-controlled `AAAA` record could smuggle a
+blocked IPv4 (loopback, cloud IMDS, RFC 1918) past the guard. We thank
+[@chaitanyagarware](https://github.com/chaitanyagarware) for the coordinated
+disclosure.
+
+**Breaking change:** `/metrics` now requires admin authentication by default.
+Deployments that scrape Prometheus metrics unauthenticated must set
+`STIGMEM_METRICS_REQUIRE_AUTH=false` or supply an admin credential to the
+scraper.
+
+The standing publication policy remains: Critical and High vulnerabilities that
+affect supported published artifacts are handled through GHSA where applicable
+after a patched version is available; Medium and Low findings are documented in
+this file unless a documented risk-profile, reporter-coordination, or
+downstream-compliance carve-out applies.
+
 ## Security Posture — v0.9.0a10 (2026-05-26)
 
 `v0.9.0a10` is the adapter-batch publication alpha release. It packages the

@@ -4,7 +4,7 @@ Integrates Stigmem with OpenClaw agents. Provides the standard boot handshake
 (pull user prefs + project constraints into context) and write surfaces for
 handoffs, decisions, and escalations.
 
-> **Status:** alpha / experimental. The current v0.9.0a10 OpenClaw adapter
+> **Status:** alpha / experimental. The current v0.9.0a11 OpenClaw adapter
 > source is prepared as an evaluation surface, not a recommended production
 > integration. The ClawHub skill is published as
 > [`stigmem-node`](https://clawhub.ai/skills/stigmem-node) and installs the
@@ -75,16 +75,16 @@ deployments.
 
 ## Changelog
 
-### v0.9.0a10 artifact refresh
+### v0.9.0a11 artifact refresh
 
 - Documentation: remove pre-reset release-history framing from the PyPI long
   description so the `stigmem-openclaw` publish presents the adapter as a
-  v0.9.0a10 alpha/evaluation surface.
+  v0.9.0a11 alpha/evaluation surface.
 - Documentation: align the package README with the ClawHub skill warning that
   OpenClaw is not a recommended production integration while R-21 certification
   and operator validation remain open.
 - Packaging: keep the dependency contract on the active alpha line with
-  `stigmem-py>=0.9.0a10,<1.0.0`.
+  `stigmem-py>=0.9.0a11,<1.0.0`.
 
 ## Design
 
@@ -128,7 +128,7 @@ agents import it as a standard Python library.
 
 - Python ≥ 3.11
 - `stigmem-py` installed from the alpha line:
-  `pip install --pre "stigmem-py>=0.9.0a10,<1.0.0"`
+  `pip install --pre "stigmem-py>=0.9.0a11,<1.0.0"`
 - A running Stigmem node
 
 ### Environment variables

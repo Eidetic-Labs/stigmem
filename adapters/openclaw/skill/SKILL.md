@@ -28,14 +28,14 @@ metadata:
         description: "Comma-separated agent: entity URI allowlist for handoff and escalation targets. The source entity is always allowed."
     install:
       - kind: uv
-        package: "stigmem-openclaw>=0.9.0a10,<1.0.0"
+        package: "stigmem-openclaw>=0.9.0a11,<1.0.0"
 ---
 
 # Stigmem
 
 Gives your OpenClaw agent persistent, federated memory via [Stigmem](https://stigmem.dev) — an open-source knowledge fabric that stores facts as immutable, signed assertions and replicates them across nodes.
 
-> **Alpha status.** This source copy is prepared for the v0.9.0a10 ClawHub
+> **Alpha status.** This source copy is prepared for the v0.9.0a11 ClawHub
 > artifact refresh, which adds plugin-awareness pointers. The OpenClaw skill
 > remains available for v0.9.0aN evaluation only, not as a recommended
 > production integration. The adapter separates retrieved
@@ -177,7 +177,7 @@ Over-privileged API keys grant unnecessary read/write access across your node. T
 
 ### Dependency pinning
 
-The install spec uses a version range (`stigmem-openclaw>=0.9.0a10,<1.0.0`) so compatible alpha-line updates are picked up automatically. A future alpha or beta release could change runtime behaviour.
+The install spec uses a version range (`stigmem-openclaw>=0.9.0a11,<1.0.0`) so compatible alpha-line updates are picked up automatically. A future alpha or beta release could change runtime behaviour.
 
 **What you should do:**
 - Pin the exact version in a lockfile (`uv.lock` or `requirements.txt`) for any
@@ -204,7 +204,7 @@ docker run --rm -p 8765:8765 \
 ```
 
 `:latest` is fine for trying things out; for repeatable evaluation swap to a
-pinned version tag (`:0.9.0a10`) or a `@sha256:<digest>` pin — the install guide
+pinned version tag (`:0.9.0a11`) or a `@sha256:<digest>` pin — the install guide
 on docs.stigmem.dev has the full tag-selection table.
 
 Full setup guide and federation docs: [docs.stigmem.dev/en/latest/docs/guides/federation](https://docs.stigmem.dev/en/latest/docs/guides/federation)
@@ -215,7 +215,7 @@ Stigmem nodes can federate with each other to share public-scoped facts across o
 
 ## Changelog
 
-> **Note on versioning.** This ClawHub skill is independently versioned along its own semver line. The skill's `version:` (currently 1.0.x) tracks the skill's ClawHub release history; the dependency on stigmem is expressed via the `install.package` pin (currently `stigmem-openclaw>=0.9.0a10,<1.0.0`). The bare-stigmem version line was reset to v0.9.0a1 in May 2026 — see [the retraction post](https://dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0) — but ClawHub registry rules require monotonically increasing skill versions, so the skill stays on its 1.0.x line. The two version surfaces are intentionally decoupled.
+> **Note on versioning.** This ClawHub skill is independently versioned along its own semver line. The skill's `version:` (currently 1.0.x) tracks the skill's ClawHub release history; the dependency on stigmem is expressed via the `install.package` pin (currently `stigmem-openclaw>=0.9.0a11,<1.0.0`). The bare-stigmem version line was reset to v0.9.0a1 in May 2026 — see [the retraction post](https://dev.to/offbyonce/walking-back-our-v10-announcement-resetting-to-v090a1-as-the-first-build-al0) — but ClawHub registry rules require monotonically increasing skill versions, so the skill stays on its 1.0.x line. The two version surfaces are intentionally decoupled.
 
 ### v1.0.9
 
@@ -223,19 +223,19 @@ Stigmem nodes can federate with each other to share public-scoped facts across o
   operators, pointing to the six published Stigmem plugin packages and
   clarifying that plugin installation and enablement happen on the Stigmem node
   side, not inside the OpenClaw skill environment.
-- Documentation: refreshes the alpha-status note for the v0.9.0a10 ClawHub
+- Documentation: refreshes the alpha-status note for the v0.9.0a11 ClawHub
   artifact refresh.
 
 ### v1.0.8
 
 - **Source directory renamed** from `adapters/openclaw/clawhub-skill/` to `adapters/openclaw/skill/`. The `clawhub-` prefix was the root cause of two publish-time inference bugs: (a) display-name inferred as "Clawhub Skill" when `--name` was omitted (regressed v1.0.3 and v1.0.6), (b) slug inferred as `clawhub-skill` which trips ClawHub's protected-namespace check ("clawhub-*"), forcing every publish to pass `--slug stigmem-node` explicitly. Both worked around in CI via PR #82's hard-coded flags; this rename removes the inference dependency at the source. The CI flags are now belt-and-suspenders rather than required workarounds. Skill behavior unchanged; manifest content unchanged; this is a source-tree refactor only.
 
-### v0.9.0a10 ClawHub artifact refresh
+### v0.9.0a11 ClawHub artifact refresh
 
 - Documentation: explicitly frames the OpenClaw skill as alpha/evaluation-only.
   This is the source state prepared for the a3 ClawHub publish.
 - Documentation: corrects the dependency-pinning section to the alpha line
-  (`stigmem-openclaw>=0.9.0a10,<1.0.0`) and avoids claiming presentation-layer
+  (`stigmem-openclaw>=0.9.0a11,<1.0.0`) and avoids claiming presentation-layer
   sanitization is a complete prompt-injection defense.
 
 ### v1.0.7

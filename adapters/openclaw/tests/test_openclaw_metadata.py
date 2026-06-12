@@ -14,14 +14,14 @@ def test_package_readme_does_not_render_pre_reset_changelog() -> None:
 
     assert "### v1.0" not in readme
     assert "stigmem-py>=1.0" not in readme
-    assert "v0.9.0a10 alpha/evaluation surface" in readme
+    assert "v0.9.0a11 alpha/evaluation surface" in readme
     assert "queued for the v0.9.0a2 artifact refresh" not in readme
 
 
 def test_package_dependency_stays_on_active_alpha_line() -> None:
     pyproject = tomllib.loads((_OPENCLAW_ROOT / "pyproject.toml").read_text())
 
-    assert "stigmem-py>=0.9.0a10,<1.0.0" in pyproject["project"]["dependencies"]
+    assert "stigmem-py>=0.9.0a11,<1.0.0" in pyproject["project"]["dependencies"]
 
 
 def test_clawhub_skill_keeps_alpha_warning_and_limitation_link() -> None:
@@ -33,7 +33,7 @@ def test_clawhub_skill_keeps_alpha_warning_and_limitation_link() -> None:
         for step in frontmatter["metadata"]["openclaw"]["install"]
         if step.get("kind") == "uv"
     ]
-    assert install_packages == ["stigmem-openclaw>=0.9.0a10,<1.0.0"]
+    assert install_packages == ["stigmem-openclaw>=0.9.0a11,<1.0.0"]
     assert "v0.9.0aN evaluation only" in skill_text
     assert "LIMITATIONS.md#9-running-the-openclaw-bundled-adapter-as-is" in skill_text
 

@@ -1,6 +1,6 @@
 [project]
 name = "stigmem"
-version = "0.9.0a10"
+version = "0.9.0a11"
 description = "Stigmem — federated knowledge fabric for AI agents (meta-package)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,14 +23,14 @@ classifiers = [
 # Operators self-hosting a node use `pip install stigmem[node]` or
 # `pip install stigmem-node` directly. See the install table below for extras.
 dependencies = [
-  "stigmem-py>=0.9.0a10,<1.0.0",
+  "stigmem-py>=0.9.0a11,<1.0.0",
 ]
 
 [project.optional-dependencies]
 # pip install stigmem[node] → SDK + reference node service
-node = ["stigmem-node>=0.9.0a10,<1.0.0"]
+node = ["stigmem-node>=0.9.0a11,<1.0.0"]
 # pip install stigmem[openclaw] → SDK + OpenClaw adapter
-openclaw = ["stigmem-openclaw>=0.9.0a10,<1.0.0"]
+openclaw = ["stigmem-openclaw>=0.9.0a11,<1.0.0"]
 # pip install stigmem[<feature>] → SDK + one published experimental plugin
 cognee-adapter = [
   "stigmem-plugin-cognee-adapter>=0.1.0,<2.0.0",
@@ -89,8 +89,8 @@ plugins-all = [
 ]
 # pip install stigmem[all] → everything published from this monorepo
 all = [
-  "stigmem-node>=0.9.0a10,<1.0.0",
-  "stigmem-openclaw>=0.9.0a10,<1.0.0",
+  "stigmem-node>=0.9.0a11,<1.0.0",
+  "stigmem-openclaw>=0.9.0a11,<1.0.0",
   "stigmem-plugin-cognee-adapter>=0.1.0,<2.0.0",
   "stigmem-plugin-gemini-adapter>=0.1.0,<2.0.0",
   "stigmem-plugin-letta-adapter>=0.1.0,<2.0.0",

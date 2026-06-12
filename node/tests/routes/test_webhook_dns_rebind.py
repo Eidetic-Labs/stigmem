@@ -249,13 +249,13 @@ class TestLiveTLSPinnedConnect:
 class TestResolvePinnedAddress:
     def test_returns_validated_public_ip(self, monkeypatch) -> None:
         def fake_gai(host, *a, **k):  # noqa: ANN001, ANN002, ANN003
-            return [(2, 1, 6, "", ("203.0.113.10", 0))]
+            return [(2, 1, 6, "", ("93.184.216.34", 0))]
 
         monkeypatch.setattr(nu.socket, "getaddrinfo", fake_gai)
         result = nu.resolve_pinned_address(
             "https://ok.example/x", allow_schemes=frozenset({"https"})
         )
-        assert result == "203.0.113.10"
+        assert result == "93.184.216.34"
 
     def test_loopback_rejected(self, monkeypatch) -> None:
         monkeypatch.setattr(
@@ -278,7 +278,7 @@ class TestResolvePinnedAddress:
             nu.socket,
             "getaddrinfo",
             lambda *a, **k: [
-                (2, 1, 6, "", ("203.0.113.10", 0)),  # public
+                (2, 1, 6, "", ("93.184.216.34", 0)),  # public
                 (2, 1, 6, "", ("127.0.0.1", 0)),  # private — must trip
             ],
         )
@@ -287,7 +287,7 @@ class TestResolvePinnedAddress:
 
     def test_disallowed_scheme_rejected(self, monkeypatch) -> None:
         monkeypatch.setattr(
-            nu.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("203.0.113.10", 0))]
+            nu.socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))]
         )
         with pytest.raises(ValueError, match="Disallowed URL scheme"):
             nu.resolve_pinned_address("http://ok.example/x", allow_schemes=frozenset({"https"}))
@@ -308,13 +308,15 @@ class TestResolvePinnedAddress:
         ``::1`` is itself blocked, so prove bracketing via the resolver returning
         a (public) IPv6 literal and the delivery path constructing ``https://[...]``.
         """
-        # 2001:db8::1 is documentation space, not in any blocked net.
+        # 2606:4700:4700::1111 is a genuinely-global IPv6 (Cloudflare DNS).
         monkeypatch.setattr(
-            nu.socket, "getaddrinfo", lambda *a, **k: [(10, 1, 6, "", ("2001:db8::1", 0, 0, 0))]
+            nu.socket,
+            "getaddrinfo",
+            lambda *a, **k: [(10, 1, 6, "", ("2606:4700:4700::1111", 0, 0, 0))],
         )
         assert nu.resolve_pinned_address(
             "https://v6.example/x", allow_schemes=frozenset({"https"})
-        ) == "2001:db8::1"
+        ) == "2606:4700:4700::1111"
 
 
 # ---------------------------------------------------------------------------
