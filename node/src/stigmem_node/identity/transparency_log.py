@@ -292,16 +292,23 @@ class RekorLog(TransparencyLog):
                 )
 
             # Delegate checkpoint/STH verification to sigstore.transparency.
-            # ImportError (sigstore not installed) is a warned skip; any other failure
-            # means the log checkpoint cannot be trusted and is a hard error.
+            # A missing sigstore is a HARD ERROR — without it the STH/checkpoint
+            # cannot be trusted, so we fail closed rather than returning True.
             try:
                 from sigstore.transparency import LogEntry as SigstoreLogEntry
-
-                _ = SigstoreLogEntry.from_response(data)
             except ImportError as exc:
-                logger.warning(
-                    "sigstore not installed; STH checkpoint verification skipped: %s", exc
-                )
+                raise TransparencyLogUnavailable(
+                    "sigstore is required to verify Rekor STH/checkpoint inclusion; "
+                    "install it with: pip install 'stigmem-node[identity]'"
+                ) from exc
+
+            try:
+                # Parse + structurally validate the Rekor response into a
+                # SigstoreLogEntry. from_response raises on a malformed/invalid
+                # response; the parsed entry's inclusion proof must be present.
+                sig_entry = SigstoreLogEntry.from_response(data)
+                if sig_entry.inclusion_proof is None:
+                    raise ValueError("Rekor entry has no inclusion proof")
             except Exception as exc:
                 raise ValueError(f"Rekor STH checkpoint verification failed: {exc}") from exc
 

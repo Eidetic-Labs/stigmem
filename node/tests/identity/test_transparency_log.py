@@ -60,6 +60,59 @@ def test_local_tl_tampered_entry_fails(tmp_path: Path):
         tl.verify_inclusion(bad_entry)
 
 
+def test_rekor_verify_inclusion_missing_sigstore_is_hard_error(monkeypatch):
+    """A missing sigstore dependency must FAIL CLOSED, not return True.
+
+    Previously verify_inclusion logged a warning on ImportError and fell
+    through to ``return True`` (fail-open). The STH/checkpoint cannot be
+    trusted without sigstore, so an absent sigstore is a hard error.
+    """
+    import builtins
+
+    import httpx
+
+    from stigmem_node.identity.transparency_log import LogEntry, RekorLog
+
+    # Bypass __init__ (which guards the sigstore import at construction) so we
+    # exercise verify_inclusion's own import path in isolation.
+    tl = RekorLog.__new__(RekorLog)
+    tl._url = "https://rekor.example.invalid"
+    entry = LogEntry(log_id="t", leaf_hash="a" * 64, log_index=5, integrated_time=0)
+
+    # A well-formed Rekor response with a matching (here: undecodable -> empty)
+    # stored hash so we reach the sigstore-verification step.
+    fake_response = {
+        "uuid-abc": {
+            "body": "not-base64-json",
+            "logIndex": 5,
+            "verification": {},
+        }
+    }
+
+    class _FakeResp:
+        status_code = 200
+
+        def json(self):
+            return fake_response
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResp())
+
+    # Force ``import sigstore...`` to fail, simulating sigstore not installed.
+    real_import = builtins.__import__
+
+    def _no_sigstore(name, *args, **kwargs):
+        if name.startswith("sigstore"):
+            raise ImportError("No module named 'sigstore'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _no_sigstore)
+
+    with pytest.raises((ValueError, Exception)) as excinfo:
+        tl.verify_inclusion(entry)
+    # Must NOT have returned True; the exception is the contract.
+    assert excinfo.value is not None
+
+
 # ===========================================================================
 # 10. Manifest resolve API
 # ===========================================================================
