@@ -39,6 +39,7 @@ if TYPE_CHECKING:  # import for type-checkers only; never at runtime (I11).
     import dns.rdataset
     import dns.rdatatype
     import dns.rrset
+    from dns.rdtypes.ANY.NSEC3 import NSEC3
 
     from .resolver import Resolver
 
@@ -321,6 +322,17 @@ def _fetch_validated_ds(
 
     ds_rrset = _find_rrset(ds_message, child, dns.rdatatype.DS)
     if ds_rrset is None:
+        # No DS at the child. Distinguish two authenticated cases (Rev 6 I2):
+        #   * insecure delegation — a validated NSEC3 that MATCHES the child and
+        #     whose type bitmap shows NS-without-DS proves a signed parent
+        #     delegating to an unsigned child. Surface INSECURE so the caller
+        #     routes to operator-confirm (never silent-accept).
+        #   * not a cut — no such proof; the child's records live in the parent
+        #     zone. Carry the current keys (return None).
+        if _nsec3_proves_insecure_delegation(
+            ds_message, child=child, parent_name=parent_name, parent_keys=parent_keys, now=now
+        ):
+            raise _InsecureDelegation(f"authenticated unsigned delegation at {child}")
         return None
 
     ds_rrsig = _find_rrsig(ds_message, child, dns.rdatatype.DS)
@@ -334,7 +346,7 @@ def _fetch_validated_ds(
 
 
 # --------------------------------------------------------------------------- #
-# Absence + wildcard hooks (implemented in 3a.5 / 3a.6)
+# Authenticated denial-of-existence (Rev 6 I2) — 3a.5
 # --------------------------------------------------------------------------- #
 
 
@@ -346,13 +358,240 @@ def _classify_absence(
     zone_keys: dns.rdataset.Rdataset,
     now: float,
 ) -> ValidationResult:
-    """Classify a missing binding TXT.
+    """Classify a missing binding TXT via authenticated denial-of-existence.
 
-    3a.4 placeholder: with no authenticated-denial proof checking yet, a missing
-    TXT on a signed zone is treated as ``UNVALIDATABLE`` (fail-closed; the caller
-    never falls through). 3a.5 replaces this with NSEC3 proof validation.
+    Rev 6 I2: to treat the binding TXT as "absent" and let the caller fall
+    through, the receiver MUST hold a cryptographically-validated NSEC3
+    denial-of-existence proof for the qname against the zone DNSKEY. Outcomes:
+
+      * ``ABSENT_AUTHENTICATED`` — a validated NSEC3 closest-encloser proof
+        covers the qname. The caller MAY fall through to operator-confirm.
+      * ``UNVALIDATABLE`` — no validated proof of absence (the answer is just
+        empty, or carries unsigned/forged NSEC3). The caller MUST reject and
+        never fall through.
+
+    NSEC3 is REQUIRED (Rev 6 I2): a bare NSEC record, or an NSEC3 with the
+    opt-out flag set, is rejected as ``UNVALIDATABLE`` (no insecure-delegation
+    fall-through for the binding name).
     """
-    return ValidationResult(Validation.UNVALIDATABLE, detail="binding TXT absent (no proof yet)")
+    import dns.rdatatype
+
+    # A bare NSEC (not NSEC3) authority section does not satisfy the NSEC3
+    # requirement -> unvalidatable.
+    if _has_rrset_of_type(message, dns.rdatatype.NSEC):
+        return ValidationResult(
+            Validation.UNVALIDATABLE, detail="bare NSEC denial; NSEC3 required (I2)"
+        )
+
+    nsec3s = _collect_validated_nsec3(message, zone_name=zone_name, zone_keys=zone_keys, now=now)
+    if nsec3s is None:
+        return ValidationResult(
+            Validation.UNVALIDATABLE, detail="NSEC3 denial RRSIG invalid"
+        )
+    if not nsec3s:
+        return ValidationResult(
+            Validation.UNVALIDATABLE, detail="binding TXT absent with no NSEC3 proof"
+        )
+
+    # Reject opt-out NSEC3 (flags bit 0): opt-out weakens the proof to an
+    # unsigned-delegation assertion, which Rev 6 I2 forbids for the binding.
+    for _owner, rdata in nsec3s:
+        if rdata.flags & 0x01:
+            return ValidationResult(
+                Validation.UNVALIDATABLE, detail="NSEC3 opt-out set; rejected (I2)"
+            )
+
+    if _nsec3_proves_absence(binding_qname, zone_name=zone_name, nsec3s=nsec3s):
+        return ValidationResult(
+            Validation.ABSENT_AUTHENTICATED, detail="authenticated NSEC3 absence"
+        )
+    return ValidationResult(
+        Validation.UNVALIDATABLE, detail="NSEC3 present but does not prove qname absence"
+    )
+
+
+def _has_rrset_of_type(message: dns.message.Message, rdtype: dns.rdatatype.RdataType) -> bool:
+    for section in (message.answer, message.authority):
+        for rrset in section:
+            if rrset.rdtype == rdtype:
+                return True
+    return False
+
+
+def _collect_validated_nsec3(
+    message: dns.message.Message,
+    *,
+    zone_name: dns.name.Name,
+    zone_keys: dns.rdataset.Rdataset,
+    now: float,
+) -> list[tuple[dns.name.Name, NSEC3]] | None:
+    """Return ``[(owner_name, nsec3_rdata), ...]`` for *validated* NSEC3 RRsets.
+
+    Each NSEC3 RRset in the authority section must carry an RRSIG that validates
+    against the zone DNSKEY. Returns ``None`` if any present NSEC3 RRset fails
+    validation (treat the whole proof as unvalidatable); an empty list if there
+    are no NSEC3 RRsets at all.
+    """
+    import dns.dnssec
+    import dns.rdatatype
+
+    collected: list[tuple[dns.name.Name, NSEC3]] = []
+    for rrset in message.authority:
+        if rrset.rdtype != dns.rdatatype.NSEC3:
+            continue
+        rrsig = _find_rrsig(message, rrset.name, dns.rdatatype.NSEC3)
+        if rrsig is None:
+            return None
+        try:
+            dns.dnssec.validate(rrset, rrsig, {zone_name: zone_keys}, now=now)
+        except Exception:  # noqa: BLE001 — forged/expired NSEC3 -> unvalidatable.
+            return None
+        for rdata in rrset:
+            collected.append((rrset.name, rdata))
+    return collected
+
+
+def _nsec3_owner_hash(owner: dns.name.Name, zone_name: dns.name.Name) -> str:
+    """The base32hex NSEC3 hash from an NSEC3 owner name (first label)."""
+    return owner.labels[0].decode("ascii").upper()
+
+
+def _nsec3_next_hash(rdata: NSEC3) -> str:
+    """The base32hex-encoded next-hashed-owner of an NSEC3 rdata."""
+    import base64
+
+    # dnspython exposes the raw next-owner bytes as ``rdata.next``.
+    return base64.b32encode(rdata.next).translate(_B32HEX).decode("ascii").rstrip("=")
+
+
+# RFC 4648 base32 -> base32hex ("extended hex") alphabet translation table.
+_B32HEX = bytes.maketrans(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+    b"0123456789ABCDEFGHIJKLMNOPQRSTUV",
+)
+
+
+def _hash_name(name: dns.name.Name, rdata: NSEC3) -> str:
+    """NSEC3-hash ``name`` using the NSEC3 rdata's algorithm/salt/iterations."""
+    import dns.dnssec
+
+    salt = rdata.salt if rdata.salt is not None else b""
+    return dns.dnssec.nsec3_hash(name, salt, rdata.iterations, rdata.algorithm)
+
+
+def _nsec3_matches(name: dns.name.Name, owner_hash: str, rdata: NSEC3) -> bool:
+    """True iff the NSEC3 owner hash equals H(name) (RFC 5155 'matches')."""
+    return _hash_name(name, rdata) == owner_hash
+
+
+def _nsec3_covers(name: dns.name.Name, owner_hash: str, next_hash: str, rdata: NSEC3) -> bool:
+    """True iff H(name) falls in the (owner_hash, next_hash] gap (RFC 5155 'covers').
+
+    Handles the zone-apex wraparound where next_hash <= owner_hash.
+    """
+    target = _hash_name(name, rdata)
+    if owner_hash < next_hash:
+        return owner_hash < target < next_hash
+    # Wraparound interval (covers the largest..smallest gap including the apex).
+    return target > owner_hash or target < next_hash
+
+
+def _nsec3_proves_absence(
+    qname: dns.name.Name,
+    *,
+    zone_name: dns.name.Name,
+    nsec3s: list[tuple[dns.name.Name, NSEC3]],
+) -> bool:
+    """Verify an RFC 5155 closest-encloser proof of ``qname``'s non-existence.
+
+    The proof requires (a) an NSEC3 that *matches* the closest encloser and
+    (b) an NSEC3 that *covers* the next-closer name. We search the ancestors of
+    ``qname`` (down to the zone apex) for the deepest enclosing name that an
+    NSEC3 matches; its immediate child toward ``qname`` (the next-closer) must
+    be covered by some NSEC3. This proves no exact match and no wildcard
+    synthesis path for the binding name.
+    """
+    import dns.name
+
+    qlabels = list(qname.labels)
+    zlabels = list(zone_name.labels)
+    # Candidate closest-encloser names: proper ancestors of the qname that are
+    # at or below the zone apex. The apex sits at label-offset
+    # ``apex_depth = len(qlabels) - len(zlabels)`` into the qname. The closest
+    # encloser is the *deepest* such ancestor an NSEC3 matches, so iterate from
+    # the qname's parent (offset 1) down to the apex (offset apex_depth) and take
+    # the first match. The next-closer is the immediate child of the CE toward
+    # the qname (one label deeper).
+    apex_depth = len(qlabels) - len(zlabels)
+    for depth in range(1, apex_depth + 1):
+        ce = dns.name.Name(qlabels[depth:])
+        next_closer = dns.name.Name(qlabels[depth - 1:])
+        ce_matched = False
+        for owner, rdata in nsec3s:
+            owner_hash = _nsec3_owner_hash(owner, zone_name)
+            if _nsec3_matches(ce, owner_hash, rdata):
+                ce_matched = True
+                break
+        if not ce_matched:
+            continue
+        # The closest encloser exists; the next-closer must be covered.
+        for owner, rdata in nsec3s:
+            owner_hash = _nsec3_owner_hash(owner, zone_name)
+            next_hash = _nsec3_next_hash(rdata)
+            if _nsec3_covers(next_closer, owner_hash, next_hash, rdata):
+                return True
+        return False
+    return False
+
+
+def _nsec3_type_present(rdata: NSEC3, rdtype: dns.rdatatype.RdataType) -> bool:
+    """True iff ``rdtype`` is set in the NSEC3 type bitmap (RFC 4034 §4.1.2)."""
+    for window, bitmap in rdata.windows:
+        if window != (rdtype >> 8):
+            continue
+        byte_index = (rdtype & 0xFF) >> 3
+        if byte_index >= len(bitmap):
+            continue
+        if bitmap[byte_index] & (0x80 >> (rdtype & 0x07)):
+            return True
+    return False
+
+
+def _nsec3_proves_insecure_delegation(
+    message: dns.message.Message,
+    *,
+    child: dns.name.Name,
+    parent_name: dns.name.Name,
+    parent_keys: dns.rdataset.Rdataset,
+    now: float,
+) -> bool:
+    """True iff a validated NSEC3 proves ``child`` is an unsigned delegation.
+
+    RFC 5155 §3.2: a secure parent denying a DS for a delegated child serves an
+    NSEC3 that *matches* the child's name whose type bitmap contains ``NS`` but
+    not ``DS`` (and not ``SOA`` — i.e. a delegation, not the apex). The NSEC3
+    RRset must validate against the parent's DNSKEY. Opt-out NSEC3 is not
+    accepted as a proof here (Rev 6 I2 requires opt-out off).
+    """
+    import dns.rdatatype
+
+    nsec3s = _collect_validated_nsec3(
+        message, zone_name=parent_name, zone_keys=parent_keys, now=now
+    )
+    if not nsec3s:
+        return False
+    for owner, rdata in nsec3s:
+        if rdata.flags & 0x01:  # opt-out -> not an accepted proof (I2)
+            continue
+        owner_hash = _nsec3_owner_hash(owner, parent_name)
+        if not _nsec3_matches(child, owner_hash, rdata):
+            continue
+        has_ns = _nsec3_type_present(rdata, dns.rdatatype.NS)
+        has_ds = _nsec3_type_present(rdata, dns.rdatatype.DS)
+        has_soa = _nsec3_type_present(rdata, dns.rdatatype.SOA)
+        if has_ns and not has_ds and not has_soa:
+            return True
+    return False
 
 
 def _reject_if_wildcard_synthesized(

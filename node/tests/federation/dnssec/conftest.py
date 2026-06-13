@@ -224,6 +224,98 @@ def _load_binding_txt(resolver: FixtureResolver, h: _Hierarchy, *,
 
 
 # --------------------------------------------------------------------------- #
+# NSEC3 denial-of-existence helpers (3a.5)
+# --------------------------------------------------------------------------- #
+
+# base32hex alphabet (RFC 4648 §7), ascending. Smallest/largest hash sentinels.
+_B32HEX = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
+_HASH_LEN = 32  # SHA-1 hashes encode to 32 base32hex chars.
+
+
+def _b32hex_decrement(h: str) -> str:
+    """A base32hex string strictly just below ``h`` (for an NSEC3 owner bound)."""
+    chars = list(h)
+    i = len(chars) - 1
+    while i >= 0:
+        idx = _B32HEX.index(chars[i])
+        if idx > 0:
+            chars[i] = _B32HEX[idx - 1]
+            return "".join(chars)
+        chars[i] = _B32HEX[-1]
+        i -= 1
+    return "0" * len(h)
+
+
+def _b32hex_increment(h: str) -> str:
+    """A base32hex string strictly just above ``h`` (for an NSEC3 next bound)."""
+    chars = list(h)
+    i = len(chars) - 1
+    while i >= 0:
+        idx = _B32HEX.index(chars[i])
+        if idx < len(_B32HEX) - 1:
+            chars[i] = _B32HEX[idx + 1]
+            return "".join(chars)
+        chars[i] = _B32HEX[0]
+        i -= 1
+    return "V" * len(h)
+
+
+def _signed_nsec3(zone: SignedZone, owner_hash: str, next_hash: str, types: list[str]):
+    """Build + ZSK-sign an NSEC3 RRset owned at ``owner_hash.<zone>``.
+
+    Returns ``(nsec3_rrset, rrsig_rrset)``.
+    """
+    owner = dns.name.from_text(owner_hash.upper() + "." + zone.origin.to_text())
+    type_str = " ".join(types)
+    text = (
+        f"{NSEC3_ALG} {NSEC3_FLAGS} {NSEC3_ITERATIONS} {NSEC3_SALT.hex()} "
+        f"{next_hash} {type_str}".strip()
+    )
+    rd = dns.rdata.from_text(dns.rdataclass.IN, dns.rdatatype.NSEC3, text)
+    rrset = dns.rrset.from_rdata(owner, 300, rd)
+    sig = zone.sign_with_zsk(rrset)
+    sig_rrset = dns.rrset.from_rdata(owner, 300, sig)
+    return rrset, sig_rrset
+
+
+def _closest_encloser_proof(zone: SignedZone, qname: str):
+    """Build a valid RFC 5155 closest-encloser NSEC3 proof for ``qname``'s absence.
+
+    Produces two NSEC3s: one MATCHING the zone apex (closest encloser) and one
+    COVERING the next-closer name (the qname's immediate-child-of-CE label).
+    Returns the list of (nsec3_rrset, rrsig_rrset) pairs.
+    """
+    apex = zone.origin
+    qn = dns.name.from_text(qname)
+    # next-closer = the name one label below the closest encloser toward qname.
+    qlabels = list(qn.labels)
+    alabels = list(apex.labels)
+    next_closer = dns.name.from_text(b".".join(qlabels[len(qlabels) - len(alabels) - 1:]).decode())
+
+    ce_hash = zone.nsec3_hash(apex.to_text())
+    nc_hash = zone.nsec3_hash(next_closer.to_text())
+
+    pairs = []
+    # (1) NSEC3 matching the closest encloser (apex): owner hash == H(apex).
+    #     Its type bitmap names the apex's types (SOA/NS/DNSKEY...).
+    pairs.append(_signed_nsec3(zone, ce_hash, _b32hex_increment(ce_hash),
+                               ["SOA", "NS", "DNSKEY", "NSEC3PARAM", "RRSIG"]))
+    # (2) NSEC3 covering the next-closer: owner < H(nc) < next.
+    pairs.append(_signed_nsec3(zone, _b32hex_decrement(nc_hash),
+                               _b32hex_increment(nc_hash), ["RRSIG"]))
+    return pairs
+
+
+def _nodata_message(qname: str, rdtype: str, nsec3_pairs):
+    """An empty-answer NOERROR message carrying NSEC3 proof RRsets in authority."""
+    msg = _answer_message(qname, rdtype, [])
+    for rrset, sig in nsec3_pairs:
+        msg.authority.append(rrset)
+        msg.authority.append(sig)
+    return msg
+
+
+# --------------------------------------------------------------------------- #
 # Pytest fixtures
 # --------------------------------------------------------------------------- #
 
@@ -311,6 +403,68 @@ def hierarchy_factory(patch_anchor):
         return h, resolver
 
     return _make
+
+
+@pytest.fixture
+def stripped_nsec3(patch_anchor) -> FixtureResolver:
+    """Valid chain, binding TXT absent but with a validated NSEC3 absence proof.
+
+    Models authenticated denial-of-existence -> ABSENT_AUTHENTICATED (the caller
+    may fall through to operator-confirm).
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+    proof = _closest_encloser_proof(h.leaf, BINDING_QNAME)
+    resolver.add(BINDING_QNAME, "TXT", _nodata_message(BINDING_QNAME, "TXT", proof))
+    return resolver
+
+
+@pytest.fixture
+def unvalidatable_absence(patch_anchor) -> FixtureResolver:
+    """Valid chain, binding TXT absent with NO denial proof at all.
+
+    Models an unvalidatable absence -> UNVALIDATABLE (the caller MUST reject).
+    The FixtureResolver returns an empty NOERROR for the unstaged TXT, so no
+    NSEC3 proof is present.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+    # Intentionally do not stage a TXT answer.
+    return resolver
+
+
+@pytest.fixture
+def unsigned_delegation(patch_anchor) -> FixtureResolver:
+    """A signed parent authenticatedly denies a DS for the leaf (NS, no DS).
+
+    Models an insecure delegation -> INSECURE. The leaf zone's DS query returns
+    a validated NSEC3 matching the leaf with NS-but-not-DS in its type bitmap.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    # Load root + TLD DNSKEY/DS, and the leaf DNSKEY, but NOT a leaf DS.
+    for zone in (h.root, h.tld, h.leaf):
+        dnskey_rr = zone.dnskey_rrset
+        sig_rr = dns.rrset.from_rdata(zone.origin, 3600, zone.sign_with_ksk(dnskey_rr))
+        resolver.add(zone.origin.to_text(), "DNSKEY",
+                     _answer_message(zone.origin.to_text(), "DNSKEY", [dnskey_rr, sig_rr]))
+    ds_rr = h.root.ds_rrset(h.tld)
+    sig_rr = dns.rrset.from_rdata(h.tld.origin, 3600, h.root.sign_with_zsk(ds_rr))
+    resolver.add(h.tld.origin.to_text(), "DS",
+                 _answer_message(h.tld.origin.to_text(), "DS", [ds_rr, sig_rr]))
+
+    # Leaf DS query -> authenticated no-DS: NSEC3 (signed by the TLD/parent zone)
+    # that MATCHES the leaf name with NS set but DS and SOA unset.
+    leaf_hash = h.tld.nsec3_hash(h.leaf.origin.to_text())
+    nsec3_pair = _signed_nsec3(h.tld, leaf_hash, _b32hex_increment(leaf_hash), ["NS", "RRSIG"])
+    resolver.add(h.leaf.origin.to_text(), "DS",
+                 _nodata_message(h.leaf.origin.to_text(), "DS", [nsec3_pair]))
+    return resolver
 
 
 # Re-export helpers used by sibling test modules (denial / wildcard).
