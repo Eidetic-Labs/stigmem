@@ -159,6 +159,19 @@ def _drain_subscription_delivery_lock() -> Generator[None, None, None]:
     if _sd._DELIVER_PENDING_LOCK.acquire(timeout=10):
         _sd._DELIVER_PENDING_LOCK.release()
     yield
+    # Drain again on teardown so a test that leaks an in-flight sweep thread
+    # reclaims the lock at its OWN exit instead of relying on the next test's
+    # setup drain. The setup-only drain is racy against this same #718/#722
+    # lock-leak class: a sweep thread launched by ``test_subscription_delivery_race``
+    # can acquire ``_DELIVER_PENDING_LOCK`` AFTER the next test's setup drain has
+    # already acquired-and-released it, so the lock is still held when that test
+    # makes its own ``deliver_pending()`` call (which then silently no-ops via the
+    # #47 non-blocking guard — the failure mode seen in ``test_stale_claim_recovered``
+    # and ``test_only_tombstoned_entity_suppressed``). A blocking acquire/release
+    # here waits for any holder spawned by the just-finished test to release, then
+    # frees it — reorg-proof, like the setup drain above.
+    if _sd._DELIVER_PENDING_LOCK.acquire(timeout=10):
+        _sd._DELIVER_PENDING_LOCK.release()
 
 
 # ---------------------------------------------------------------------------

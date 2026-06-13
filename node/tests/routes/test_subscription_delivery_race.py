@@ -277,16 +277,24 @@ def test_sweep_loop_and_deliver_pending_no_duplicate(client: TestClient) -> None
             await asyncio.gather(task, return_exceptions=True)
         finally:
             settings_mod.settings.subscription_delivery_sweep_s = original_interval
-            # task.cancel() cancels the awaiting coroutine, not the OS thread that
-            # asyncio.to_thread already launched into deliver_pending(). Drain the
-            # process-global delivery lock so no in-flight sweep thread outlives this
-            # test still holding it — otherwise a later test's explicit
-            # deliver_pending() would silently skip (the #47 non-blocking guard).
-            if delivery_mod._DELIVER_PENDING_LOCK.acquire(timeout=5):
-                delivery_mod._DELIVER_PENDING_LOCK.release()
 
     with patch("stigmem_node.subscription_delivery.httpx.Client", mock_cls):
         asyncio.run(driver())
+
+    # #718/#722 lock-leak class: task.cancel() cancels the awaiting coroutine, not
+    # the OS thread that asyncio.to_thread already launched into deliver_pending().
+    # A sweep iteration can submit one more to_thread(deliver_pending) right before
+    # cancellation; that thread keeps running and acquires _DELIVER_PENDING_LOCK.
+    # Draining INSIDE the loop is racy — the drain can acquire the (momentarily free)
+    # lock before that orphan thread does, then release, leaving the orphan to grab
+    # and hold it into the next test (whose explicit deliver_pending() then silently
+    # no-ops via the #47 non-blocking guard). asyncio.run() shuts down the default
+    # thread-pool executor and JOINS every to_thread worker before returning, so by
+    # this point no orphan deliver_pending() can still be running. Draining here is
+    # therefore deterministic: a blocking acquire/release reclaims the lock for the
+    # next test no matter how the race fell out.
+    if delivery_mod._DELIVER_PENDING_LOCK.acquire(timeout=5):
+        delivery_mod._DELIVER_PENDING_LOCK.release()
 
     event_ids = [call.kwargs["json"]["event_id"] for call in mock_inst.post.call_args_list]
     counts = Counter(event_ids)
