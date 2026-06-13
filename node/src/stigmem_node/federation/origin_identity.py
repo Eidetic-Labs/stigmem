@@ -409,6 +409,7 @@ def resolve_origin_key_for_relay(
     *,
     cache: dict[tuple[str, str], set[str]],
     origin_manifest: dict[str, object] | None = None,
+    relay_peer: str | None = None,
 ) -> set[str]:
     """Resolve the signing key set for a RELAYED origin (offline-safe, zero transitive trust).
 
@@ -444,6 +445,13 @@ def resolve_origin_key_for_relay(
     key set and bypass those checks (entity-authority + per-node pin bypass). It MUST be a
     local threaded through calls — a module-level global would persist a stale binding
     across requests and defeat rotation/revocation.
+
+    *relay_peer* is the node_id of the IMMEDIATE relaying peer (the authenticated
+    sender), threaded into the DNSSEC first-trust ladder so the per-peer
+    operator-confirm quarantine cap (``quarantine._peer_pending_count``) is keyed
+    per relaying peer rather than collapsing every relay into a shared
+    ``relay_peer IS NULL`` bucket. ``None`` keeps the legacy shared bucket (e.g. a
+    self/non-relay caller).
 
     Returns ``{current_key} ∪ rotation-window keys`` (same shape as
     ``resolve_origin_key``). Raises OriginIdentityError on any failure.
@@ -496,7 +504,7 @@ def resolve_origin_key_for_relay(
             entity_uri=entity_uri,
             candidate=None,
             candidate_fp=None,
-            relay_peer=None,
+            relay_peer=relay_peer,
         )
         if dnssec_keys is not None:  # 3c only; in 3b this branch is unreachable.
             cache[(entity_uri, node_id)] = dnssec_keys
@@ -583,7 +591,7 @@ def resolve_origin_key_for_relay(
             entity_uri=entity_uri,
             candidate=candidate,
             candidate_fp=candidate_fp,
-            relay_peer=None,
+            relay_peer=relay_peer,
         )
         if dnssec_keys is not None:  # 3c only; in 3b TRUSTED fails closed at recheck.
             conn.commit()

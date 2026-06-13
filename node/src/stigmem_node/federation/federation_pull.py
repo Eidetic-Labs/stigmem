@@ -298,6 +298,7 @@ async def pull_from_peer_once(
                         origin.get("entity_uri", ""),
                         cache=relay_cache,
                         origin_manifest=origin_manifest,
+                        relay_peer=sender_node_id,
                     )
                 else:
                     keys = resolve_origin_key(origin["node_id"])
@@ -546,6 +547,7 @@ def ingest_tombstone_entry(
                 origin.get("entity_uri", ""),
                 cache=relay_cache,
                 origin_manifest=origin_manifest,
+                relay_peer=sender_node_id,
             )
         else:
             keys = resolve_origin_key(sender_node_id)
@@ -904,6 +906,7 @@ def ingest_revocation_entry(
                 origin.get("entity_uri", ""),
                 cache=relay_cache,
                 origin_manifest=origin_manifest,
+                relay_peer=sender_node_id,
             )
         else:
             keys = resolve_origin_key(sender_node_id)

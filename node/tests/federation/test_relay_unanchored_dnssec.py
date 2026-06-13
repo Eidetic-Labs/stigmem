@@ -215,6 +215,53 @@ def test_flag_on_candidate_pending_confirm_raises(
     assert "confirm" in str(exc.value).lower() or "pending" in str(exc.value).lower()
 
 
+def test_relay_peer_threaded_gives_independent_quarantine_buckets(
+    client, monkeypatch, _dnssec_on, _unreachable, unsigned_delegation
+):
+    """L-1: the immediate relaying peer is threaded into the first-trust ladder, so
+    the per-peer operator-confirm quarantine cap is keyed per relaying peer rather
+    than collapsing every relay into a shared ``relay_peer IS NULL`` bucket.
+
+    Fill peer-A's bucket to a cap of 1 with one unrelated parked row, then drive a
+    PENDING_CONFIRM relay resolution attributed to peer-B. With the fix peer-B has
+    its own bucket and the candidate parks (a row with relay_peer='peer-B'); under
+    the old NULL-bucket behavior peer-B's insert would have been rejected because
+    the shared bucket was already full."""
+    from datetime import UTC, datetime
+
+    from stigmem_node.db import db as _db_ctx
+    from stigmem_node.federation.dnssec import quarantine as q
+
+    monkeypatch.setattr(oi.settings, "federation_dnssec_pending_confirm_cap", 1)
+    # Fill peer-A's bucket to the cap (1) with one unrelated parked row.
+    with _db_ctx() as conn:
+        q.quarantine(
+            conn,
+            entity_uri="https://unrelated.example/",
+            node_id="stigmem:node:unrelated",
+            candidate_key_fpr="f",
+            source="relay",
+            relay_peer="peer-A",
+            now=datetime.now(UTC),
+            cap=1,
+        )
+        conn.commit()
+
+    m, _pub = _manifest_with_fpr(NODE_ID, ENTITY_URI)
+    monkeypatch.setattr(oi, "fingerprint_from_pubkey", lambda k: RECORD_FPR)
+    _inject_resolver(monkeypatch, unsigned_delegation)
+    # PENDING_CONFIRM raises, but the quarantine row is committed first.
+    with pytest.raises(oi.OriginIdentityError):
+        oi.resolve_origin_key_for_relay(
+            NODE_ID, ENTITY_URI, cache={}, origin_manifest=manifest_to_dict(m),
+            relay_peer="peer-B",
+        )
+    with _db_ctx() as conn:
+        parked = q.get_pending(conn, ENTITY_URI, NODE_ID)
+    assert parked is not None, "peer-B should get its own bucket, not the full peer-A one"
+    assert parked["relay_peer"] == "peer-B"
+
+
 def test_flag_on_candidate_rejected_raises(
     client, monkeypatch, _dnssec_on, _unreachable, revoked_chain
 ):

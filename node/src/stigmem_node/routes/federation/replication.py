@@ -688,6 +688,7 @@ def _verify_origin_and_resolve_tenant(
                 origin.get("entity_uri", ""),
                 cache=relay_cache if relay_cache is not None else {},
                 origin_manifest=origin_manifest,
+                relay_peer=sender_node_id,
             )
         else:
             keys = resolve_origin_key(origin["node_id"])
