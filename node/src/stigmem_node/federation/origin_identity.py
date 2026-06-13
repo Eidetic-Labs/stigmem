@@ -16,7 +16,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 import httpx
@@ -34,7 +34,9 @@ from ..settings import settings
 from .origin_pins import fingerprint_from_pubkey, get_origin_pin
 
 if TYPE_CHECKING:
-    pass
+    # Type-only import of the DNSSEC resolver Protocol (Rev 6 I11): never imported
+    # at runtime, so importing this module on a default node loads no DNSSEC code.
+    from .dnssec.resolver import Resolver
 
 logger = logging.getLogger("stigmem.federation.origin_identity")
 
@@ -46,6 +48,151 @@ class OriginIdentityError(ValueError):
 def _now() -> datetime:
     """Current UTC time. Indirected through a module function so tests own the clock."""
     return datetime.now(UTC)
+
+
+def _make_dnssec_resolver() -> Resolver:
+    """Construct the DNSSEC validating resolver for the first-trust tier (Rev 6 I11).
+
+    Indirected through a module function so (a) the dnspython-backed
+    ``LiveResolver`` is imported ONLY here, function-locally, on the flag-on path
+    — importing this module on a default node never loads the ``[federation-dnssec]``
+    extra (I11) — and (b) tests can inject an offline ``FixtureResolver`` by
+    patching this single seam.
+    """
+    from .dnssec.resolver import LiveResolver
+
+    return LiveResolver()
+
+
+def _dnssec_first_trust_keys(
+    conn: Any,
+    *,
+    node_id: str,
+    entity_uri: str,
+    candidate: OrgManifest | None,
+    candidate_fp: str | None,
+    relay_peer: str | None,
+) -> set[str] | None:
+    """Phase-3 DNSSEC first-trust tier at the relay fail-closed terminals (Rev 6).
+
+    Strictly ADDITIVE at ``relay_origin_unanchored`` (I8): reached only after
+    operator-pin -> stored-binding -> fetch-on-first TOFU have all declined and the
+    origin is unknown + unreachable. Gated on ``federation_dnssec_trust_enabled``;
+    when the flag is OFF this is a no-op (returns None) and the caller raises the
+    unchanged ``relay_origin_unanchored`` — byte-identical to today, with no ladder
+    call and no DNSSEC resolver constructed.
+
+    When ON, the disposition depends on whether a candidate key exists:
+
+      * **No candidate key** (``candidate is None`` — the no-candidate terminal):
+        the DNSSEC record binds ``entity_uri -> fingerprint`` but yields NO key
+        BYTES, and a relayed fact cannot be signature-verified without the key.
+        The DNSSEC tier can therefore neither anchor (no bytes to return) nor
+        route-to-confirm (no candidate fingerprint to quarantine) a key that does
+        not exist. The terminal stays fail-closed — but it is now FLAG-AWARE
+        (consulted + short-circuited here, never silently bypassed), satisfying
+        plan TB-2. Returns None -> the caller raises ``relay_origin_unanchored``.
+
+      * **Candidate exists** (the candidate-exists terminal): run the first-trust
+        ladder against the candidate's fingerprint.
+          - TRUSTED   -> the ladder validated + pinned the binding, BUT a relayed
+            DNSSEC key is honored only after the I5 recency/revocation re-check,
+            which is build-phase 3c. Call the ``recheck`` seam BEFORE returning a
+            key; in 3b it raises ``RecheckNotImplemented`` -> fail-closed (plan
+            TB-4: a 3b node cannot honor a DNSSEC first-trust key with no
+            revocation path, even with the flag flipped on). 3c will make TRUSTED
+            return the verified key set.
+          - PENDING_CONFIRM -> the ladder quarantined the binding; the fact cannot
+            be trusted until an operator confirms the fingerprint out-of-band.
+            Raise (operator-confirm pending).
+          - REJECTED  -> raise (revoked / rollback / bogus / unvalidatable / queue
+            full — every reject branch of the I10 outcome lattice).
+
+    Raises ``OriginIdentityError`` on any non-trust verdict (or the 3b recheck
+    fail-closed). Returns the verified key set ONLY when a future 3c recheck
+    succeeds; in 3b it never returns a key set.
+    """
+    if not settings.federation_dnssec_trust_enabled:
+        return None  # flag OFF — no ladder, no resolver; caller fails closed as today
+
+    from .dnssec.ladder import TrustDecision, resolve_first_trust
+    from .dnssec.recheck import RecheckNotImplemented, recheck_relay_binding
+
+    if candidate is None or not candidate_fp:
+        # No-candidate terminal: no key bytes exist to anchor, no candidate fpr to
+        # confirm. DNSSEC cannot help here (it binds a fingerprint, never key
+        # bytes). Flag-aware fail-closed (TB-2): the caller raises unanchored.
+        return None
+
+    from .dnssec.host import host_from_entity_uri
+
+    host = host_from_entity_uri(entity_uri)
+    _audit_relay(
+        "relay_origin_dnssec_first_trust_attempt",
+        node_id=node_id,
+        entity_uri=entity_uri,
+        detail_host=host or "",
+    )
+
+    decision = resolve_first_trust(
+        conn,
+        entity_uri=entity_uri,
+        node_id=node_id,
+        candidate_key_fpr=candidate_fp,
+        resolver=_make_dnssec_resolver(),
+        settings=settings,
+        now=_now(),
+        relay_peer=relay_peer,
+        source="relay",
+    )
+
+    if decision.outcome is TrustDecision.Outcome.TRUSTED:
+        # TB-4 / I5: a relayed DNSSEC key is not honored without the 3c recency
+        # re-check. The seam raises RecheckNotImplemented in 3b; map it to the
+        # fail-closed ``OriginIdentityError`` the relay caller already handles, so a
+        # 3b node refuses the key (with the validated pin persisted for 3c). The
+        # ladder already committed the pin via ``conn``; commit again is harmless.
+        try:
+            recheck_relay_binding(
+                conn,
+                host=host or "",
+                entity_uri=entity_uri,
+                node_id=node_id,
+                key_fpr=candidate_fp,
+                resolver=_make_dnssec_resolver(),
+                settings=settings,
+                now=_now(),
+            )
+        except RecheckNotImplemented as exc:
+            if conn is not None:
+                conn.commit()  # persist the ladder's validated pin for the 3c re-check
+            raise OriginIdentityError(
+                f"relayed origin {node_id!r} ({entity_uri!r}) dnssec-trusted but the "
+                f"relay-path recency re-check is not yet wired (3c); failing closed"
+            ) from exc
+        # 3c only: reached after a successful re-check.
+        keys = _keys_from_manifest(candidate)
+        return keys
+
+    if decision.outcome is TrustDecision.Outcome.PENDING_CONFIRM:
+        # The ladder quarantined the binding on ``conn`` (the operator-confirm
+        # queue, I9). Commit BEFORE raising so the queue row survives — otherwise
+        # the caller's ``with db()`` block rolls it back when this raise unwinds.
+        if conn is not None:
+            conn.commit()
+        raise OriginIdentityError(
+            f"relayed origin {node_id!r} ({entity_uri!r}) pending operator confirmation "
+            f"({decision.reason})"
+        )
+
+    # REJECTED (revoked / rollback / bogus / unvalidatable / queue full). The ladder
+    # may have stamped epoch/sticky markers on ``conn``; commit them before raising.
+    if conn is not None:
+        conn.commit()
+    raise OriginIdentityError(
+        f"relayed origin {node_id!r} ({entity_uri!r}) rejected by dnssec first-trust "
+        f"({decision.reason})"
+    )
 
 
 def _prior_key_within_grace(rotated_at: str) -> bool:
@@ -337,6 +484,23 @@ def resolve_origin_key_for_relay(
     )
     if candidate is None:
         # No candidate from any source AND no stored binding ⇒ unknown + unreachable.
+        # Phase-3 DNSSEC first-trust (flag-gated, strictly additive at this terminal,
+        # Rev 6 I8 / plan TB-2). With NO candidate key bytes the DNSSEC tier can
+        # neither anchor (it yields a fingerprint, never key bytes) nor route-to-
+        # confirm (no candidate fpr to quarantine), so it short-circuits to None and
+        # this terminal stays fail-closed — but it is now flag-AWARE (consulted here,
+        # never silently bypassed). When the flag is OFF this is a no-op.
+        dnssec_keys = _dnssec_first_trust_keys(
+            None,
+            node_id=node_id,
+            entity_uri=entity_uri,
+            candidate=None,
+            candidate_fp=None,
+            relay_peer=None,
+        )
+        if dnssec_keys is not None:  # 3c only; in 3b this branch is unreachable.
+            cache[(entity_uri, node_id)] = dnssec_keys
+            return dnssec_keys
         _audit_relay("relay_origin_unanchored", node_id=node_id, entity_uri=entity_uri)
         raise OriginIdentityError(
             f"relayed origin {node_id!r} ({entity_uri!r}) is unanchored and unreachable"
@@ -404,6 +568,33 @@ def resolve_origin_key_for_relay(
         keys = _keys_from_manifest(fetched)
         cache[(entity_uri, node_id)] = keys
         return keys
+
+    # Phase-3 DNSSEC first-trust (flag-gated, strictly additive at this terminal,
+    # Rev 6 I8 / plan TB-2). A candidate self-verified + lists node_id (the W3.2
+    # gate above passed) but there is no pin, no stored binding, and the origin is
+    # unreachable. The DNSSEC tier runs the first-trust ladder against the
+    # candidate's fingerprint. It writes (pins / epoch / quarantine), so it owns a
+    # live transaction here. When the flag is OFF this is a no-op and the unchanged
+    # ``relay_origin_unanchored`` raise below fires (byte-identical to today).
+    with db() as conn:
+        dnssec_keys = _dnssec_first_trust_keys(
+            conn,
+            node_id=node_id,
+            entity_uri=entity_uri,
+            candidate=candidate,
+            candidate_fp=candidate_fp,
+            relay_peer=None,
+        )
+        if dnssec_keys is not None:  # 3c only; in 3b TRUSTED fails closed at recheck.
+            conn.commit()
+            cache[(entity_uri, node_id)] = dnssec_keys
+            return dnssec_keys
+        # The ladder may have pinned/quarantined as a side effect even on a verdict
+        # that does not yield a key here (e.g. PENDING_CONFIRM raises before this
+        # point). On the flag-OFF no-op path there is nothing to commit; commit is
+        # harmless and persists any quarantine row written before a raise is caught
+        # upstream. (Reached only when _dnssec_first_trust_keys returned None.)
+        conn.commit()
 
     # Fail-closed: a candidate existed (carried/stored) but there is no pin, no stored binding,
     # and the origin is unreachable ⇒ no first-party anchor to accept it against.
