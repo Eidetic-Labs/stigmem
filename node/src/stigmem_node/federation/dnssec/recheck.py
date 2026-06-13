@@ -21,11 +21,16 @@ DNSSEC-first-trust key with no revocation path even if an operator flips
 ``federation_dnssec_trust_enabled`` — the no-recency window is unreachable
 *structurally*, not merely undocumented.
 
-3b GUARANTEES (proven by ``test_recheck_stub.py`` + the default-off guard):
+3b GUARANTEES (proven by ``tests/federation/dnssec/test_recheck_stub.py`` + the
+default-off guard):
   * the seam exists and is the single call site the relay path routes through;
   * it is fail-closed (raises a dedicated typed error, never returns "trusted");
-  * it does NO network work in 3b (it raises before touching any resolver), so a
-    flag-on 3b node performs zero DNS egress on the pin short-circuit path.
+  * it does NO network work in 3b: it never calls a resolver method, and a flag-on
+    3b node performs zero DNS egress on the pin short-circuit path. (Note the
+    resolver is CONSTRUCTED by the caller and passed in as an argument before this
+    stub runs; zero-egress holds because ``LiveResolver.__init__`` imports no
+    dnspython and opens no socket — NOT because the stub "raises first". The stub
+    simply never invokes the resolver.)
 
 3c MUST FILL IN (Rev 6 I5, task 3c.1/3c.2):
   * the ``clamp(record_DNS_TTL, floor, cap)`` re-check cadence + per-origin cache;
@@ -68,12 +73,13 @@ def recheck_relay_binding(
 ) -> None:
     """Re-check a pinned DNSSEC binding's recency/revocation (Rev 6 I5) — 3b stub.
 
-    In 3b this ALWAYS raises :class:`RecheckNotImplemented` BEFORE consulting the
-    resolver (no network egress). The argument shape mirrors what the 3c
-    implementation needs (the open DB connection, the canonical host + identity
-    being re-checked, the injected resolver, settings for the cadence clamp, and
-    the wall-clock ``now``) so 3c can fill in the body without changing the relay
-    call site or this signature.
+    In 3b this ALWAYS raises :class:`RecheckNotImplemented` and NEVER invokes the
+    injected ``resolver`` (so no DNS egress occurs here — the resolver is already
+    constructed by the caller, but this stub does not call any of its methods).
+    The argument shape mirrors what the 3c implementation needs (the open DB
+    connection, the canonical host + identity being re-checked, the injected
+    resolver, settings for the cadence clamp, and the wall-clock ``now``) so 3c
+    can fill in the body without changing the relay call site or this signature.
 
     Returns ``None`` on a successful re-check in 3c; in 3b it never returns.
     """
