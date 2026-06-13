@@ -60,8 +60,9 @@ def list_quarantined_facts(
 ) -> QuarantineListResponse:
     """List facts in the quarantine system (Spec-08-Quarantine-Garden).
 
-    Node admins see all quarantined facts across all gardens.
-    Other callers see facts only in quarantine gardens where they hold a member role.
+    Scoped to the caller's tenant: admins see all quarantined facts within their
+    own tenant. Other callers see facts only in quarantine gardens where they
+    hold a member role. No caller can read another tenant's quarantine.
     """
     if not identity.can_read():
         raise HTTPException(
@@ -76,6 +77,11 @@ def list_quarantined_facts(
     quarantine_status_expr = "COALESCE(fqs.quarantine_status, f.quarantine_status)"
     filters: list[str] = [f"{quarantine_garden_expr} IS NOT NULL"]
     params: list[Any] = []
+
+    # Tenant scope: applies to ALL callers (admins included). A per-NODE admin
+    # is NOT cross-tenant — quarantine moderation is per-TENANT (R-2 / F-SBOLA5).
+    filters.append("f.tenant_id = ?")
+    params.append(identity.tenant_id)
 
     if quarantine_status:
         filters.append(f"{quarantine_status_expr} = ?")
@@ -290,10 +296,10 @@ def _get_quarantined_fact(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (fact_row, garden_row) for a pending quarantined fact.
 
-    Raises 404 or 409 as appropriate. Node-admin bypass is intentional because
-    node admins are the system's last-resort moderation authority. Garden-scoped
-    moderators must hold quarantine:moderator or admin role in the fact's
-    quarantine garden.
+    Scoped to the caller's tenant: a fact in another tenant returns 404 (R-2 /
+    F-SBOLA5). Within the caller's tenant, admins are the last-resort moderation
+    authority; garden-scoped moderators must hold quarantine:moderator or admin
+    role in the fact's quarantine garden.
     """
     with db() as conn:
         row = conn.execute(
@@ -307,8 +313,9 @@ def _get_quarantined_fact(
                FROM facts f
                LEFT JOIN fact_quarantine_status fqs ON fqs.fact_id = f.id
                WHERE f.id = ?
+                 AND f.tenant_id = ?
                  AND COALESCE(fqs.quarantine_garden_id, f.quarantine_garden_id) IS NOT NULL""",
-            (fact_id,),
+            (fact_id, identity.tenant_id),
         ).fetchone()
 
     if row is None:
@@ -322,7 +329,9 @@ def _get_quarantined_fact(
             detail="fact_not_quarantine_pending",
         )
 
-    garden = get_garden_by_slug_or_id(row["projected_quarantine_garden_id"])
+    garden = get_garden_by_slug_or_id(
+        row["projected_quarantine_garden_id"], tenant_id=identity.tenant_id
+    )
     if garden is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="quarantine garden not found"
