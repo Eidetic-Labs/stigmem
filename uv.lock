@@ -6226,6 +6226,9 @@ dev = [
 embed-openai = [
     { name = "openai" },
 ]
+federation-dnssec = [
+    { name = "dnspython" },
+]
 libsql = [
     { name = "libsql-experimental" },
 ]
@@ -6257,6 +6260,7 @@ dev = [
 requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "canonicaljson", specifier = ">=2.0" },
+    { name = "dnspython", marker = "extra == 'federation-dnssec'", specifier = ">=2.6" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -6283,7 +6287,7 @@ requires-dist = [
     { name = "stigmem-node", extras = ["postgres"], marker = "extra == 'conformance'", editable = "node" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
 ]
-provides-extras = ["dev", "libsql", "encryption", "sqlcipher", "sqlite-vec", "embed-openai", "postgres", "conformance", "observability"]
+provides-extras = ["dev", "libsql", "encryption", "sqlcipher", "sqlite-vec", "embed-openai", "postgres", "conformance", "observability", "federation-dnssec"]
 
 [package.metadata.requires-dev]
 dev = [
