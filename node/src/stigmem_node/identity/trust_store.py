@@ -231,7 +231,11 @@ def _try_fetch_manifest(entity_uri: str) -> OrgManifest | None:
         return None  # can't derive URL from non-HTTP URI
 
     try:
-        assert_safe_url(base_url, allow_schemes=frozenset({"https", "http"}))
+        # F-SSRF2: https-only. A manifest base_url derived from an entity_uri must be
+        # https in production — matching the already-https-only relay sibling
+        # ``origin_identity._fetch_relay_manifest``. An ``http://`` entity_uri is
+        # refused before any GET (assert_safe_url raises 'Disallowed URL scheme').
+        assert_safe_url(base_url, allow_schemes=frozenset({"https"}))
         resp = httpx.get(
             f"{base_url}/.well-known/stigmem-manifest.json",
             timeout=10.0,
