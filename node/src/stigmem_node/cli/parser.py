@@ -469,6 +469,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="restrict sweep to one scope (local/team/company/public)",
     )
     sw_p.add_argument(
+        "--tenant",
+        dest="tenant",
+        default="default",
+        metavar="TENANT",
+        help="restrict sweep to one tenant (default: 'default')",
+    )
+    sw_p.add_argument(
         "--dry-run",
         action="store_true",
         help="print what would be decayed without writing",

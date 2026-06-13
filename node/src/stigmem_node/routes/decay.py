@@ -30,6 +30,7 @@ def _decay_job_worker(
     min_confidence: float | None,
     scope: str | None,
     dry_run: bool,
+    tenant_id: str,
 ) -> None:
     """Background task: run decay sweep and update job status."""
     mark_running(job_id)
@@ -39,6 +40,7 @@ def _decay_job_worker(
             min_confidence=min_confidence,
             scope=scope,
             dry_run=dry_run,
+            tenant_id=tenant_id,
         )
         mark_done(job_id, result)
     except Exception as exc:
@@ -89,7 +91,13 @@ def decay_sweep(
             estimated_s = max(60, scope_count // 1_000)
             job_id = create_job("decay", scope, estimated_s)
             background_tasks.add_task(
-                _decay_job_worker, job_id, ttl_seconds, min_confidence, scope, dry_run
+                _decay_job_worker,
+                job_id,
+                ttl_seconds,
+                min_confidence,
+                scope,
+                dry_run,
+                identity.tenant_id,
             )
             return JSONResponse(
                 status_code=202,
@@ -101,6 +109,7 @@ def decay_sweep(
         min_confidence=min_confidence,
         scope=scope,
         dry_run=dry_run,
+        tenant_id=identity.tenant_id,
     )
 
 

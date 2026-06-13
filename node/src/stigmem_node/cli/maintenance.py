@@ -19,6 +19,7 @@ def _cmd_decay_sweep(args: argparse.Namespace) -> int:
         min_confidence=args.min_confidence,
         scope=args.scope or None,
         dry_run=args.dry_run,
+        tenant_id=getattr(args, "tenant", "default") or "default",
     )
 
     if args.dry_run:
