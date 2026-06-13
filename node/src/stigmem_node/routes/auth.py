@@ -117,13 +117,33 @@ def _verify_id_token(id_token: str) -> dict[str, Any]:
     return claims
 
 
-def _check_domain(email: str | None) -> None:
-    """Enforce oidc_allowed_domains if configured."""
-    if not settings.oidc_allowed_domains or not email:
+def _check_domain(email: str | None, email_verified: bool) -> None:
+    """Enforce oidc_allowed_domains if configured.
+
+    The allowlist may only be satisfied by a *verified* email.  An unverified
+    or absent email is treated as no email: when no allowlist is configured the
+    node does not enforce one (``email_verified`` is irrelevant, unchanged
+    behavior), but when an allowlist IS configured an unverified/absent email
+    cannot satisfy it and the exchange is rejected.
+
+    ``email_verified`` is the strict boolean ``claims.get("email_verified") is
+    True`` evaluated by the caller — some IdPs emit the string ``"true"``; only
+    the OIDC-spec boolean ``True`` counts as verified.
+    """
+    if not settings.oidc_allowed_domains:
         return
     allowed = {d.strip().lower() for d in settings.oidc_allowed_domains.split(",") if d.strip()}
     if not allowed:
         return
+    # An allowlist is configured: only a verified email can satisfy it. An
+    # unverified or absent email is rejected — an attacker who tricks an IdP
+    # into issuing email=victim@alloweddomain.com with email_verified=false (or
+    # omitted) must not pass the allowlist (F-SAUTH1).
+    if not email or not email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A verified email in an allowed domain is required",
+        )
     domain = email.split("@", 1)[-1].lower()
     if domain not in allowed:
         raise HTTPException(
@@ -188,7 +208,9 @@ def oidc_exchange(body: ExchangeRequest) -> ExchangeResponse:
     claims = _verify_id_token(body.id_token)
     sub: str = claims["sub"]
     email: str | None = claims.get("email")
-    _check_domain(email)
+    # Strict boolean identity: some IdPs send the string "true"; only the
+    # OIDC-spec boolean True counts as verified.
+    _check_domain(email, claims.get("email_verified") is True)
 
     entity_uri = f"oidc:{sub}"
 
