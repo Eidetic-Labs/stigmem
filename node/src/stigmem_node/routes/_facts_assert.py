@@ -138,7 +138,8 @@ def _existing_record_for_cid(
 ) -> FactRecord | None:
     """Return the existing record for ``fact_cid``, or None when no alias exists yet."""
     existing_alias = conn.execute(
-        "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?", (fact_cid,)
+        "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+        (fact_cid, tenant_id),
     ).fetchone()
     if existing_alias is None:
         return None
@@ -456,8 +457,8 @@ def assert_fact_impl(
 
         # F-10 §25.7.3: alias table row — idempotent upsert on CID collision
         alias_result = conn.execute(
-            "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid) VALUES (?, ?)",
-            (fact_id, fact_cid),
+            "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid, tenant_id) VALUES (?, ?, ?)",
+            (fact_id, fact_cid, identity.tenant_id),
         )
         if alias_result.rowcount == 0:
             # Concurrent same-CID write race: return existing record

@@ -41,8 +41,8 @@ def _resolve_provenance_entry(
             ref_row = conn.execute(_REF_SELECT, (entry_fact_id, tenant_id)).fetchone()
         elif hash_val.startswith("sha256:"):
             alias = conn.execute(
-                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?",
-                (hash_val,),
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+                (hash_val, tenant_id),
             ).fetchone()
             if alias:
                 ref_row = conn.execute(_REF_SELECT, (alias["fact_id"], tenant_id)).fetchone()

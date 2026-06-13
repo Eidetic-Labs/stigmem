@@ -48,10 +48,12 @@ def _conn() -> sqlite3.Connection:
         """
         CREATE TABLE facts (id TEXT PRIMARY KEY, entity TEXT, relation TEXT,
             value_type TEXT, value_v TEXT, source TEXT, scope TEXT,
-            confidence REAL, interpret_as TEXT, cid TEXT);
+            confidence REAL, interpret_as TEXT, cid TEXT,
+            tenant_id TEXT NOT NULL DEFAULT 'default');
         CREATE TABLE fact_cid_aliases (fact_id TEXT, cid TEXT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             PRIMARY KEY (fact_id, cid));
-        CREATE UNIQUE INDEX idx_alias_cid ON fact_cid_aliases(cid);
+        CREATE UNIQUE INDEX idx_alias_cid ON fact_cid_aliases(cid, tenant_id);
         CREATE TABLE fact_cid_backfill (fact_id TEXT PRIMARY KEY, status TEXT,
             attempted_at TEXT, error TEXT, updated_at TEXT);
         """

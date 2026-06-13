@@ -193,13 +193,13 @@ def rebind_facts_to_cid_v2(conn: Any, *, batch_size: int = 500) -> dict[str, int
         if last_id is None:
             rows = conn.execute(
                 "SELECT id, entity, relation, value_type, value_v, source, scope, "
-                "confidence, interpret_as FROM facts ORDER BY id LIMIT ?",
+                "confidence, interpret_as, tenant_id FROM facts ORDER BY id LIMIT ?",
                 (batch_size,),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT id, entity, relation, value_type, value_v, source, scope, "
-                "confidence, interpret_as FROM facts WHERE id > ? ORDER BY id LIMIT ?",
+                "confidence, interpret_as, tenant_id FROM facts WHERE id > ? ORDER BY id LIMIT ?",
                 (last_id, batch_size),
             ).fetchall()
         if not rows:
@@ -225,8 +225,11 @@ def rebind_facts_to_cid_v2(conn: Any, *, batch_size: int = 500) -> dict[str, int
             if existing == {v2}:
                 set_fact_cid_backfill_status(conn, fact_id=row["id"], status="complete")
                 continue
+            # Tenant-scoped collision check: alias uniqueness is per (cid, tenant_id)
+            # after migration 052 (F-SBOLA4).
             owner = conn.execute(
-                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?", (v2,)
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+                (v2, row["tenant_id"]),
             ).fetchone()
             if owner is not None and owner["fact_id"] != row["id"]:
                 set_fact_cid_backfill_status(
@@ -236,8 +239,8 @@ def rebind_facts_to_cid_v2(conn: Any, *, batch_size: int = 500) -> dict[str, int
                 continue
             conn.execute("DELETE FROM fact_cid_aliases WHERE fact_id = ?", (row["id"],))
             conn.execute(
-                "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid) VALUES (?, ?)",
-                (row["id"], v2),
+                "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid, tenant_id) VALUES (?, ?, ?)",
+                (row["id"], v2, row["tenant_id"]),
             )
             set_fact_cid_backfill_status(conn, fact_id=row["id"], status="complete")
             rebound += 1
