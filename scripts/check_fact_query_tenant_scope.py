@@ -31,10 +31,10 @@ SCAN_DIRS = [ROOT / "routes", ROOT / "recall", ROOT / "federation", ROOT / "life
 
 # Tenant-bearing tables this guard defends. All carry a `tenant_id` column (facts
 # from the start; entity_aliases/instruction_manifests/boot_stubs/instruction_audit
-# since migrations 039/040; tombstones carries tenant_id too) — a route/recall/
-# lifecycle query against any of them must scope by tenant or it can leak across
-# tenants.
-TENANT_TABLES = r"(?:facts|entity_aliases|instruction_manifests|boot_stubs|instruction_audit|tombstones)"
+# since migrations 039/040; tombstones carries tenant_id too; jobs since migration
+# 051, F-SBOLA2) — a route/recall/lifecycle query against any of them must scope by
+# tenant or it can leak across tenants.
+TENANT_TABLES = r"(?:facts|entity_aliases|instruction_manifests|boot_stubs|instruction_audit|tombstones|jobs)"
 # Case-sensitive: SQL keywords are uppercase in this codebase, so this skips
 # prose like "from facts.py" in docstrings.
 FROM_FACTS = re.compile(rf"FROM\s+{TENANT_TABLES}\b")

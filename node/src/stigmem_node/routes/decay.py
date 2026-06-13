@@ -89,7 +89,7 @@ def decay_sweep(
 
         if scope_count > settings.async_job_threshold:
             estimated_s = max(60, scope_count // 1_000)
-            job_id = create_job("decay", scope, estimated_s)
+            job_id = create_job("decay", scope, estimated_s, identity.tenant_id)
             background_tasks.add_task(
                 _decay_job_worker,
                 job_id,
@@ -121,7 +121,7 @@ def get_decay_job(
     """Poll the status of an async decay job (Spec-X9-Decay-Semantics)."""
     if not identity.can_read():
         raise HTTPException(status_code=403, detail="read permission required")
-    job = get_job(job_id, job_type="decay")
+    job = get_job(job_id, job_type="decay", tenant_id=identity.tenant_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job
