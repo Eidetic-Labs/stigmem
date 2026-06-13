@@ -37,6 +37,16 @@ def test_forged_rrsig_is_bogus(forged_rrsig_chain):
     assert res.status is Validation.BOGUS, res.detail
 
 
+def test_ad_bit_ignored_even_with_present_forged_signature(forged_rrsig_chain):
+    # 3AV-3: AD=1 AND a present-but-invalid binding RRSIG. Unlike the
+    # stripped-RRSIG case, a signature IS present here — but it is forged. A
+    # validator that trusted AD when "a signature exists" would accept; we
+    # re-validate the signature itself and reject -> BOGUS.
+    forged_rrsig_chain.force_ad_bit()
+    res = validate_binding(HOST.rstrip("."), resolver=forged_rrsig_chain)
+    assert res.status is Validation.BOGUS, res.detail
+
+
 def test_stale_rrsig_is_bogus(stale_rrsig_chain):
     # 3a is strict: a far-past/expired binding RRSIG is BOGUS at validation
     # time. The age-clamp -> operator-confirm nuance is a 3b concern.

@@ -25,6 +25,9 @@ from stigmem_node.federation.dnssec.host import host_from_entity_uri
         ("https://xn--vctim-n4a.example/", "xn--vctim-n4a.example"),
         # IDN (U-label, dotless-i U+0131) -> A-label (punycode)
         ("https://vıctim.example/", "xn--vctim-n4a.example"),
+        # 3AC-3: scheme is case-insensitive (RFC 3986) -> recognize + canonicalize.
+        ("HTTPS://Memory.ACME.example/", "memory.acme.example"),
+        ("HtTp://memory.acme.example/x", "memory.acme.example"),
     ],
 )
 def test_valid_hosts_canonicalize(uri, expected):

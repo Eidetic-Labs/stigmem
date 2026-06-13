@@ -25,6 +25,11 @@ from dataclasses import dataclass
 # password string.
 _VERSION_TOKEN = "v=stigmem1"  # nosec B105
 
+# Keys this grammar assigns meaning to. A DUPLICATE of any of these is ambiguous
+# and rejected (fail-closed); duplicates of unknown keys are tolerated for the
+# forward-compat path (Rev 6 §7).
+_KNOWN_KEYS = frozenset({"v", "fpr", "epoch", "status", "prev_fpr", "prev_until"})
+
 
 @dataclass(frozen=True)
 class BindingRecord:
@@ -60,26 +65,31 @@ def parse_binding_record(txt: str) -> BindingRecord | None:
     for tok in tokens[1:]:
         if "=" not in tok:
             return None  # malformed token (not k=v)
-        key, _, value = tok.partition("=")
+        key, _, raw_value = tok.partition("=")
         key = key.strip()
-        value = value.strip()
         if not key:
             return None
-        # Ignore unknown keys for forward-compat, but reject a duplicate of a
-        # known key to avoid ambiguity. (Unknown duplicates are simply kept by
-        # last-write; only known-key ambiguity matters.)
-        pairs[key] = value
+        # Reject a DUPLICATE of any known key (the grammar assigns it meaning, so
+        # a second occurrence is ambiguous -> fail closed). Unknown keys may
+        # repeat for forward-compat; their last-write value is harmless.
+        if key in _KNOWN_KEYS and key in pairs:
+            return None
+        # Keep the raw (unstripped) value alongside the stripped one so the
+        # strict numeric gate below can reject embedded whitespace (e.g.
+        # ``epoch= 5``), which ``int()`` would otherwise silently accept.
+        pairs[key] = raw_value.strip()
+        if key == "epoch":
+            raw_epoch_token = raw_value
 
-    # epoch is required and must be a non-negative integer.
+    # epoch is required and must be a strict ASCII non-negative decimal integer.
     raw_epoch = pairs.get("epoch")
     if raw_epoch is None:
         return None
-    try:
-        epoch = int(raw_epoch)
-    except ValueError:
+    # Gate against the RAW value: ``int()`` accepts ``+5``, ``1_000``, Unicode
+    # digits (``٠١``), and surrounding whitespace — none of which are valid here.
+    if not raw_epoch_token.isascii() or not raw_epoch_token.isdigit():
         return None
-    if epoch < 0:
-        return None
+    epoch = int(raw_epoch_token)
 
     revoked = pairs.get("status") == "revoked"
     fpr = pairs.get("fpr", "")

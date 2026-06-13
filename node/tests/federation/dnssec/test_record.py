@@ -78,3 +78,35 @@ def test_rejects_malformed():
     assert parse_binding_record("v=stigmem1; epoch=-1; fpr=abc") is None  # negative epoch
     assert parse_binding_record("v=stigmem1; epoch=3") is None  # active form needs fpr
     assert parse_binding_record("v=stigmem1; fpr=; epoch=3") is None  # active empty fpr
+
+
+def test_rejects_duplicate_known_key():
+    # 3AC-1: a duplicate of any KNOWN key is ambiguous -> reject (not last-write).
+    assert parse_binding_record("v=stigmem1; fpr=a; epoch=1; epoch=2") is None
+    assert parse_binding_record("v=stigmem1; fpr=a; fpr=b; epoch=1") is None
+    # A single occurrence of each known key (no duplicate) still parses.
+    assert parse_binding_record("v=stigmem1; status=revoked; epoch=1; fpr=") is not None
+    assert parse_binding_record(
+        "v=stigmem1; status=revoked; status=revoked; epoch=1; fpr="
+    ) is None
+    assert parse_binding_record(
+        "v=stigmem1; fpr=a; epoch=1; prev_fpr=x; prev_fpr=y"
+    ) is None
+    assert parse_binding_record(
+        "v=stigmem1; fpr=a; epoch=1; prev_until=p; prev_until=q"
+    ) is None
+    # An unknown key may repeat without rejection (forward-compat).
+    assert parse_binding_record(
+        "v=stigmem1; fpr=a; epoch=1; x=1; x=2"
+    ) is not None
+
+
+def test_rejects_non_strict_epoch():
+    # 3AC-2: epoch must be a plain ASCII non-negative decimal integer.
+    assert parse_binding_record("v=stigmem1; fpr=a; epoch=+5") is None  # leading sign
+    assert parse_binding_record("v=stigmem1; fpr=a; epoch=1_000") is None  # underscores
+    assert parse_binding_record("v=stigmem1; fpr=a; epoch=٠١") is None  # Unicode digits
+    assert parse_binding_record("v=stigmem1; fpr=a; epoch= 5; ") is None  # inner whitespace
+    # epoch=0 (and a plain positive int) remain valid.
+    r0 = parse_binding_record("v=stigmem1; fpr=a; epoch=0")
+    assert r0 is not None and r0.epoch == 0

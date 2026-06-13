@@ -29,10 +29,19 @@ def host_from_entity_uri(entity_uri: str) -> str | None:
 
     ``None`` means the DNSSEC tier is not applicable for this origin.
     """
-    if not entity_uri or not entity_uri.startswith(_HTTP_SCHEMES):
+    if not entity_uri:
         return None
 
-    parsed = urlparse(entity_uri)
+    # RFC 3986 §3.1: the scheme is case-insensitive. Lowercase only the scheme
+    # component (everything up to and including the first ``://``) so an
+    # uppercase scheme like ``HTTPS://`` is recognized; the authority/path are
+    # left untouched (urlparse + IDNA handle host case-folding downstream).
+    scheme, sep, rest = entity_uri.partition("://")
+    normalized = scheme.lower() + sep + rest if sep else entity_uri
+    if not normalized.startswith(_HTTP_SCHEMES):
+        return None
+
+    parsed = urlparse(normalized)
 
     # Userinfo steer (e.g. https://victim.com@attacker.com/) -> reject (NF-R5D-1).
     if parsed.username is not None or parsed.password is not None:

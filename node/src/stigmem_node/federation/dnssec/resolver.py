@@ -129,6 +129,20 @@ class FixtureResolver:
                 section[:] = [rr for rr in section if rr.rdtype not in dnssec_types]
         self._force_ad_only = True
 
+    def force_ad_bit(self) -> None:
+        """Set AD=1 on every canned message WITHOUT stripping any RRSIG.
+
+        Companion to ``force_ad_bit_only`` (which strips signatures). This hook
+        keeps every RRset — including a present-but-forged binding RRSIG —
+        intact, so a test can prove the validator ignores the AD bit even when a
+        signature is present to (mis)trust: it must re-validate the signature
+        itself and reject the forgery (3AV-3).
+        """
+        import dns.flags
+
+        for message in self._answers.values():
+            message.flags |= dns.flags.AD
+
     def query(self, qname: str, rdtype: str) -> dns.message.Message:
         import dns.rcode
 
