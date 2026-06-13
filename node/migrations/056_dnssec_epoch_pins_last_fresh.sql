@@ -1,0 +1,16 @@
+-- node/migrations/056_dnssec_epoch_pins_last_fresh.sql
+-- Phase 3 build-phase 3b.6 (RRSIG-age clamp, Rev 6 I4): add a per-host
+-- "previously-fresh" marker to dnssec_epoch_pins. The RRSIG-age clamp treats an
+-- aged signature differently depending on whether the host has EVER served a
+-- fresh signature: on a never-fresh host an aged RRSIG falls through to
+-- operator-confirm (a slow-resigning zone stays usable behind a human gate); on
+-- a previously-fresh host an aged-only RRSIG is an attack signal and is rejected.
+--
+-- last_fresh_at is the ISO-8601 timestamp of the most recent FRESH RRSIG
+-- observation for the host (NULL = never observed fresh). It is sticky in
+-- meaning: once set it is only ever refreshed forward, never cleared, so the
+-- previously-fresh hard-reject cannot be erased by a subsequent aged record.
+--
+-- Additive + portable DDL: a single nullable column, no index, no non-constant
+-- default; no migrations_pg override needed (mirrors 046_facts_origin_entity_uri).
+ALTER TABLE dnssec_epoch_pins ADD COLUMN last_fresh_at TEXT;

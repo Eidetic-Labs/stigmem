@@ -1,11 +1,10 @@
-"""Migration 054 — dnssec_epoch_pins (Phase 3 build-phase 3b, Rev 6 §9).
+"""Migration 056 — dnssec_epoch_pins.last_fresh_at (Phase 3 build-phase 3b.6).
 
-Per-host monotonic epoch + sticky-signedness state (I2/I4): max_epoch_seen is
-monotonic (rollback => reject), and once a signed delegation has been seen for a
-host a later "absent" is treated as an attack. Keyed by host (NOT identity).
-Confirms migration 054 creates the table with the correct columns, the host
-PRIMARY KEY, and the signed_delegation_seen DEFAULT 0; applies fresh; and an
-existing-data DB still migrates. Mirrors the migration 050/053 tests.
+Adds the per-host "previously-fresh" marker (Rev 6 I4) used by the RRSIG-age
+clamp: an aged RRSIG on a previously-fresh host is rejected, while on a
+never-fresh host it falls through to operator-confirm. Confirms the additive
+column lands, defaults NULL, the existing columns/PK are untouched, applies
+fresh, and an existing-data DB still migrates. Mirrors the migration 054 test.
 """
 
 from __future__ import annotations
@@ -20,8 +19,6 @@ _EXPECTED_COLUMNS = {
     "max_epoch_seen",
     "signed_delegation_seen",
     "last_validated_at",
-    # Added by migration 056 (RRSIG-age clamp, 3b.6); apply_migrations runs the
-    # full chain, so the live dnssec_epoch_pins schema carries it.
     "last_fresh_at",
 }
 
@@ -31,12 +28,11 @@ def _table_info(db_path: Path, table: str) -> list[tuple]:
         return conn.execute(f"PRAGMA table_info({table})").fetchall()
 
 
-def test_migration_054_creates_table_with_columns(tmp_path: Path) -> None:
+def test_migration_056_adds_last_fresh_at_column(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     apply_migrations(db_path=str(db_path))
 
     rows = _table_info(db_path, "dnssec_epoch_pins")
-    assert rows, "dnssec_epoch_pins table not created"
     col_names = {row[1] for row in rows}
     assert col_names == _EXPECTED_COLUMNS, (
         f"column mismatch: extra={col_names - _EXPECTED_COLUMNS}, "
@@ -44,19 +40,7 @@ def test_migration_054_creates_table_with_columns(tmp_path: Path) -> None:
     )
 
 
-def test_migration_054_host_primary_key(tmp_path: Path) -> None:
-    db_path = tmp_path / "test.db"
-    apply_migrations(db_path=str(db_path))
-
-    rows = _table_info(db_path, "dnssec_epoch_pins")
-    # PRAGMA table_info row: (cid, name, type, notnull, dflt_value, pk)
-    pk_cols = {row[1] for row in rows if row[5] > 0}
-    assert pk_cols == {"host"}, f"unexpected PK columns: {pk_cols}"
-
-
-def test_migration_054_signed_delegation_seen_defaults_zero(tmp_path: Path) -> None:
-    """signed_delegation_seen defaults to 0 (not-yet-seen) so absence is not
-    sticky until a signed delegation is observed."""
+def test_migration_056_last_fresh_at_defaults_null(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     apply_migrations(db_path=str(db_path))
     with sqlite3.connect(db_path) as conn:
@@ -66,13 +50,21 @@ def test_migration_054_signed_delegation_seen_defaults_zero(tmp_path: Path) -> N
         )
         conn.commit()
         val = conn.execute(
-            "SELECT signed_delegation_seen FROM dnssec_epoch_pins WHERE host=?",
+            "SELECT last_fresh_at FROM dnssec_epoch_pins WHERE host=?",
             ("memory.acme.example",),
         ).fetchone()[0]
-    assert val == 0
+    assert val is None
 
 
-def test_migration_054_existing_data_still_migrates(tmp_path: Path) -> None:
+def test_migration_056_preserves_host_primary_key(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    apply_migrations(db_path=str(db_path))
+    rows = _table_info(db_path, "dnssec_epoch_pins")
+    pk_cols = {row[1] for row in rows if row[5] > 0}
+    assert pk_cols == {"host"}, f"unexpected PK columns: {pk_cols}"
+
+
+def test_migration_056_existing_data_still_migrates(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     apply_migrations(db_path=str(db_path))
     with sqlite3.connect(db_path) as conn:
