@@ -41,7 +41,8 @@ class Resolver(Protocol):
     fail-closed outcome rather than trusting a missing answer.
     """
 
-    def query(self, qname: str, rdtype: str) -> dns.message.Message: ...
+    def query(self, qname: str, rdtype: str) -> dns.message.Message:
+        """Return the DNS response for ``(qname, rdtype)``, DNSSEC records included."""
 
 
 class LiveResolver:

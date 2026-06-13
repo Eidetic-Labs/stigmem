@@ -229,7 +229,6 @@ def _load_binding_txt(resolver: FixtureResolver, h: _Hierarchy, *,
 
 # base32hex alphabet (RFC 4648 §7), ascending. Smallest/largest hash sentinels.
 _B32HEX = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
-_HASH_LEN = 32  # SHA-1 hashes encode to 32 base32hex chars.
 
 
 def _b32hex_decrement(h: str) -> str:
