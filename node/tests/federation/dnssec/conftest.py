@@ -467,6 +467,34 @@ def unsigned_delegation(patch_anchor) -> FixtureResolver:
     return resolver
 
 
+@pytest.fixture
+def wildcard_synth(patch_anchor) -> FixtureResolver:
+    """The binding answer is synthesized from a ``*`` wildcard, not an exact name.
+
+    The TXT is signed at ``*.memory.acme.example.`` (label count 3, excluding
+    root) and served at the binding qname (label count 5). The RRSIG's ``labels``
+    field reflects the wildcard's 3, so RRSIG.labels < owner labels -> rejected
+    as BOGUS even though the signature itself verifies against the zone DNSKEY.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+
+    qname = dns.name.from_text(BINDING_QNAME)
+    wildcard = dns.name.from_text("*." + HOST)
+    txt_rd = dns.rdata.from_text(dns.rdataclass.IN, dns.rdatatype.TXT, f'"{DEFAULT_RECORD}"')
+    # Sign the rrset at the WILDCARD owner; its RRSIG.labels reflects the wildcard.
+    wild_rrset = dns.rrset.from_rdata(wildcard, 300, txt_rd)
+    wild_sig = h.leaf.sign_with_zsk(wild_rrset)
+    # The synthesized answer is served at the qname, carrying the wildcard RRSIG.
+    qname_rrset = dns.rrset.from_rdata(qname, 300, txt_rd)
+    qname_sig = dns.rrset.from_rdata(qname, 300, wild_sig)
+    resolver.add(BINDING_QNAME, "TXT", _answer_message(BINDING_QNAME, "TXT",
+                                                       [qname_rrset, qname_sig]))
+    return resolver
+
+
 # Re-export helpers used by sibling test modules (denial / wildcard).
 __all__ = [
     "SignedZone",

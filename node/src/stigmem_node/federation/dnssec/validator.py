@@ -597,11 +597,27 @@ def _nsec3_proves_insecure_delegation(
 def _reject_if_wildcard_synthesized(
     txt_rrset: dns.rrset.RRset, txt_rrsig: dns.rrset.RRset, binding_qname: dns.name.Name
 ) -> str | None:
-    """Return a BOGUS detail string if the answer was wildcard-synthesized.
+    """Return a BOGUS detail string if the binding answer was wildcard-synthesized.
 
-    3a.4 placeholder: returns ``None`` (no rejection). 3a.6 implements the
-    RRSIG-labels check (RFC 4035 §5.3.1) requiring an exact-match RRSIG.
+    Rev 6 I3: the binding record requires an *exact-match* RRSIG; a record
+    synthesized from a ``*`` wildcard is rejected. RFC 4035 §5.3.1: an RRSIG's
+    ``labels`` field carries the label count of the *original* owner name the
+    signature was generated over. When an answer is synthesized from a wildcard,
+    ``RRSIG.labels`` is **less** than the number of (non-root) labels in the
+    queried owner name — that gap is the proof of synthesis. (A validly-signed
+    wildcard answer still verifies against the zone DNSKEY, so the chain check
+    alone does not catch it; this label-count comparison does.)
     """
+    # All RRSIGs covering the binding TXT must be exact-match. The owner name's
+    # non-root label count is the expected signed-label count.
+    owner_label_count = len(binding_qname.labels) - 1  # exclude the root label
+    for rrsig in txt_rrsig:
+        if rrsig.labels < owner_label_count:
+            return (
+                "binding TXT synthesized from a wildcard "
+                f"(RRSIG labels={rrsig.labels} < owner labels={owner_label_count}); "
+                "exact-match RRSIG required (I3)"
+            )
     return None
 
 
