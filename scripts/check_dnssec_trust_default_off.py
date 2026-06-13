@@ -13,13 +13,14 @@ Asserts four things; any failure exits non-zero (the structural-guard contract):
      ``sys.modules`` afterwards. The DNSSEC validator/resolver are reached only through
      function-local imports on the flag-on path, so a flag-off node loads no DNSSEC code.
 
-  3. **Reachability (static)** — in ``origin_identity.py`` the ONLY call to the first-trust
-     ladder helper (``_dnssec_first_trust_keys``) is itself gated by an early
-     ``if not settings.federation_dnssec_trust_enabled: return None`` inside that helper,
-     so a flag-off relay resolution can never reach ``resolve_first_trust``. We assert (a)
-     the helper's flag-guarded early-return exists, and (b) the helper imports the ladder
-     (``resolve_first_trust``) only AFTER that flag guard (the guard text precedes the
-     import text).
+  3. **Reachability (static, AST-scoped)** — in ``origin_identity.py`` the ONLY call to the
+     first-trust ladder is itself gated by an early
+     ``if not settings.federation_dnssec_trust_enabled: return None`` inside the
+     ``_dnssec_first_trust_keys`` helper, so a flag-off relay resolution can never reach
+     ``resolve_first_trust``. We parse the module and confine the check to that helper's body
+     (so an unrelated ``resolve_first_trust`` mention elsewhere — a docstring or a second
+     helper — cannot fool the ordering check, L-2), asserting (a) the flag-guard ``If`` node
+     exists and (b) it precedes EVERY ``resolve_first_trust`` reference inside the helper.
 
   4. **Recheck fail-closed gate (TB-4)** — the helper routes a TRUSTED ladder verdict
      through ``recheck_relay_binding`` (the 3c recency/revocation seam) BEFORE returning a
@@ -31,9 +32,12 @@ Asserts four things; any failure exits non-zero (the structural-guard contract):
 """
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
+
+_HELPER_NAME = "_dnssec_first_trust_keys"
 
 _BASE = Path(__file__).resolve().parent.parent / "node" / "src" / "stigmem_node"
 _ORIGIN_IDENTITY = _BASE / "federation" / "origin_identity.py"
@@ -82,27 +86,93 @@ def _check_runtime() -> list[str]:
     return []
 
 
+def _find_helper(tree: ast.AST) -> ast.FunctionDef | None:
+    """Return the ``_dnssec_first_trust_keys`` function node, or None if absent."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == _HELPER_NAME:
+            return node
+    return None
+
+
+def _flag_guard_line(func: ast.FunctionDef) -> int | None:
+    """Line of the ``if not settings.federation_dnssec_trust_enabled:`` guard.
+
+    Matches the structural shape (an ``If`` whose test is ``not <...>.
+    federation_dnssec_trust_enabled``) rather than a text scan, so a mention of
+    the flag in a docstring or comment cannot be mistaken for the guard.
+    """
+    for node in ast.walk(func):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if (
+            isinstance(test, ast.UnaryOp)
+            and isinstance(test.op, ast.Not)
+            and isinstance(test.operand, ast.Attribute)
+            and test.operand.attr == "federation_dnssec_trust_enabled"
+        ):
+            return node.lineno
+    return None
+
+
+def _resolve_first_trust_lines(func: ast.FunctionDef) -> list[int]:
+    """Lines of every ``resolve_first_trust`` reference WITHIN the helper.
+
+    Covers both the lazy import and the call site; only references inside the
+    helper's own body count, so an unrelated mention elsewhere in the module
+    (docstring, a second helper) cannot fool the ordering check.
+    """
+    lines: list[int] = []
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name) and node.id == "resolve_first_trust":
+            lines.append(node.lineno)
+        elif isinstance(node, ast.alias) and node.name == "resolve_first_trust":
+            # `from .dnssec.ladder import ... resolve_first_trust` — the alias node
+            # carries no lineno on older ASTs; fall back to the enclosing import.
+            lines.append(getattr(node, "lineno", func.lineno))
+    return lines
+
+
 def _check_reachability(text: str) -> list[str]:
-    """Static reachability: the ladder is reached only behind the flag guard (assert 3)."""
+    """Static reachability: the ladder is reached only behind the flag guard (assert 3).
+
+    Scope-aware (L-2): parse the module and confine the ordering check to the
+    ``_dnssec_first_trust_keys`` helper, asserting the flag-guard ``If`` precedes
+    EVERY ``resolve_first_trust`` reference inside that function. A robust
+    fallback to a string scan is used only when the source cannot be parsed or
+    the helper is not present (so the standalone snippet unit tests still apply
+    when they wrap the body in the helper)."""
     failures: list[str] = []
 
-    flag_guard = "if not settings.federation_dnssec_trust_enabled:"
-    if flag_guard not in text:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return [f"origin_identity.py: could not parse for reachability check ({exc})"]
+
+    func = _find_helper(tree)
+    if func is None:
         failures.append(
-            "origin_identity.py: missing the flag guard "
-            f"`{flag_guard}` in the DNSSEC first-trust helper"
+            f"origin_identity.py: missing the `{_HELPER_NAME}` first-trust helper "
+            "(reachability check cannot be scoped)"
+        )
+        return failures
+
+    guard_line = _flag_guard_line(func)
+    if guard_line is None:
+        failures.append(
+            f"{_HELPER_NAME}: missing the flag guard "
+            "`if not settings.federation_dnssec_trust_enabled:`"
         )
         return failures  # the ordering check below is meaningless without the guard
 
-    guard_idx = text.find(flag_guard)
-    ladder_import_idx = text.find("resolve_first_trust")
-    if ladder_import_idx == -1:
+    ladder_lines = _resolve_first_trust_lines(func)
+    if not ladder_lines:
         failures.append(
-            "origin_identity.py: expected the helper to import `resolve_first_trust`"
+            f"{_HELPER_NAME}: expected the helper to reference `resolve_first_trust`"
         )
-    elif ladder_import_idx < guard_idx:
+    elif min(ladder_lines) < guard_line:
         failures.append(
-            "origin_identity.py: `resolve_first_trust` is referenced BEFORE the "
+            f"{_HELPER_NAME}: `resolve_first_trust` is referenced BEFORE the "
             "`federation_dnssec_trust_enabled` guard — the ladder may be reachable "
             "with the flag OFF (I11 reachability violation)"
         )

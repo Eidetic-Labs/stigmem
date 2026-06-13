@@ -34,9 +34,17 @@ def test_current_tree_passes_the_guard() -> None:
 # --- assert 3: reachability (static, flag-guarded) ---------------------------
 
 
+def test_reachability_flags_missing_helper() -> None:
+    checker = _load_checker()
+    text = "def other_helper():\n    return resolve_first_trust(conn)\n"
+    failures = checker._check_reachability(text)
+    assert failures
+    assert any("_dnssec_first_trust_keys" in f for f in failures)
+
+
 def test_reachability_flags_missing_flag_guard() -> None:
     checker = _load_checker()
-    text = "def helper():\n    return resolve_first_trust(conn)\n"
+    text = "def _dnssec_first_trust_keys(settings):\n    return resolve_first_trust(conn)\n"
     failures = checker._check_reachability(text)
     assert failures
     assert any("flag guard" in f for f in failures)
@@ -47,9 +55,10 @@ def test_reachability_flags_ladder_referenced_before_guard() -> None:
     reachable with the flag OFF — the guard must catch the ordering inversion."""
     checker = _load_checker()
     text = (
-        "x = resolve_first_trust(conn)\n"
-        "if not settings.federation_dnssec_trust_enabled:\n"
-        "    return None\n"
+        "def _dnssec_first_trust_keys(settings):\n"
+        "    x = resolve_first_trust(conn)\n"
+        "    if not settings.federation_dnssec_trust_enabled:\n"
+        "        return None\n"
     )
     failures = checker._check_reachability(text)
     assert any("BEFORE" in f for f in failures)
@@ -58,9 +67,27 @@ def test_reachability_flags_ladder_referenced_before_guard() -> None:
 def test_reachability_passes_when_guard_precedes_ladder() -> None:
     checker = _load_checker()
     text = (
-        "if not settings.federation_dnssec_trust_enabled:\n"
-        "    return None\n"
-        "decision = resolve_first_trust(conn)\n"
+        "def _dnssec_first_trust_keys(settings):\n"
+        "    if not settings.federation_dnssec_trust_enabled:\n"
+        "        return None\n"
+        "    decision = resolve_first_trust(conn)\n"
+    )
+    assert checker._check_reachability(text) == []
+
+
+def test_reachability_scope_ignores_earlier_unrelated_mention() -> None:
+    """L-2: a `resolve_first_trust` mention OUTSIDE the helper (an earlier docstring
+    or a second helper) before the guard must NOT trip the ordering inversion — the
+    check is scoped to the helper function body only."""
+    checker = _load_checker()
+    text = (
+        '"""Module docstring mentioning resolve_first_trust up top."""\n'
+        "def _earlier_helper():\n"
+        "    return resolve_first_trust(other)\n"
+        "def _dnssec_first_trust_keys(settings):\n"
+        "    if not settings.federation_dnssec_trust_enabled:\n"
+        "        return None\n"
+        "    decision = resolve_first_trust(conn)\n"
     )
     assert checker._check_reachability(text) == []
 
