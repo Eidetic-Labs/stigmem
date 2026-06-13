@@ -15,23 +15,28 @@ from typing import Any
 from .db import db
 
 
-def create_job(job_type: str, scope: str | None, estimated_s: int) -> str:
+def create_job(job_type: str, scope: str | None, estimated_s: int, tenant_id: str) -> str:
     job_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
     with db() as conn:
         conn.execute(
-            "INSERT INTO jobs (id, job_type, status, scope, estimated_s, created_at)"
-            " VALUES (?, ?, 'pending', ?, ?, ?)",
-            (job_id, job_type, scope, estimated_s, now),
+            "INSERT INTO jobs (id, job_type, status, scope, estimated_s, created_at, tenant_id)"
+            " VALUES (?, ?, 'pending', ?, ?, ?, ?)",
+            (job_id, job_type, scope, estimated_s, now, tenant_id),
         )
     return job_id
 
 
-def get_job(job_id: str, job_type: str) -> dict[str, Any] | None:
-    """Return the job record, or None if not found (or wrong type)."""
+def get_job(job_id: str, job_type: str, tenant_id: str) -> dict[str, Any] | None:
+    """Return the job record, or None if not found (wrong type, or another tenant).
+
+    F-SBOLA2: the lookup is tenant-scoped, so a caller who learns a job UUID for
+    another tenant gets None (404 at the route) rather than that tenant's record.
+    """
     with db() as conn:
         row = conn.execute(
-            "SELECT * FROM jobs WHERE id = ? AND job_type = ?", (job_id, job_type)
+            "SELECT * FROM jobs WHERE id = ? AND job_type = ? AND tenant_id = ?",
+            (job_id, job_type, tenant_id),
         ).fetchone()
     if row is None:
         return None

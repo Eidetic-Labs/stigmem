@@ -30,7 +30,7 @@ def _resolve_effective_min_conf(min_confidence: float | None) -> float | None:
 
 
 def _select_ttl_candidates(
-    conn: Any, effective_ttl: int, scope: str | None, now_dt: datetime
+    conn: Any, effective_ttl: int, scope: str | None, now_dt: datetime, tenant_id: str
 ) -> list[str]:
     """Return fact ids whose timestamp is older than (now - effective_ttl)."""
     cutoff = (now_dt - timedelta(seconds=effective_ttl)).isoformat()
@@ -38,11 +38,12 @@ def _select_ttl_candidates(
         "SELECT f.id FROM facts f "
         "LEFT JOIN fact_validity_overrides fvo ON fvo.fact_id = f.id "
         "WHERE f.timestamp <= ? "
+        "AND f.tenant_id = ? "
         "AND COALESCE(fvo.valid_until, f.valid_until) IS NULL "
         "AND NOT (entity LIKE 'stigmem:%' AND entity NOT LIKE 'stigmem://%') "
         "AND NOT (relation LIKE 'stigmem:%' AND relation NOT LIKE 'stigmem://%')"
     )
-    params: list[Any] = [cutoff]
+    params: list[Any] = [cutoff, tenant_id]
     if scope:
         sql += " AND scope = ?"
         params.append(scope)
@@ -50,20 +51,21 @@ def _select_ttl_candidates(
 
 
 def _select_confidence_candidates(
-    conn: Any, effective_min_conf: float, scope: str | None, now: str
+    conn: Any, effective_min_conf: float, scope: str | None, now: str, tenant_id: str
 ) -> list[str]:
     """Return active fact ids whose confidence is below the floor."""
     sql = (
         "SELECT f.id FROM facts f "
         "LEFT JOIN fact_validity_overrides fvo ON fvo.fact_id = f.id "
         "WHERE COALESCE(fvo.confidence, f.confidence) < ? "
+        "AND f.tenant_id = ? "
         "AND COALESCE(fvo.confidence, f.confidence) > 0.0 "
         "AND (COALESCE(fvo.valid_until, f.valid_until) IS NULL "
         "OR COALESCE(fvo.valid_until, f.valid_until) > ?) "
         "AND NOT (entity LIKE 'stigmem:%' AND entity NOT LIKE 'stigmem://%') "
         "AND NOT (relation LIKE 'stigmem:%' AND relation NOT LIKE 'stigmem://%')"
     )
-    params: list[Any] = [effective_min_conf, now]
+    params: list[Any] = [effective_min_conf, tenant_id, now]
     if scope:
         sql += " AND scope = ?"
         params.append(scope)
@@ -98,6 +100,8 @@ def run_decay_sweep(
     min_confidence: float | None = None,
     scope: str | None = None,
     dry_run: bool = False,
+    *,
+    tenant_id: str,
 ) -> dict[str, Any]:
     """Mark stale facts as expired by setting valid_until to now.
 
@@ -106,6 +110,9 @@ def run_decay_sweep(
     - Confidence decay: active facts whose confidence is below min_confidence.
     - System facts (stigmem: entity/relation, not stigmem://) are never decayed.
     - dry_run=True returns counts without writing.
+    - Candidate selection is scoped to ``tenant_id`` so a caller can only
+      expire/count facts in its own tenant (no cross-tenant write or count
+      oracle).
 
     Returns {"scanned": N, "decayed": M, "dry_run": bool}.
     """
@@ -121,10 +128,12 @@ def run_decay_sweep(
 
     with db() as conn:
         if effective_ttl is not None:
-            ttl_ids = _select_ttl_candidates(conn, effective_ttl, scope, now_dt)
+            ttl_ids = _select_ttl_candidates(conn, effective_ttl, scope, now_dt, tenant_id)
 
         if effective_min_conf is not None:
-            conf_ids = _select_confidence_candidates(conn, effective_min_conf, scope, now)
+            conf_ids = _select_confidence_candidates(
+                conn, effective_min_conf, scope, now, tenant_id
+            )
 
         candidates = list({*ttl_ids, *conf_ids})
 

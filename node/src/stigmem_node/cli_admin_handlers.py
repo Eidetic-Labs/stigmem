@@ -537,7 +537,7 @@ def _cmd_backfill_cids(args: argparse.Namespace) -> int:
     while True:
         rows = conn.execute(
             "SELECT f.id, f.entity, f.relation, f.value_type, f.value_v, f.source, "
-            "f.scope, f.confidence"
+            "f.scope, f.confidence, f.tenant_id"
             " FROM facts f"
             " LEFT JOIN fact_cid_backfill fcb ON fcb.fact_id = f.id"
             " WHERE f.cid IS NULL AND COALESCE(fcb.status, 'pending') != 'complete'"
@@ -557,17 +557,19 @@ def _cmd_backfill_cids(args: argparse.Namespace) -> int:
                 scope=row["scope"],
                 confidence=float(row["confidence"]),
             )
-            # Check for CID collision before writing
+            # Check for CID collision before writing (tenant-scoped: the CID-alias
+            # uniqueness is per (cid, tenant_id) after migration 052, F-SBOLA4).
             existing = conn.execute(
-                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?", (cid,)
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+                (cid, row["tenant_id"]),
             ).fetchone()
             if existing and existing["fact_id"] != row["id"]:
                 collision_skipped += 1
                 continue
 
             conn.execute(
-                "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid) VALUES (?, ?)",
-                (row["id"], cid),
+                "INSERT OR IGNORE INTO fact_cid_aliases (fact_id, cid, tenant_id) VALUES (?, ?, ?)",
+                (row["id"], cid, row["tenant_id"]),
             )
             set_fact_cid_backfill_status(conn, fact_id=row["id"], status="complete")
 

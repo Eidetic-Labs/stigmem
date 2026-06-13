@@ -100,13 +100,17 @@ def jwks_document(rsa_keypair):
     }
 
 
+_UNSET = object()
+
+
 def _sign_token(
     private_key,
     sub: str = "user-123",
-    email: str = "alice@example.com",
+    email: str | None = "alice@example.com",
     audience: str = AUDIENCE,
     issuer: str = ISSUER,
     exp_offset: int = 3600,
+    email_verified: Any = True,
 ) -> str:
     now = int(time.time())
     payload = {
@@ -115,9 +119,11 @@ def _sign_token(
         "aud": audience,
         "iat": now,
         "exp": now + exp_offset,
-        "email": email,
-        "email_verified": True,
     }
+    if email is not None:
+        payload["email"] = email
+    if email_verified is not _UNSET:
+        payload["email_verified"] = email_verified
     return jwt.encode(
         payload,
         private_key,
@@ -470,6 +476,137 @@ def test_exchange_domain_restriction_blocks_wrong_domain(
         wk_mod.settings = original  # type: ignore[assignment]
         auth_route_mod.settings = original  # type: ignore[assignment]
         auth_route_mod._JWKS_CACHE.clear()
+
+
+def _allowlist_exchange(
+    tmp_path: Path,
+    rsa_keypair,
+    jwks_document,
+    token: str,
+    *,
+    allowed_domains: str,
+) -> int:
+    """Run an OIDC exchange against a node with the given allowlist; return status code.
+
+    Mirrors test_exchange_domain_restriction_blocks_wrong_domain's setup so the
+    email_verified tests use the identical token-minting / JWKS-mocking path.
+    """
+    db_file = str(tmp_path / "ev_test.db")
+    apply_migrations(db_path=db_file)
+
+    original = settings_module.settings
+    test_settings = Settings(
+        db_path=db_file,
+        auth_required=True,
+        node_url="http://testnode",
+        oidc_enabled=True,
+        oidc_issuer_url=ISSUER,
+        oidc_audience=AUDIENCE,
+        oidc_token_ttl_hours=1,
+        oidc_allowed_domains=allowed_domains,
+    )
+
+    settings_module.settings = test_settings  # type: ignore[assignment]
+    auth_mod.settings = test_settings  # type: ignore[assignment]
+    db_mod.settings = test_settings  # type: ignore[assignment]
+    wk_mod.settings = test_settings  # type: ignore[assignment]
+    auth_route_mod.settings = test_settings  # type: ignore[assignment]
+    auth_route_mod._JWKS_CACHE.clear()
+
+    real_PyJWKClient = jwt.PyJWKClient
+
+    class _FakeJWKSClient(real_PyJWKClient):
+        def fetch_data(self):
+            return jwks_document
+
+    disco_response = MagicMock()
+    disco_response.raise_for_status = MagicMock()
+    disco_response.json.return_value = {"jwks_uri": f"{ISSUER}/.well-known/jwks.json"}
+
+    def _fake_get(url: str, **kwargs: Any) -> MagicMock:
+        return disco_response
+
+    try:
+        with (
+            patch("stigmem_node.routes.auth.httpx.get", side_effect=_fake_get),
+            patch("stigmem_node.routes.auth.jwt.PyJWKClient", _FakeJWKSClient),
+            patch("stigmem_node.routes.auth.assert_safe_url"),
+        ):
+            app = create_app()
+            with TestClient(app, raise_server_exceptions=True) as c:
+                resp = c.post("/v1/auth/oidc/exchange", json={"id_token": token})
+                return resp.status_code
+    finally:
+        settings_module.settings = original  # type: ignore[assignment]
+        auth_mod.settings = original  # type: ignore[assignment]
+        db_mod.settings = original  # type: ignore[assignment]
+        wk_mod.settings = original  # type: ignore[assignment]
+        auth_route_mod.settings = original  # type: ignore[assignment]
+        auth_route_mod._JWKS_CACHE.clear()
+
+
+def test_exchange_unverified_email_in_allowlist_is_rejected(
+    tmp_path: Path, rsa_keypair, jwks_document
+) -> None:
+    """F-SAUTH1: an unverified email must NOT satisfy the domain allowlist (403)."""
+    private_key, _ = rsa_keypair
+    token = _sign_token(
+        private_key,
+        email="user@alloweddomain.com",
+        email_verified=False,
+    )
+    status_code = _allowlist_exchange(
+        tmp_path, rsa_keypair, jwks_document, token, allowed_domains="alloweddomain.com"
+    )
+    assert status_code == 403
+
+
+def test_exchange_verified_email_in_allowlist_passes(
+    tmp_path: Path, rsa_keypair, jwks_document
+) -> None:
+    """A verified email whose domain is allowed must pass the allowlist."""
+    private_key, _ = rsa_keypair
+    token = _sign_token(
+        private_key,
+        email="user@alloweddomain.com",
+        email_verified=True,
+    )
+    status_code = _allowlist_exchange(
+        tmp_path, rsa_keypair, jwks_document, token, allowed_domains="alloweddomain.com"
+    )
+    assert status_code == 200
+
+
+def test_exchange_no_allowlist_unverified_email_unchanged(
+    tmp_path: Path, rsa_keypair, jwks_document
+) -> None:
+    """With no allowlist configured, an unverified/absent email must NOT be rejected."""
+    private_key, _ = rsa_keypair
+    token = _sign_token(
+        private_key,
+        email=None,
+        email_verified=False,
+    )
+    status_code = _allowlist_exchange(
+        tmp_path, rsa_keypair, jwks_document, token, allowed_domains=""
+    )
+    assert status_code == 200
+
+
+def test_exchange_verified_email_wrong_domain_still_rejected(
+    tmp_path: Path, rsa_keypair, jwks_document
+) -> None:
+    """A verified email of a non-allowed domain is still rejected (403)."""
+    private_key, _ = rsa_keypair
+    token = _sign_token(
+        private_key,
+        email="user@otherdomain.com",
+        email_verified=True,
+    )
+    status_code = _allowlist_exchange(
+        tmp_path, rsa_keypair, jwks_document, token, allowed_domains="alloweddomain.com"
+    )
+    assert status_code == 403
 
 
 def test_exchange_permissions_capped_at_read_write(oidc_client: TestClient, rsa_keypair) -> None:

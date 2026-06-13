@@ -19,10 +19,12 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from ..net_util import assert_safe_url
+from ..net_util import resolve_pinned_address
+from ..settings import settings
 from .manifest import (
     ManifestError,
     OrgManifest,
@@ -231,11 +233,19 @@ def _try_fetch_manifest(entity_uri: str) -> OrgManifest | None:
         return None  # can't derive URL from non-HTTP URI
 
     try:
-        assert_safe_url(base_url, allow_schemes=frozenset({"https", "http"}))
-        resp = httpx.get(
+        # R-5 / F-SSRF1 anti-rebind pin. This manifest is re-fetched on the recurring
+        # ``refresh_peer_manifests`` loop over every stored peer's entity_uri, so a
+        # peer-controlled host that passed validation can later DNS-rebind to an
+        # internal/IMDS address — the same resolve-then-reconnect TOCTOU the recurring
+        # pull path closes via ``federation_pull._pinned_get``. ``_pinned_manifest_get``
+        # resolves the host ONCE (https-only, rejecting the whole URL on any private
+        # record) BEFORE opening the client and connects to that exact pinned IP, so an
+        # ``http://`` entity_uri or a rebind target fails closed with no GET. The dev
+        # bypass is ``federation_insecure`` alone, matching the recurring-pull path.
+        resp = _pinned_manifest_get(
             f"{base_url}/.well-known/stigmem-manifest.json",
             timeout=10.0,
-            follow_redirects=False,
+            skip_pin=settings.federation_insecure,
         )
         if resp.status_code != 200:
             return None
@@ -246,6 +256,52 @@ def _try_fetch_manifest(entity_uri: str) -> OrgManifest | None:
     except Exception as exc:
         logger.debug("failed to fetch manifest for %s: %s", entity_uri, exc)
         return None
+
+
+def _pinned_manifest_get(
+    url: str,
+    *,
+    timeout: float,
+    skip_pin: bool,
+) -> httpx.Response:
+    """GET *url* with the a11 anti-rebind DNS pin (R-5 / F-SSRF1), unless *skip_pin*.
+
+    Synchronous sibling of ``federation_pull._pinned_get``. Resolves the host ONCE
+    via ``resolve_pinned_address`` (https-only — rejects the whole URL if ANY resolved
+    record is private/loopback/IMDS, and rejects a non-https scheme), connecting to the
+    EXACT pinned IP literal while preserving the ``Host`` header + TLS SNI + cert
+    verification against the original hostname. The pin is resolved BEFORE the client is
+    opened, so a blocked/rebind target fails closed (``ValueError``) without ever issuing
+    a request. ``follow_redirects=False`` blocks a redirect from re-introducing a
+    rebindable hop. Under *skip_pin* (``federation_insecure``) the original-hostname URL
+    is passed straight through with no pin extensions (dev/test escape).
+    """
+    if skip_pin:
+        return httpx.get(url, timeout=timeout, follow_redirects=False)
+
+    pinned_ip = resolve_pinned_address(url, allow_schemes=frozenset({"https"}))
+    parts = urlsplit(url)
+    hostname = parts.hostname or ""
+    port = parts.port
+    ip_authority = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    if port is not None:
+        netloc = f"{ip_authority}:{port}"
+        host_header = f"{hostname}:{port}"
+    else:
+        netloc = ip_authority
+        host_header = hostname
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    # extensions={"sni_hostname": ...} runs TLS SNI + cert verification against the
+    # original hostname while the socket connects to the pinned IP literal (the webhook
+    # pin shape). httpx.get forwards it to the transient Client; the type stub omits the
+    # kwarg, so the runtime-valid call needs an ignore.
+    return httpx.get(  # type: ignore[call-arg]
+        pinned_url,
+        timeout=timeout,
+        follow_redirects=False,
+        headers={"Host": host_header},
+        extensions={"sni_hostname": hostname},
+    )
 
 
 def cleanup_expired_tokens() -> int:

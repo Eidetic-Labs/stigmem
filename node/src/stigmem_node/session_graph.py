@@ -100,23 +100,28 @@ def _read_scopes_for_session(conn: Any, *, identity: Identity, session_id: str) 
     return {row["scope"] for row in rows}
 
 
-def _provenance_scopes(conn: Any, derived_from: list[dict[str, Any]]) -> set[str]:
+def _provenance_scopes(
+    conn: Any, derived_from: list[dict[str, Any]], tenant_id: str
+) -> set[str]:
     scopes: set[str] = set()
     for entry in derived_from:
         fact_id = entry.get("fact_id")
         hash_val = entry.get("hash")
         row = None
         if fact_id:
-            row = conn.execute("SELECT scope FROM facts WHERE id = ?", (fact_id,)).fetchone()
+            row = conn.execute(
+                "SELECT scope FROM facts WHERE id = ? AND tenant_id = ?",
+                (fact_id, tenant_id),
+            ).fetchone()
         elif isinstance(hash_val, str) and hash_val.startswith("sha256:"):
             alias = conn.execute(
-                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?",
-                (hash_val,),
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+                (hash_val, tenant_id),
             ).fetchone()
             if alias is not None:
                 row = conn.execute(
-                    "SELECT scope FROM facts WHERE id = ?",
-                    (alias["fact_id"],),
+                    "SELECT scope FROM facts WHERE id = ? AND tenant_id = ?",
+                    (alias["fact_id"], tenant_id),
                 ).fetchone()
         if row is not None:
             scopes.add(row["scope"])
@@ -142,7 +147,7 @@ def ensure_write_allowed(
         return
 
     if write_mode == SUMMARIZE_WITH_PROVENANCE and target_scope in _provenance_scopes(
-        conn, derived_from
+        conn, derived_from, identity.tenant_id
     ):
         return
 

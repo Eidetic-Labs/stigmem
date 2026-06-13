@@ -267,7 +267,7 @@ def _query_facts_as_of_impl(
     if records:
         entity_uris = list({r.entity for r in records})
         excluded, tombstone_notices = _get_tombstone_filter(
-            conn, entity_uris, scope or "local", is_admin_caller
+            conn, entity_uris, scope or "local", is_admin_caller, tenant_id
         )
         if excluded:
             records = [r for r in records if r.entity not in excluded]
@@ -640,7 +640,11 @@ def _apply_tombstone_filter(
     entity_uris_in_result = list({r.entity for r in records})
     with db() as _tc_conn:
         excluded, _notices = _get_tombstone_filter(
-            _tc_conn, entity_uris_in_result, scope or "local", identity.is_admin()
+            _tc_conn,
+            entity_uris_in_result,
+            scope or "local",
+            identity.is_admin(),
+            identity.tenant_id,
         )
     if not excluded:
         return records, False

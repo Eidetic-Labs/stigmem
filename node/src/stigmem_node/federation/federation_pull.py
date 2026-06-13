@@ -13,11 +13,13 @@ import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 from ..db import db
 from ..models.constants import VALID_SCOPES
+from ..net_util import resolve_pinned_address
 from ..observability.metrics import FEDERATION_INGRESS, REPLICATION_LAG
 from ..settings import settings
 from .federation_ingest import (
@@ -47,6 +49,81 @@ _BASE_BACKOFF_S = 1.0
 
 def _jitter(base: float) -> float:
     return base * (1 + random.uniform(-0.2, 0.2))  # noqa: S311  # nosec B311 — retry jitter, not crypto
+
+
+def _build_pinned_request(url: str, pinned_ip: str) -> tuple[str, str]:
+    """Return ``(pinned_url, host_header)`` for connecting to *pinned_ip*.
+
+    Mirrors ``subscription_delivery._build_pinned_request`` (the a11 webhook pin):
+    swap the original hostname for the validated *pinned_ip* literal (IPv6 bracketed)
+    while preserving scheme/port/path/query, so the socket connects to the pinned IP
+    and cannot be re-resolved by a rebinder. ``host_header`` carries the ORIGINAL
+    hostname (+ explicit port). The caller also passes
+    ``extensions={"sni_hostname": <hostname>}`` so TLS SNI + cert verification run
+    against the original hostname, NOT the IP literal.
+    """
+    parts = urlsplit(url)
+    hostname = parts.hostname or ""
+    port = parts.port
+    ip_authority = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    if port is not None:
+        netloc = f"{ip_authority}:{port}"
+        host_header = f"{hostname}:{port}"
+    else:
+        netloc = ip_authority
+        host_header = hostname
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return pinned_url, host_header
+
+
+async def _pinned_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
+    timeout: float | None = None,
+) -> Any:
+    """Issue ``client.get`` against *url* with the a11 anti-rebind DNS pin (R-5 / F-SSRF1).
+
+    The recurring federation pull fetches re-resolve a peer-controlled ``node_url`` on a
+    loop; without pinning, a peer can pass approval-time validation and then DNS-rebind
+    the host to an internal address (IMDS / RFC1918) for these fetches. We resolve the
+    host ONCE (``resolve_pinned_address``, https-only by default — rejects the whole URL
+    if ANY resolved record is private), connect to that EXACT pinned IP literal, and
+    preserve the ``Host`` header + TLS SNI + cert verification against the original
+    hostname (async adaptation of the webhook ``_build_pinned_request`` shape).
+
+    Dev bypass (TA-6): the pin is SKIPPED whenever ``federation_insecure`` is set —
+    the dev/test escape for the RECURRING federation fetch, matching the registration
+    well-known fetch guard (NF-2, ``_federation_impl.register_peer_impl``), which is
+    gated on ``federation_insecure`` ALONE (not flag+loopback). This is deliberately
+    broader than the approval-time manifest fetch's ``federation_insecure AND loopback``
+    conjunction: a loopback dev cluster IS the primary case, but the federation test
+    suite also drives this path with fake in-process clients whose peer ``node_url`` is
+    a NON-loopback, non-resolving placeholder (e.g. ``http://relay-b``). Gating on the
+    loopback conjunction alone would pin+resolve those placeholders and break the suite.
+    Under the skip, the original-hostname URL is passed straight through with no pin
+    extensions (preserving today's exact call shape). In production
+    (``federation_insecure`` off) the pin is ALWAYS enforced.
+    """
+    if settings.federation_insecure:
+        return await client.get(url, params=params, headers=headers, timeout=timeout)
+
+    # Pin: resolve once, reject private/rebind targets, connect to the pinned IP.
+    # https-only matches the production federation transport (peer URLs are https).
+    pinned_ip = resolve_pinned_address(url, allow_schemes=frozenset({"https"}))
+    pinned_url, host_header = _build_pinned_request(url, pinned_ip)
+    hostname = urlsplit(url).hostname or ""
+    merged_headers = dict(headers or {})
+    merged_headers["Host"] = host_header
+    return await client.get(
+        pinned_url,
+        params=params,
+        headers=merged_headers,
+        timeout=timeout,
+        extensions={"sni_hostname": hostname},
+    )
 
 
 def load_cursor(peer_id: str) -> str | None:
@@ -85,12 +162,21 @@ async def pull_from_peer_once(
     backoff = _BASE_BACKOFF_S
     while True:
         try:
-            resp = await client.get(
+            resp = await _pinned_get(
+                client,
                 f"{peer['node_url']}/v1/federation/facts",
                 params=params,
                 headers={"Authorization": f"Bearer {token}", "Stigmem-Verify": "full"},
                 timeout=30.0,
             )
+        except ValueError as exc:
+            # Anti-rebind pin refused the peer's node_url at FETCH time (R-5 / F-SSRF1):
+            # the host resolved to a private/internal/IMDS address. Fail closed — retain
+            # the old cursor; an unsafe address can never become safe by retrying.
+            logger.warning(
+                "Pull from %s blocked: unsafe node_url (%s)", peer["node_id"], exc
+            )
+            return cursor
         except httpx.RequestError as exc:
             logger.warning("Pull network error from %s: %s", peer["node_id"], exc)
             return cursor  # retain old cursor; will retry next cycle
@@ -588,12 +674,19 @@ async def pull_tombstones_from_peer_once(
         params["since"] = cursor
 
     try:
-        resp = await client.get(
+        resp = await _pinned_get(
+            client,
             f"{peer['node_url']}/v1/federation/tombstones",
             params=params,
             headers={"Authorization": f"Bearer {token}"},
             timeout=30.0,
         )
+    except ValueError as exc:
+        # Anti-rebind pin refused the peer's node_url at FETCH time (R-5 / F-SSRF1).
+        logger.warning(
+            "Tombstone pull from %s blocked: unsafe node_url (%s)", peer["node_id"], exc
+        )
+        return cursor
     except httpx.RequestError as exc:
         logger.warning("Tombstone pull network error from %s: %s", peer["node_id"], exc)
         return cursor

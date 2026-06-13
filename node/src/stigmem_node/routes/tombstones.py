@@ -102,6 +102,10 @@ def issue_tombstone(
             key_id=signed.key_id,
             signature=signed.signature,
             legal_hold=signed.legal_hold,
+            # Scope issuance to the caller's tenant (R-3 / F-SBOLA3): without this the row
+            # defaults to "default", so an admin-issued tombstone could never suppress a
+            # non-default tenant's facts and would land in the wrong partition.
+            tenant_id=identity.tenant_id,
             tombstone_id=signed.id,
             created_at=signed.created_at,
         )
@@ -131,7 +135,7 @@ def check_tombstone_status(
 ) -> TombstoneStatusResponse:
     _require_admin(identity)
     entity_uri = urllib.parse.unquote(entity_uri_encoded)
-    return get_tombstone_status(entity_uri)
+    return get_tombstone_status(entity_uri, identity.tenant_id)
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +204,15 @@ def _enqueue_tombstone_rebroadcast(record: TombstoneRecord) -> None:
 
 def _push_tombstone_to_peers(record: TombstoneRecord) -> None:
     import logging
+    from urllib.parse import urlsplit
 
     import httpx
 
     from ..db import db
     from ..federation.peer_token import create_peer_token
+    from ..net_util import resolve_pinned_address
+    from ..settings import settings as _settings
+    from ..subscription_delivery import _build_pinned_request
 
     log = logging.getLogger("stigmem.tombstones.federation")
     try:
@@ -223,12 +231,35 @@ def _push_tombstone_to_peers(record: TombstoneRecord) -> None:
 
             allowed_scopes = _json.loads(peer["allowed_scopes"])
             token = create_peer_token(peer["node_id"], allowed_scopes)
-            resp = httpx.post(
-                f"{peer['node_url'].rstrip('/')}/v1/federation/tombstones/ingest",
-                json=payload,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10.0,
-            )
+            push_url = f"{peer['node_url'].rstrip('/')}/v1/federation/tombstones/ingest"
+            # Anti-rebind DNS pin (R-5 / F-SSRF1): the peer-controlled node_url is
+            # re-pushed to on a loop; resolve the host ONCE and connect to the pinned
+            # IP literal (Host + TLS SNI preserved), rejecting private/internal rebind
+            # targets. Skipped under federation_insecure (dev/test escape — matches the
+            # pull-fetch + registration NF-2 gate, which is federation_insecure-gated).
+            if _settings.federation_insecure:
+                resp = httpx.post(
+                    push_url,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10.0,
+                )
+            else:
+                pinned_ip = resolve_pinned_address(
+                    push_url, allow_schemes=frozenset({"https"})
+                )
+                pinned_url, host_header = _build_pinned_request(push_url, pinned_ip)
+                hostname = urlsplit(push_url).hostname or ""
+                # httpx.Client().post (not module-level httpx.post) carries the
+                # extensions kwarg for the sni_hostname pin — same surface the webhook
+                # delivery pin uses.
+                with httpx.Client(timeout=10.0, follow_redirects=False) as _client:
+                    resp = _client.post(
+                        pinned_url,
+                        json=payload,
+                        headers={"Authorization": f"Bearer {token}", "Host": host_header},
+                        extensions={"sni_hostname": hostname},
+                    )
             if resp.status_code not in (200, 201, 409):
                 log.warning(
                     "Peer %s returned %s on tombstone push", peer["node_url"], resp.status_code

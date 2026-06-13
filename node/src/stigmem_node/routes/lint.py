@@ -324,7 +324,7 @@ def lint_scope(
 
     if scope_count > settings.async_job_threshold:
         estimated_s = max(10, scope_count // 5_000)
-        job_id = create_job("lint", req.scope, estimated_s)
+        job_id = create_job("lint", req.scope, estimated_s, identity.tenant_id)
         background_tasks.add_task(_lint_job_worker, job_id, req, identity.tenant_id)
         return JSONResponse(
             status_code=202,
@@ -356,7 +356,7 @@ def get_lint_job(
     """Poll the status of an async lint job (Spec-20-Lint-Semantics)."""
     if not identity.can_read():
         raise HTTPException(status_code=403, detail="read permission required")
-    job = get_job(job_id, job_type="lint")
+    job = get_job(job_id, job_type="lint", tenant_id=identity.tenant_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job

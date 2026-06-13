@@ -19,6 +19,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import BackgroundTasks, HTTPException, Request, status
@@ -40,7 +41,7 @@ from ..models.tombstones import (
     TombstoneRecord,
     TombstoneRevocationRecord,
 )
-from ..net_util import assert_safe_url, node_url_is_loopback
+from ..net_util import node_url_is_loopback, resolve_pinned_address
 from ..plugins import Deny, TenantContext, get_registry
 
 logger = logging.getLogger("stigmem.federation")
@@ -49,6 +50,92 @@ logger = logging.getLogger("stigmem.federation")
 def peer_pubkey_fingerprint(pubkey: str) -> str:
     """Return the operator-verifiable fingerprint for a pinned peer public key."""
     return f"sha256:{hashlib.sha256(pubkey.encode()).hexdigest()}"
+
+
+def _build_pinned_request(url: str, pinned_ip: str) -> tuple[str, str]:
+    """Return ``(pinned_url, host_header)`` for connecting to *pinned_ip*.
+
+    Mirrors ``federation_pull._build_pinned_request`` (the a11 webhook pin shape):
+    swap the original hostname for the validated *pinned_ip* literal (IPv6 bracketed)
+    while preserving scheme/port/path/query, so the socket connects to the pinned IP
+    and cannot be re-resolved by a rebinder. ``host_header`` carries the ORIGINAL
+    hostname (+ explicit port). The caller passes ``extensions={"sni_hostname": host}``
+    so TLS SNI + cert verification run against the original hostname, NOT the IP.
+    """
+    parts = urlsplit(url)
+    hostname = parts.hostname or ""
+    port = parts.port
+    ip_authority = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    if port is not None:
+        netloc = f"{ip_authority}:{port}"
+        host_header = f"{hostname}:{port}"
+    else:
+        netloc = ip_authority
+        host_header = hostname
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return pinned_url, host_header
+
+
+async def _pinned_well_known_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    allow_schemes: frozenset[str],
+    skip_pin: bool,
+    **kwargs: Any,
+) -> httpx.Response:
+    """GET *url* with the a11 anti-rebind DNS pin (F-SSRF-3), unless *skip_pin*.
+
+    The one-shot registration/approval well-known fetches were SSRF-guarded with
+    ``assert_safe_url`` but NOT DNS-pinned, leaving the rebind TOCTOU window the
+    recurring pull fetches already close via ``federation_pull._pinned_get``. We
+    resolve the host ONCE (``resolve_pinned_address`` — rejects the whole URL if
+    ANY resolved record is private/loopback/IMDS), connect to that EXACT pinned IP
+    literal, and preserve the ``Host`` header + TLS SNI + cert verification against
+    the original hostname.
+
+    ``skip_pin`` is supplied by the caller so each site keeps its EXISTING dev
+    bypass exactly: registration skips under ``federation_insecure`` alone (NF-2);
+    the approval-time manifest fetch skips under ``federation_insecure AND loopback``.
+    Under the skip the original-hostname URL is passed straight through with no pin
+    extensions (preserving today's call shape, including the test fake clients).
+
+    NOTE: the pin is resolved (and a blocked target raises) BEFORE this is called —
+    see ``_resolve_well_known_pin`` — so callers fail closed without ever opening the
+    HTTP client for a private/IMDS URL. This wrapper recomputes the same pin for the
+    actual GET.
+    """
+    if skip_pin:
+        return await client.get(url, **kwargs)
+
+    pinned_ip = resolve_pinned_address(url, allow_schemes=allow_schemes)
+    pinned_url, host_header = _build_pinned_request(url, pinned_ip)
+    hostname = urlsplit(url).hostname or ""
+    headers = dict(kwargs.pop("headers", None) or {})
+    headers["Host"] = host_header
+    return await client.get(
+        pinned_url,
+        headers=headers,
+        extensions={"sni_hostname": hostname},
+        **kwargs,
+    )
+
+
+def _resolve_well_known_pin(
+    url: str,
+    *,
+    allow_schemes: frozenset[str],
+    skip_pin: bool,
+) -> None:
+    """Resolve+validate the F-SSRF-3 pin for *url* BEFORE the HTTP client is opened.
+
+    Raises ``ValueError`` (via ``resolve_pinned_address``) if the target resolves to a
+    private/loopback/IMDS address, so a blocked target fails closed without ever
+    constructing the client. A no-op when *skip_pin* is set (the dev bypass).
+    """
+    if skip_pin:
+        return
+    resolve_pinned_address(url, allow_schemes=allow_schemes)
 
 
 def _make_federation_client() -> httpx.AsyncClient:
@@ -125,10 +212,22 @@ async def register_peer_impl(
 
     fetched_pubkey: str | None = None
     try:
-        if not _fed_mod.settings.federation_insecure:
-            assert_safe_url(req.node_url, allow_schemes=frozenset({"https"}))
+        # F-SSRF-3: pin the host ONCE (resolve + reject private/rebind targets, then
+        # connect to the pinned IP). Skipped under federation_insecure ALONE — the
+        # existing NF-2 dev bypass for this registration fetch (https-only otherwise).
+        # The pin is resolved BEFORE the client opens so a blocked target fails closed.
+        skip_pin = _fed_mod.settings.federation_insecure
+        wk_url = f"{req.node_url}/.well-known/stigmem"
+        _resolve_well_known_pin(
+            wk_url, allow_schemes=frozenset({"https"}), skip_pin=skip_pin
+        )
         async with _make_federation_client() as client:
-            wk_resp = await client.get(f"{req.node_url}/.well-known/stigmem")
+            wk_resp = await _pinned_well_known_get(
+                client,
+                wk_url,
+                allow_schemes=frozenset({"https"}),
+                skip_pin=skip_pin,
+            )
         if wk_resp.status_code == 200:
             fetched_pubkey = wk_resp.json().get("federation_pubkey")
     except Exception as exc:  # nosec B110 — fetched_pubkey stays None → rejected below
@@ -260,11 +359,21 @@ async def _check_tl_inclusion_for_peer(node_id: str, node_url: str, peer_id: str
         # federation_insecure ALONE (https-only) — NOT flag+loopback-gated like
         # this fetch, so do not treat the two as the same mechanism.
         _loopback_dev = _fed.settings.federation_insecure and node_url_is_loopback(node_url)
-        if not _loopback_dev:
-            assert_safe_url(node_url, allow_schemes=frozenset({"https", "http"}))
+        # F-SSRF-3: pin the host ONCE rather than only assert_safe_url (which leaves
+        # the rebind TOCTOU window). Skipped under the SAME federation_insecure AND
+        # loopback conjunction this fetch already used for its dev bypass. The pin is
+        # resolved BEFORE the client opens so a private/IMDS target fails closed without
+        # ever opening an HTTP connection.
+        manifest_url = f"{node_url}/.well-known/stigmem-manifest.json"
+        _resolve_well_known_pin(
+            manifest_url, allow_schemes=frozenset({"https", "http"}), skip_pin=_loopback_dev
+        )
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{node_url}/.well-known/stigmem-manifest.json",
+            resp = await _pinned_well_known_get(
+                client,
+                manifest_url,
+                allow_schemes=frozenset({"https", "http"}),
+                skip_pin=_loopback_dev,
                 follow_redirects=False,
             )
         if resp.status_code == 200:
@@ -507,8 +616,18 @@ def _ingest_revocation(payload: dict[str, Any], fed_settings: Any) -> dict[str, 
     return {"status": "ok", "type": "revocation"}
 
 
-def _ingest_tombstone(payload: dict[str, Any], fed_settings: Any) -> dict[str, Any]:
-    """Parse + verify + apply an inbound tombstone. Returns the success response dict."""
+def _ingest_tombstone(
+    payload: dict[str, Any], peer: dict[str, Any] | None, fed_settings: Any
+) -> dict[str, Any]:
+    """Parse + verify + apply a bare (pre-v2) inbound tombstone. Returns the success response.
+
+    A bare body carries no origin block, so it is treated as a DIRECT, issuer-verified
+    tombstone (received_from None, origin == self semantics). Its LOCAL tenant is the
+    posting peer's pinned ``ingest_tenant`` — resolved fail-closed by the SAME resolver the
+    v2 + pull DIRECT paths use (:func:`resolve_ingest_tenant_for_peer`). Landing every bare
+    tombstone in ``default`` would let a peer pinned to a non-default tenant RTBF-no-op on its
+    own tenant while over-suppressing ``default`` (F-SBOLA3 on a federation WRITE path).
+    """
     from ..lifecycle.tombstone_signing import verify_tombstone_signature
     from ..lifecycle.tombstones import apply_inbound_tombstone
 
@@ -528,7 +647,27 @@ def _ingest_tombstone(payload: dict[str, Any], fed_settings: Any) -> dict[str, A
         on_failure=_emit_tombstone_verification_failed,
     )
 
-    written = apply_inbound_tombstone(record)
+    if peer is None:
+        # A capability-token-only caller carries no per-peer tenant policy. Without a peer row
+        # there is nothing to pin the tenant against, so a non-default landing cannot be made
+        # safe; the back-compat single-node contract is the default partition.
+        direct_tenant_id = "default"
+    else:
+        # Resolve the (direct) ingest tenant fail-closed — the SAME resolver the v2 path uses.
+        # A mis-pinned / ambiguous peer ⇒ 403 rather than silently mis-landing in "default".
+        from ..db import db as _db
+        from ..federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
+
+        try:
+            with _db() as conn:
+                direct_tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+        except PeerPolicyError as exc:
+            _audit_tombstone_payload_rejected(payload, "tombstone", f"tenant_policy_unsafe: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=f"tenant policy unsafe: {exc}"
+            ) from exc
+
+    written = apply_inbound_tombstone(record, tenant_id=direct_tenant_id)
     return {"status": "ok", "written": written}
 
 
@@ -734,8 +873,10 @@ def federation_ingest_tombstone_impl(
             written_any = written_any or bool(res.get("written"))
         return {"status": "ok", "written": written_any}
 
-    # Bare (pre-v2) tombstone — back-compat DIRECT issuer-verified path (unchanged).
-    return _ingest_tombstone(payload, fed_settings)
+    # Bare (pre-v2) tombstone — back-compat DIRECT issuer-verified path. ``peer`` is the
+    # authenticated peer (or None for a capability-token caller); the helper resolves its
+    # pinned ingest tenant fail-closed so the tombstone lands in the peer's tenant, not "default".
+    return _ingest_tombstone(payload, peer, fed_settings)
 
 
 def _emit_tombstone_verification_failed(record: TombstoneRecord, reason: str) -> None:

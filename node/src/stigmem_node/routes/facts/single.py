@@ -45,7 +45,8 @@ def get_fact(
             )
         with db() as conn:
             alias = conn.execute(
-                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?", (fact_id,)
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+                (fact_id, identity.tenant_id),
             ).fetchone()
         if alias is None:
             raise HTTPException(status_code=404, detail="fact not found")

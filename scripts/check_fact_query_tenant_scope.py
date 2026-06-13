@@ -25,13 +25,16 @@ ROOT = Path(__file__).resolve().parent.parent / "node" / "src" / "stigmem_node"
 # ingest/pull path, where the tenant gap was on the WRITE side (INSERT INTO facts
 # without tenant_id) — see find_insert_violations. Including it here also covers
 # any `FROM facts` SELECT in the top-level federation package via the read-guard.
-SCAN_DIRS = [ROOT / "routes", ROOT / "recall", ROOT / "federation"]
+# lifecycle/ holds the decay selectors and tombstone queries (F-SBOLA1/F-SBOLA3
+# slipped through because this dir was excluded) — they read tenant tables too.
+SCAN_DIRS = [ROOT / "routes", ROOT / "recall", ROOT / "federation", ROOT / "lifecycle"]
 
 # Tenant-bearing tables this guard defends. All carry a `tenant_id` column (facts
 # from the start; entity_aliases/instruction_manifests/boot_stubs/instruction_audit
-# since migrations 039/040) — a route/recall query against any of them must scope
-# by tenant or it can leak across tenants.
-TENANT_TABLES = r"(?:facts|entity_aliases|instruction_manifests|boot_stubs|instruction_audit)"
+# since migrations 039/040; tombstones carries tenant_id too; jobs since migration
+# 051, F-SBOLA2) — a route/recall/lifecycle query against any of them must scope by
+# tenant or it can leak across tenants.
+TENANT_TABLES = r"(?:facts|entity_aliases|instruction_manifests|boot_stubs|instruction_audit|tombstones|jobs)"
 # Case-sensitive: SQL keywords are uppercase in this codebase, so this skips
 # prose like "from facts.py" in docstrings.
 FROM_FACTS = re.compile(rf"FROM\s+{TENANT_TABLES}\b")
@@ -64,11 +67,64 @@ ALLOWLIST: dict[str, list[tuple[str, str]]] = {
         ("COUNT(*) FROM facts", "admin-only CID backfill stats; global by design"),
         ("cid IS NOT NULL", "admin-only CID backfill stats; global by design"),
     ],
-    "routes/quarantine.py": [
-        ("where_clause", "garden-membership-scoped via the dynamic where_clause"),
-    ],
     "routes/federation/replication.py": [
         ("WHERE {where}", "federation egress; tenant-scoped via the built {where} (tenant_id = ?)"),
+    ],
+    "routes/facts/query.py": [
+        (
+            "t.legal_hold = 1",
+            "F-14 legal-hold suppression probe (_legal_hold_blocks_query): a `SELECT 1` "
+            "existence check that only ever returns EMPTY results to a non-admin caller — "
+            "never row content. Legal-hold is a deliberately cross-tenant RTBF integrity gate "
+            "(over-suppression fails closed; it cannot leak another tenant's facts).",
+        ),
+    ],
+    "lifecycle/immutability.py": [
+        (
+            "FROM facts ORDER BY id LIMIT",
+            "rebind_facts_to_cid_v2: admin-only CID-v2 alias migration; batch-scans every "
+            "fact by id cursor (global by design, mirrors routes/cid_admin.py).",
+        ),
+        (
+            "FROM facts WHERE id > ? ORDER BY id",
+            "rebind_facts_to_cid_v2: admin-only CID-v2 alias migration; keyset-paged batch "
+            "scan of every fact (global by design, mirrors routes/cid_admin.py).",
+        ),
+    ],
+    "lifecycle/tombstone_cache.py": [
+        (
+            "SELECT DISTINCT t.entity_uri, t.tenant_id",
+            "tombstone suppression-cache build: reads all tenants but TAGS each row with its "
+            "tenant_id; the consumer (is_tombstoned) keys lookups on (entity_uri, tenant_id), "
+            "so suppression stays tenant-partitioned (§23.3.3).",
+        ),
+    ],
+    "lifecycle/tombstones.py": [
+        (
+            "SELECT t.entity_uri, t.scope, t.tenant_id",
+            "tombstone scope-cache build (_refresh_tombstone_cache): reads all tenants but TAGS "
+            "each row with tenant_id; is_tombstoned filters on row_tenant == tenant_id, so "
+            "suppression is tenant-partitioned (F-SBOLA3).",
+        ),
+        (
+            "mirrors ``list_tombstones`` exactly",
+            "list_tombstone_rows: federation egress lister; surfaces v2 origin columns for the "
+            "egress emit. Scoped by signed origin grant at the egress gate "
+            "(list_federatable_tombstones), not by tenant — mirrors routes/federation/"
+            "replication.py.",
+        ),
+        (
+            "{relay_clause}",
+            "list_federatable_tombstones: federation egress with the W6.6 relay gate; the "
+            "relay_clause scopes re-federation by the origin's signed scope/tenant grant "
+            "(received_from IS NULL OR origin-grant match), not by caller tenant.",
+        ),
+        (
+            "federation poll (§23.4.3)",
+            "list_tombstones: federation poll lister (admin/egress path); the egress relay gate "
+            "(list_federatable_tombstones) applies the origin-grant scope. Tenant scoping is "
+            "not applicable to a cross-node poll surface.",
+        ),
     ],
     "routes/recall/common.py": [
         ("fact_validity_overrides", "recall candidate fetch; ids from the scoped entry query"),

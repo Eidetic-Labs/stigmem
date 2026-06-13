@@ -20,16 +20,23 @@ def get_garden_by_slug_or_id(
 ) -> dict[str, Any] | None:
     """Return a garden row by slug or by its UUID id.
 
-    When tenant_id is provided, slug lookups are scoped to that tenant so that
-    the same slug used by different tenants resolves to the correct garden.
-    UUID lookups are globally unique and do not require tenant scoping.
+    When tenant_id is provided, BOTH the slug lookup and the UUID lookup are
+    scoped to that tenant. Slug scoping lets the same slug used by different
+    tenants resolve to the correct garden; UUID scoping prevents a caller from
+    resolving (and then linking a fact into) another tenant's garden by passing
+    its globally-unique raw UUID. No caller legitimately needs cross-tenant UUID
+    resolution, so scoping the UUID branch here closes that class for every
+    call site at once (fact-target operations such as quarantine admit/promote
+    in particular). When tenant_id is None (no multi-tenant context) the lookup
+    is unscoped.
     """
     with db() as conn:
         if tenant_id is not None:
-            # Slug lookup scoped to tenant; UUID lookup is always unique
+            # Both slug and UUID lookups are scoped to the caller's tenant.
             row = conn.execute(
-                "SELECT * FROM gardens WHERE (slug = ? AND tenant_id = ?) OR id = ?",
-                (slug_or_id, tenant_id, slug_or_id),
+                "SELECT * FROM gardens"
+                " WHERE (slug = ? AND tenant_id = ?) OR (id = ? AND tenant_id = ?)",
+                (slug_or_id, tenant_id, slug_or_id, tenant_id),
             ).fetchone()
         else:
             row = conn.execute(

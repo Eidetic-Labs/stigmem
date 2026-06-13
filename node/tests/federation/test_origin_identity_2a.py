@@ -304,29 +304,31 @@ def _mock_well_known(monkeypatch, peer_pub, entity_uri, manifest_json=None):
         "stigmem_node.routes._federation_impl.httpx.AsyncClient",
         _MockAsyncClient,
     )
-    # The approval-time fetch guards the URL with assert_safe_url (SSRF defence), which
-    # does a real DNS lookup (socket.getaddrinfo) of the synthetic test hostname and would
-    # raise before the mocked client is reached. We can't let the real guard run, but a bare
-    # no-op would silently let ANY URL through and stop proving the guard is even invoked.
-    # Instead, install a stub that ASSERTS the guard was called on the peer's node_url with
-    # the expected scheme allowlist — so the test still verifies the SSRF check runs on the
-    # right input. The guard's own block/allow logic stays covered by
-    # tests/utility/test_net_util.py.
+    # The approval-time fetch now DNS-PINS the URL (F-SSRF-3, resolve_pinned_address),
+    # which does a real DNS lookup (socket.getaddrinfo) of the synthetic test hostname and
+    # would raise before the mocked client is reached. We can't let the real pin run, but a
+    # bare no-op would silently let ANY URL through and stop proving the pin is even invoked.
+    # Instead, install a stub that ASSERTS the pin was called on the peer's node_url with the
+    # expected scheme allowlist — so the test still verifies the SSRF pin runs on the right
+    # input — and returns a harmless pinned literal that preserves the path the mock matches
+    # on. The pin's own block/allow logic stays covered by tests/utility/test_net_util.py.
     from urllib.parse import urlparse as _urlparse
 
-    def _asserting_safe_url(url, *, allow_schemes=frozenset({"https"})):
+    def _asserting_pin(url, *, allow_schemes=frozenset({"https"})):
         parsed = _urlparse(url)
         # _check_tl_inclusion_for_peer must call this on the peer's node_url, and the
         # production call passes http+https as the allowed schemes.
         assert parsed.scheme in allow_schemes, f"unexpected scheme {parsed.scheme!r} for {url!r}"
         assert allow_schemes == frozenset({"https", "http"}), (
-            f"SSRF guard invoked with unexpected allow_schemes {allow_schemes!r}"
+            f"SSRF pin invoked with unexpected allow_schemes {allow_schemes!r}"
         )
-        assert parsed.hostname, f"SSRF guard invoked on URL with no host: {url!r}"
+        assert parsed.hostname, f"SSRF pin invoked on URL with no host: {url!r}"
+        # A genuinely-global literal; _build_pinned_request preserves the original path.
+        return "8.8.8.8"
 
     monkeypatch.setattr(
-        "stigmem_node.routes._federation_impl.assert_safe_url",
-        _asserting_safe_url,
+        "stigmem_node.routes._federation_impl.resolve_pinned_address",
+        _asserting_pin,
     )
 
 

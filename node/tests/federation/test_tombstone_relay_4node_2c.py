@@ -343,7 +343,7 @@ def _no_fetch(monkeypatch: Any) -> None:
         return _httpx.Response(404)
 
     monkeypatch.setattr(oi.httpx, "get", _get)
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
 
 def _fetch_serves_a(monkeypatch: Any, a: _Node) -> None:
@@ -360,7 +360,7 @@ def _fetch_serves_a(monkeypatch: Any, a: _Node) -> None:
         return _httpx.Response(404)
 
     monkeypatch.setattr(oi.httpx, "get", _get)
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
 
 def _run_bc_relay(

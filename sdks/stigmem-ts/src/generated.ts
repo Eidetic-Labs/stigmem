@@ -1225,8 +1225,9 @@ export interface paths {
          * List Quarantined Facts
          * @description List facts in the quarantine system (Spec-08-Quarantine-Garden).
          *
-         *     Node admins see all quarantined facts across all gardens.
-         *     Other callers see facts only in quarantine gardens where they hold a member role.
+         *     Scoped to the caller's tenant: admins see all quarantined facts within their
+         *     own tenant. Other callers see facts only in quarantine gardens where they
+         *     hold a member role. No caller can read another tenant's quarantine.
          */
         get: operations["list_quarantined_facts_v1_quarantine_get"];
         put?: never;

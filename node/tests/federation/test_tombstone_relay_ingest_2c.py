@@ -423,7 +423,7 @@ def test_relay_unreachable_unpinned_origin_skips(relay_nodes: Any, monkeypatch: 
             return _httpx.Response(404)
 
     monkeypatch.setattr(oi.httpx, "get", _NoFetch())
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
     rec = _issuer_signed_tombstone(
         unknown_priv,

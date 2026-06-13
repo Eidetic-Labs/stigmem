@@ -44,11 +44,17 @@ def _get_tombstone_filter(
     entity_uris: list[str],
     scope: str,
     is_admin_caller: bool,
+    tenant_id: str,
 ) -> tuple[set[str], list[TombstoneNotice]]:
     """Return (excluded_entity_uris, tombstone_notices) for entity_uris in scope (§23.3, §24.3).
 
     excluded_entity_uris: entities under active (non-legal-hold) tombstones.
     tombstone_notices: annotations for legal_hold tombstones visible to admin callers.
+
+    Suppression is scoped to ``tenant_id`` (the caller's tenant): only tombstones in
+    the caller's own tenant partition may suppress the caller's facts. A tombstone in
+    a different tenant MUST NOT hide this caller's content (R-3 / F-SBOLA3). Single-tenant
+    nodes pass ``tenant_id="default"``, matching the ``default`` rows create_tombstone writes.
     """
     from ...lifecycle.tombstone_gate import tombstone_filter_enabled
 
@@ -79,14 +85,17 @@ def _get_tombstone_filter(
         # Same-issuer binding: only a revocation from the tombstone's OWN issuer
         # (r.signed_by = t.signed_by) lifts the suppression — a forged/cross-issuer
         # revocation can never un-suppress content another org tombstoned (RTBF integrity).
+        # Tenant predicate (R-3 / F-SBOLA3): only a tombstone in the CALLER's own tenant
+        # may suppress the caller's facts — a different tenant's tombstone must not hide them.
         f"""SELECT t.id, t.entity_uri, t.scope, t.created_at, t.legal_hold
             FROM tombstones t
             WHERE t.entity_uri IN ({placeholders})
+            AND t.tenant_id = ?
             AND NOT EXISTS (
                 SELECT 1 FROM tombstone_revocations r
                 WHERE r.tombstone_id = t.id AND r.signed_by = t.signed_by
             )""",  # noqa: S608  # nosec B608 - dynamic SQL is generated placeholders only; entity values are bound params.
-        entity_uris,
+        [*entity_uris, tenant_id],
     ).fetchall()
     try:  # noqa: SIM105
         conn.execute("COMMIT")

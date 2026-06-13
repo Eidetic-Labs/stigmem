@@ -41,8 +41,8 @@ def _resolve_provenance_entry(
             ref_row = conn.execute(_REF_SELECT, (entry_fact_id, tenant_id)).fetchone()
         elif hash_val.startswith("sha256:"):
             alias = conn.execute(
-                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ?",
-                (hash_val,),
+                "SELECT fact_id FROM fact_cid_aliases WHERE cid = ? AND tenant_id = ?",
+                (hash_val, tenant_id),
             ).fetchone()
             if alias:
                 ref_row = conn.execute(_REF_SELECT, (alias["fact_id"], tenant_id)).fetchone()
@@ -123,7 +123,9 @@ def get_provenance(
     if accessible_entities:
         with db() as _tc_conn:
             is_admin = identity.is_admin()
-            excluded, _ = _get_tombstone_filter(_tc_conn, accessible_entities, root_scope, is_admin)
+            excluded, _ = _get_tombstone_filter(
+                _tc_conn, accessible_entities, root_scope, is_admin, identity.tenant_id
+            )
 
     # Build response — §23.3.2 r.4 tombstone and §20.6.2 unauthorized share identical shape
     result: list[ProvenanceEntry] = [
