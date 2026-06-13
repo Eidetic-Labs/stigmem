@@ -2358,6 +2358,49 @@
         "title": "PeerRegisterResponse",
         "type": "object"
       },
+      "PendingConfirmRequest": {
+        "description": "Body for POST /v1/federation/dnssec/pending/confirm (paste-to-confirm).",
+        "properties": {
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
+          "key_fpr": {
+            "title": "Key Fpr",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_uri",
+          "node_id",
+          "key_fpr"
+        ],
+        "title": "PendingConfirmRequest",
+        "type": "object"
+      },
+      "PendingRejectRequest": {
+        "description": "Body for POST /v1/federation/dnssec/pending/reject.",
+        "properties": {
+          "entity_uri": {
+            "title": "Entity Uri",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_uri",
+          "node_id"
+        ],
+        "title": "PendingRejectRequest",
+        "type": "object"
+      },
       "Preference": {
         "description": "Soft preference on an intent (Spec-X8-Intent-Envelope).",
         "properties": {
@@ -6023,6 +6066,133 @@
         "summary": "Revoke Capability Token",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/v1/federation/dnssec/pending": {
+      "get": {
+        "description": "List quarantined first-trust candidates. Requires admin:federation.\n\nEach row surfaces the operator-facing fields needed to confirm a binding\nout-of-band: ``entity_uri``, ``node_id``, ``candidate_key_fpr``, ``source``\n(``unsigned`` vs ``insecure-delegation``), ``relay_peer``, and ``seen_at``.",
+        "operationId": "list_dnssec_pending_v1_federation_dnssec_pending_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Dnssec Pending V1 Federation Dnssec Pending Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Dnssec Pending",
+        "tags": [
+          "federation"
+        ]
+      }
+    },
+    "/v1/federation/dnssec/pending/confirm": {
+      "post": {
+        "description": "Confirm a quarantined first-trust candidate (paste-to-confirm, NF-D4-5).\n\nThe operator-supplied ``key_fpr`` MUST byte-equal the stored\n``candidate_key_fpr`` (never one-click). On match the binding is pinned\n(establishing trust) and the pending row is cleared. On fingerprint mismatch\nthe candidate is NOT trusted (422) and the row is left parked. When no such\npending row exists, returns 404. Requires admin:federation.",
+        "operationId": "confirm_dnssec_pending_v1_federation_dnssec_pending_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Confirm Dnssec Pending V1 Federation Dnssec Pending Confirm Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Dnssec Pending",
+        "tags": [
+          "federation"
+        ]
+      }
+    },
+    "/v1/federation/dnssec/pending/reject": {
+      "post": {
+        "description": "Reject a quarantined first-trust candidate WITHOUT trusting it.\n\nClears the pending row; no pin is created. Returns 404 when no such pending\nrow exists. Requires admin:federation.",
+        "operationId": "reject_dnssec_pending_v1_federation_dnssec_pending_reject_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingRejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reject Dnssec Pending V1 Federation Dnssec Pending Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Dnssec Pending",
+        "tags": [
+          "federation"
         ]
       }
     },

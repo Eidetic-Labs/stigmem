@@ -20,6 +20,11 @@ from .common import (  # noqa: F401
     logger,
     router,
 )
+from .dnssec_first_trust import (  # noqa: F401
+    confirm_dnssec_pending,
+    list_dnssec_pending,
+    reject_dnssec_pending,
+)
 from .peers import approve_peer, list_peers, register_peer  # noqa: F401
 from .pins import create_origin_pin, delete_pin, list_pins  # noqa: F401
 from .replication import (  # noqa: F401
@@ -42,10 +47,13 @@ __all__ = [
     "_require_peer_token",
     "_try_peer_token_auth",
     "_verify_push_cap_token",
+    "confirm_dnssec_pending",
     "get_audit_log",
     "approve_peer",
     "create_origin_pin",
     "delete_pin",
+    "list_dnssec_pending",
+    "reject_dnssec_pending",
     "federation_ingest_tombstone",
     "federation_list_tombstones",
     "ingest_fact",

@@ -686,6 +686,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/federation/dnssec/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dnssec Pending
+         * @description List quarantined first-trust candidates. Requires admin:federation.
+         *
+         *     Each row surfaces the operator-facing fields needed to confirm a binding
+         *     out-of-band: ``entity_uri``, ``node_id``, ``candidate_key_fpr``, ``source``
+         *     (``unsigned`` vs ``insecure-delegation``), ``relay_peer``, and ``seen_at``.
+         */
+        get: operations["list_dnssec_pending_v1_federation_dnssec_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/federation/dnssec/pending/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Dnssec Pending
+         * @description Confirm a quarantined first-trust candidate (paste-to-confirm, NF-D4-5).
+         *
+         *     The operator-supplied ``key_fpr`` MUST byte-equal the stored
+         *     ``candidate_key_fpr`` (never one-click). On match the binding is pinned
+         *     (establishing trust) and the pending row is cleared. On fingerprint mismatch
+         *     the candidate is NOT trusted (422) and the row is left parked. When no such
+         *     pending row exists, returns 404. Requires admin:federation.
+         */
+        post: operations["confirm_dnssec_pending_v1_federation_dnssec_pending_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/federation/dnssec/pending/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Dnssec Pending
+         * @description Reject a quarantined first-trust candidate WITHOUT trusting it.
+         *
+         *     Clears the pending row; no pin is created. Returns 404 when no such pending
+         *     row exists. Requires admin:federation.
+         */
+        post: operations["reject_dnssec_pending_v1_federation_dnssec_pending_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/federation/facts": {
         parameters: {
             query?: never;
@@ -2295,6 +2368,28 @@ export interface components {
             verified_at: string | null;
         };
         /**
+         * PendingConfirmRequest
+         * @description Body for POST /v1/federation/dnssec/pending/confirm (paste-to-confirm).
+         */
+        PendingConfirmRequest: {
+            /** Entity Uri */
+            entity_uri: string;
+            /** Key Fpr */
+            key_fpr: string;
+            /** Node Id */
+            node_id: string;
+        };
+        /**
+         * PendingRejectRequest
+         * @description Body for POST /v1/federation/dnssec/pending/reject.
+         */
+        PendingRejectRequest: {
+            /** Entity Uri */
+            entity_uri: string;
+            /** Node Id */
+            node_id: string;
+        };
+        /**
          * Preference
          * @description Soft preference on an intent (Spec-X8-Intent-Envelope).
          */
@@ -2911,6 +3006,8 @@ export type SchemaPeerApprovalResponse = components['schemas']['PeerApprovalResp
 export type SchemaPeerPolicyPatch = components['schemas']['PeerPolicyPatch'];
 export type SchemaPeerRegisterRequest = components['schemas']['PeerRegisterRequest'];
 export type SchemaPeerRegisterResponse = components['schemas']['PeerRegisterResponse'];
+export type SchemaPendingConfirmRequest = components['schemas']['PendingConfirmRequest'];
+export type SchemaPendingRejectRequest = components['schemas']['PendingRejectRequest'];
 export type SchemaPreference = components['schemas']['Preference'];
 export type SchemaProvenanceEntry = components['schemas']['ProvenanceEntry'];
 export type SchemaProvenanceResponse = components['schemas']['ProvenanceResponse'];
@@ -4052,6 +4149,98 @@ export interface operations {
                 "application/json": {
                     [key: string]: unknown;
                 };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dnssec_pending_v1_federation_dnssec_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    confirm_dnssec_pending_v1_federation_dnssec_pending_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PendingConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_dnssec_pending_v1_federation_dnssec_pending_reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PendingRejectRequest"];
             };
         };
         responses: {
