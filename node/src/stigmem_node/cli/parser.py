@@ -468,12 +468,19 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SCOPE",
         help="restrict sweep to one scope (local/team/company/public)",
     )
-    sw_p.add_argument(
+    sw_tenant_grp = sw_p.add_mutually_exclusive_group()
+    sw_tenant_grp.add_argument(
         "--tenant",
         dest="tenant",
         default="default",
         metavar="TENANT",
         help="restrict sweep to one tenant (default: 'default')",
+    )
+    sw_tenant_grp.add_argument(
+        "--all-tenants",
+        dest="all_tenants",
+        action="store_true",
+        help="sweep every tenant (for multi-tenant operators); mutually exclusive with --tenant",
     )
     sw_p.add_argument(
         "--dry-run",

@@ -90,3 +90,59 @@ def test_dry_run_scanned_counts_only_callers_tenant(migrated_db: str) -> None:
     assert result["dry_run"] is True
     # Nothing written.
     assert _valid_until(migrated_db, default_id) is None
+
+
+def _decay_args(**kwargs: object):
+    import argparse
+
+    base: dict[str, object] = {
+        "db": None,
+        "ttl_seconds": 0,
+        "min_confidence": None,
+        "scope": "",
+        "tenant": "default",
+        "all_tenants": False,
+        "dry_run": False,
+    }
+    base.update(kwargs)
+    return argparse.Namespace(**base)
+
+
+def test_cli_all_tenants_decays_every_tenant(
+    migrated_db: str, monkeypatch
+) -> None:
+    """--all-tenants must decay facts in BOTH tenants, not just 'default'."""
+    from stigmem_node import db as db_mod
+    from stigmem_node.cli.maintenance import _cmd_decay_sweep
+
+    monkeypatch.setattr(db_mod.settings, "db_path", migrated_db)
+
+    default_id = _seed_fact(migrated_db, tenant_id="default", entity="stigmem://test/user/a")
+    tenant_b_id = _seed_fact(migrated_db, tenant_id="tenantB", entity="stigmem://test/user/b")
+
+    rc = _cmd_decay_sweep(_decay_args(db=migrated_db, all_tenants=True))
+    assert rc == 0
+
+    # Both tenants' facts are now expired.
+    assert _valid_until(migrated_db, default_id) is not None
+    assert _valid_until(migrated_db, tenant_b_id) is not None
+
+
+def test_cli_single_tenant_leaves_other_tenant(
+    migrated_db: str, monkeypatch
+) -> None:
+    """Without --all-tenants, --tenant default must not touch tenantB facts."""
+    from stigmem_node import db as db_mod
+    from stigmem_node.cli.maintenance import _cmd_decay_sweep
+
+    monkeypatch.setattr(db_mod.settings, "db_path", migrated_db)
+
+    default_id = _seed_fact(migrated_db, tenant_id="default", entity="stigmem://test/user/a")
+    tenant_b_id = _seed_fact(migrated_db, tenant_id="tenantB", entity="stigmem://test/user/b")
+
+    rc = _cmd_decay_sweep(_decay_args(db=migrated_db, tenant="default"))
+    assert rc == 0
+
+    # Only the default tenant's fact is expired; tenantB is untouched.
+    assert _valid_until(migrated_db, default_id) is not None
+    assert _valid_until(migrated_db, tenant_b_id) is None
