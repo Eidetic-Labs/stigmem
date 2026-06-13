@@ -507,8 +507,18 @@ def _ingest_revocation(payload: dict[str, Any], fed_settings: Any) -> dict[str, 
     return {"status": "ok", "type": "revocation"}
 
 
-def _ingest_tombstone(payload: dict[str, Any], fed_settings: Any) -> dict[str, Any]:
-    """Parse + verify + apply an inbound tombstone. Returns the success response dict."""
+def _ingest_tombstone(
+    payload: dict[str, Any], peer: dict[str, Any] | None, fed_settings: Any
+) -> dict[str, Any]:
+    """Parse + verify + apply a bare (pre-v2) inbound tombstone. Returns the success response.
+
+    A bare body carries no origin block, so it is treated as a DIRECT, issuer-verified
+    tombstone (received_from None, origin == self semantics). Its LOCAL tenant is the
+    posting peer's pinned ``ingest_tenant`` — resolved fail-closed by the SAME resolver the
+    v2 + pull DIRECT paths use (:func:`resolve_ingest_tenant_for_peer`). Landing every bare
+    tombstone in ``default`` would let a peer pinned to a non-default tenant RTBF-no-op on its
+    own tenant while over-suppressing ``default`` (F-SBOLA3 on a federation WRITE path).
+    """
     from ..lifecycle.tombstone_signing import verify_tombstone_signature
     from ..lifecycle.tombstones import apply_inbound_tombstone
 
@@ -528,7 +538,27 @@ def _ingest_tombstone(payload: dict[str, Any], fed_settings: Any) -> dict[str, A
         on_failure=_emit_tombstone_verification_failed,
     )
 
-    written = apply_inbound_tombstone(record)
+    if peer is None:
+        # A capability-token-only caller carries no per-peer tenant policy. Without a peer row
+        # there is nothing to pin the tenant against, so a non-default landing cannot be made
+        # safe; the back-compat single-node contract is the default partition.
+        direct_tenant_id = "default"
+    else:
+        # Resolve the (direct) ingest tenant fail-closed — the SAME resolver the v2 path uses.
+        # A mis-pinned / ambiguous peer ⇒ 403 rather than silently mis-landing in "default".
+        from ..db import db as _db
+        from ..federation.peer_policy import PeerPolicyError, resolve_ingest_tenant_for_peer
+
+        try:
+            with _db() as conn:
+                direct_tenant_id = resolve_ingest_tenant_for_peer(peer, conn)
+        except PeerPolicyError as exc:
+            _audit_tombstone_payload_rejected(payload, "tombstone", f"tenant_policy_unsafe: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=f"tenant policy unsafe: {exc}"
+            ) from exc
+
+    written = apply_inbound_tombstone(record, tenant_id=direct_tenant_id)
     return {"status": "ok", "written": written}
 
 
@@ -734,8 +764,10 @@ def federation_ingest_tombstone_impl(
             written_any = written_any or bool(res.get("written"))
         return {"status": "ok", "written": written_any}
 
-    # Bare (pre-v2) tombstone — back-compat DIRECT issuer-verified path (unchanged).
-    return _ingest_tombstone(payload, fed_settings)
+    # Bare (pre-v2) tombstone — back-compat DIRECT issuer-verified path. ``peer`` is the
+    # authenticated peer (or None for a capability-token caller); the helper resolves its
+    # pinned ingest tenant fail-closed so the tombstone lands in the peer's tenant, not "default".
+    return _ingest_tombstone(payload, peer, fed_settings)
 
 
 def _emit_tombstone_verification_failed(record: TombstoneRecord, reason: str) -> None:
