@@ -7674,7 +7674,7 @@
     },
     "/v1/quarantine": {
       "get": {
-        "description": "List facts in the quarantine system (Spec-08-Quarantine-Garden).\n\nNode admins see all quarantined facts across all gardens.\nOther callers see facts only in quarantine gardens where they hold a member role.",
+        "description": "List facts in the quarantine system (Spec-08-Quarantine-Garden).\n\nScoped to the caller's tenant: admins see all quarantined facts within their\nown tenant. Other callers see facts only in quarantine gardens where they\nhold a member role. No caller can read another tenant's quarantine.",
         "operationId": "list_quarantined_facts_v1_quarantine_get",
         "parameters": [
           {
