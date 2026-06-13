@@ -55,8 +55,10 @@ _TOMBSTONE_CACHE_TTL = 60.0
 
 @dataclass
 class _TombstoneScopeCacheState:
-    # Full set of active (entity_uri, scope) pairs from DB — refreshed every 60s.
-    active_set: set[tuple[str, str]] = field(default_factory=set)
+    # Full set of active (entity_uri, scope, tenant_id) triples from DB — refreshed every 60s.
+    # tenant_id is part of the key (R-3 / F-SBOLA3): suppression must be tenant-scoped so a
+    # tombstone in one tenant cannot suppress a different tenant's facts.
+    active_set: set[tuple[str, str, str]] = field(default_factory=set)
     refreshed_at: float = 0.0
 
 
@@ -77,7 +79,7 @@ def _refresh_tombstone_cache() -> None:
             # BEGIN IMMEDIATE for consistency (§23.3.3 rule 5, SQLite path)
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
-                """SELECT t.entity_uri, t.scope
+                """SELECT t.entity_uri, t.scope, t.tenant_id
                    FROM tombstones t
                    WHERE NOT EXISTS (
                        SELECT 1 FROM tombstone_revocations r
@@ -85,21 +87,28 @@ def _refresh_tombstone_cache() -> None:
                    )"""
             ).fetchall()
             conn.execute("COMMIT")
-        _tombstone_scope_cache.active_set = {(r["entity_uri"], r["scope"]) for r in rows}
+        _tombstone_scope_cache.active_set = {
+            (r["entity_uri"], r["scope"], r["tenant_id"]) for r in rows
+        }
         _tombstone_scope_cache.refreshed_at = now
     except Exception:
         logger.exception("Failed to refresh tombstone cache")
 
 
-def is_tombstoned(entity_uri: str, fact_scope: str) -> bool:
-    """Return True if entity_uri has an active tombstone covering fact_scope."""
+def is_tombstoned(entity_uri: str, fact_scope: str, tenant_id: str = "default") -> bool:
+    """Return True if entity_uri has an active tombstone covering fact_scope in tenant_id.
+
+    Suppression is tenant-scoped (R-3 / F-SBOLA3): only a tombstone in the caller's own
+    tenant may suppress the caller's facts. Single-tenant callers omit tenant_id (defaults
+    to "default", matching the rows create_tombstone writes).
+    """
     from .tombstone_gate import tombstone_filter_enabled
 
     if not tombstone_filter_enabled():
         return False
     _refresh_tombstone_cache()
-    for uri, pattern in _tombstone_scope_cache.active_set:
-        if uri == entity_uri and _scope_matches(pattern, fact_scope):
+    for uri, pattern, row_tenant in _tombstone_scope_cache.active_set:
+        if uri == entity_uri and row_tenant == tenant_id and _scope_matches(pattern, fact_scope):
             return True
     return False
 
@@ -521,12 +530,18 @@ def revoke_tombstone(
     return _row_to_revocation(row)
 
 
-def get_tombstone_status(entity_uri: str) -> TombstoneStatusResponse:
-    """Return tombstone status for entity_uri — admin-only endpoint data."""
+def get_tombstone_status(
+    entity_uri: str, tenant_id: str = "default"
+) -> TombstoneStatusResponse:
+    """Return tombstone status for entity_uri in tenant_id — admin-only endpoint data.
+
+    Scoped to the caller's tenant (R-3 / F-SBOLA3): a tombstone in a different tenant
+    must not surface in this caller's status check. Single-tenant callers omit tenant_id.
+    """
     with db() as conn:
         t_rows = conn.execute(
-            "SELECT * FROM tombstones WHERE entity_uri = ? ORDER BY created_at",
-            (entity_uri,),
+            "SELECT * FROM tombstones WHERE entity_uri = ? AND tenant_id = ? ORDER BY created_at",
+            (entity_uri, tenant_id),
         ).fetchall()
         tombstone_list = [_row_to_tombstone(r) for r in t_rows]
 
@@ -823,8 +838,11 @@ def _emit_tombstone_audit(
 # ---------------------------------------------------------------------------
 
 
-def filter_tombstoned_records(records: list[Any]) -> list[Any]:
-    """Remove facts whose entity or ref-value is tombstoned (§23.3.1, §23.3.2).
+def filter_tombstoned_records(records: list[Any], tenant_id: str = "default") -> list[Any]:
+    """Remove facts whose entity or ref-value is tombstoned in tenant_id (§23.3.1, §23.3.2).
+
+    Suppression is tenant-scoped (R-3 / F-SBOLA3): only a tombstone in the caller's own
+    tenant suppresses the caller's records. Single-tenant callers omit tenant_id.
 
     Also strips tombstoned entries from derived_from and related_entities per spec.
     """
@@ -838,14 +856,14 @@ def filter_tombstoned_records(records: list[Any]) -> list[Any]:
 
         # §23.3.1 rule 2 — exclude facts whose entity is tombstoned
         entity = getattr(record, "entity", None)
-        if entity and is_tombstoned(entity, scope):
+        if entity and is_tombstoned(entity, scope, tenant_id):
             continue
 
         # §23.3.1 rule 2 — exclude ref-valued facts pointing to tombstoned entities
         value = getattr(record, "value", None)
         if value and getattr(value, "type", None) == "ref":
             ref_uri = str(value.v) if value.v is not None else ""
-            if ref_uri and is_tombstoned(ref_uri, scope):
+            if ref_uri and is_tombstoned(ref_uri, scope, tenant_id):
                 continue
 
         result.append(record)

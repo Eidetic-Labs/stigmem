@@ -170,7 +170,7 @@ def _recall_as_of_impl(
 
     # Tombstone filter (§24.3)
     entity_uris = list({sf.fact.entity for sf in scored})
-    excluded, notices = _get_tombstone_filter(conn, entity_uris, scope, is_admin_caller)
+    excluded, notices = _get_tombstone_filter(conn, entity_uris, scope, is_admin_caller, tenant_id)
     tombstone_filtered = False
     if excluded:
         scored = [sf for sf in scored if sf.fact.entity not in excluded]

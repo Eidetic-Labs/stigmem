@@ -102,6 +102,10 @@ def issue_tombstone(
             key_id=signed.key_id,
             signature=signed.signature,
             legal_hold=signed.legal_hold,
+            # Scope issuance to the caller's tenant (R-3 / F-SBOLA3): without this the row
+            # defaults to "default", so an admin-issued tombstone could never suppress a
+            # non-default tenant's facts and would land in the wrong partition.
+            tenant_id=identity.tenant_id,
             tombstone_id=signed.id,
             created_at=signed.created_at,
         )
@@ -131,7 +135,7 @@ def check_tombstone_status(
 ) -> TombstoneStatusResponse:
     _require_admin(identity)
     entity_uri = urllib.parse.unquote(entity_uri_encoded)
-    return get_tombstone_status(entity_uri)
+    return get_tombstone_status(entity_uri, identity.tenant_id)
 
 
 # ---------------------------------------------------------------------------
