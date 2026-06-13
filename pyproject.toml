@@ -167,6 +167,16 @@ dev = [
   # (fixed in 26.1.2) so the pip-audit gate sees a patched pip.
   "pip>=26.1.2",
   "hypothesis>=6.100",
+  # dnspython is the production carrier of the optional [federation-dnssec]
+  # extra (node/pyproject.toml). It is ALSO pinned into the workspace dev group
+  # so the Federation Phase 3 DNSSEC validator's adversarial test suite
+  # (node/tests/federation/dnssec/) actually EXECUTES under `scripts/check.sh
+  # python` and the tag-time release gate — `uv sync --all-packages` installs
+  # this group (default-groups = ["dev"]) but NOT optional-dependency extras,
+  # so without this line the §12 negative suite would silently skip. The
+  # lazy-import guard (Rev 6 I11) still holds: installing dnspython does not
+  # import it; the validator imports `dns.*` only inside its functions.
+  "dnspython>=2.6",
 ]
 
 [tool.uv]
