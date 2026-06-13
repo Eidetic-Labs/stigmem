@@ -76,6 +76,12 @@ observability = [
     "opentelemetry-exporter-otlp-proto-http>=1.24",
     "opentelemetry-exporter-otlp-proto-grpc>=1.24",
 ]
+federation-dnssec = [
+    # In-process DNSSEC chain validation for Federation Phase 3 origin key trust.
+    # Optional + default-off: dnspython is imported only inside the functions that
+    # need it (Rev 6 I11), so a default node never loads it at import time.
+    "dnspython>=2.6",
+]
 
 [project.scripts]
 stigmem-node = "stigmem_node.main:run"
