@@ -164,3 +164,59 @@ def test_reject_other_tenants_fact_returns_404(node):
 
     r = client.post(f"/v1/quarantine/{fid}/reject", headers=_ah(attacker_admin_key))
     assert r.status_code == 404, r.text
+
+
+def _create_owner_target_garden(client: TestClient, owner_admin_key: str) -> str:
+    """Create a regular (non-quarantine) target garden owned by the owner tenant."""
+    r = client.post(
+        "/v1/gardens",
+        json={"slug": "owner-target", "name": "Owner Target", "scope": "local"},
+        headers=_ah(owner_admin_key),
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _create_attacker_quarantine_garden(client: TestClient, attacker_admin_key: str) -> str:
+    """Create a quarantine garden owned by the attacker tenant's admin."""
+    r = client.post(
+        "/v1/gardens",
+        json={"slug": "q-attacker", "name": "Q Attacker", "scope": "local", "quarantine": True},
+        headers=_ah(attacker_admin_key),
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_admit_own_fact_into_other_tenants_garden_uuid_rejected(node):
+    """An attacker admitting THEIR OWN fact into a tenant-A garden's UUID is refused.
+
+    The garden-resolution helper's UUID branch was not tenant-scoped, so a caller
+    could link their own quarantined fact into another tenant's garden by passing
+    that garden's raw UUID as target_garden_id. The admit handler must reject the
+    cross-tenant target garden rather than create the membership.
+    """
+    client, owner_admin_key, attacker_admin_key, _db_file = node
+
+    # Owner tenant owns a target garden (the cross-tenant target).
+    owner_target_uuid = _create_owner_target_garden(client, owner_admin_key)
+
+    # Attacker owns its own quarantine garden + a pending fact in its own tenant.
+    attacker_q_garden = _create_attacker_quarantine_garden(client, attacker_admin_key)
+    attacker_fid = _inject_quarantined_fact(attacker_q_garden, tenant_id=ATTACKER_TENANT)
+
+    # Attacker admits its own fact but targets the OWNER tenant's garden by UUID.
+    r = client.post(
+        f"/v1/quarantine/{attacker_fid}/admit",
+        params={"target_garden_id": owner_target_uuid},
+        headers=_ah(attacker_admin_key),
+    )
+    assert r.status_code in (403, 404), r.text
+
+    # The cross-tenant membership must NOT have been created.
+    with db_mod.db() as conn:
+        membership = conn.execute(
+            "SELECT garden_id FROM fact_garden_membership WHERE fact_id = ?",
+            (attacker_fid,),
+        ).fetchone()
+    assert membership is None or membership["garden_id"] != owner_target_uuid

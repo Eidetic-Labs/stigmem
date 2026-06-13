@@ -180,7 +180,11 @@ def admit_fact(
     target_db_id: str | None = None
     if target_garden_id:
         tg = get_garden_by_slug_or_id(target_garden_id, tenant_id=identity.tenant_id)
-        if tg is None:
+        # get_garden_by_slug_or_id's UUID branch is NOT tenant-scoped, so a caller
+        # could pass another tenant's garden UUID and link their own fact into it.
+        # Reject (as 404, to avoid revealing existence) any resolved garden that is
+        # not in the caller's tenant.
+        if tg is None or tg["tenant_id"] != identity.tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="target garden not found"
             )
