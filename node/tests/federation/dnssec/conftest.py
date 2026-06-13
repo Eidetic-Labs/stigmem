@@ -357,6 +357,32 @@ def valid_chain(patch_anchor) -> FixtureResolver:
 
 
 @pytest.fixture
+def binding_chain_factory(patch_anchor):
+    """Factory: a fully-signed valid chain whose binding RRSIG inception is set.
+
+    Lets a test produce an *aged-but-valid* binding by back-dating the binding
+    TXT RRSIG inception while keeping the expiration inside the validator's
+    pinned NOW window — so the chain still validates to SECURE but the surfaced
+    ``rrsig_inception`` is old. ``inception``/``expiration`` are
+    ``datetime.datetime`` (defaulting to the standard fixture window).
+    """
+
+    def _make(
+        *,
+        inception: datetime.datetime = INCEPTION,
+        expiration: datetime.datetime = EXPIRATION,
+    ) -> FixtureResolver:
+        h = _build_hierarchy()
+        patch_anchor(h)
+        resolver = FixtureResolver()
+        _load_chain(resolver, h)
+        _load_binding_txt(resolver, h, inception=inception, expiration=expiration)
+        return resolver
+
+    return _make
+
+
+@pytest.fixture
 def revoked_chain(patch_anchor) -> FixtureResolver:
     """A fully-signed, valid chain resolving a REVOKED binding TXT -> SECURE.
 

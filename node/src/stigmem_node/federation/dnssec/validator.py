@@ -63,11 +63,21 @@ class Validation(enum.Enum):
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """The validator's verdict plus the parsed record on success."""
+    """The validator's verdict plus the parsed record on success.
+
+    ``rrsig_inception`` is the epoch-seconds inception of the *newest* RRSIG
+    covering the binding TXT (the most-recent re-sign — the correct freshness
+    reference). It is populated ONLY on the ``SECURE`` path and stays ``None`` on
+    every other outcome. It is measured against the SAME clock the RRSIG validity
+    is checked against (``_validation_now``), so the ladder's RRSIG-age clamp
+    (Rev 6 I4) can derive a real age from it. Surfacing it changes no trust
+    decision here — it is an additional, validated input the ladder consumes.
+    """
 
     status: Validation
     record: BindingRecord | None = None
     detail: str = ""
+    rrsig_inception: float | None = None
 
 
 class _ChainError(Exception):
@@ -149,7 +159,15 @@ def validate_binding(host: str, *, resolver: Resolver) -> ValidationResult:
     if record is None:
         return ValidationResult(Validation.BOGUS, detail="binding TXT failed grammar")
 
-    return ValidationResult(Validation.SECURE, record=record)
+    # Surface the freshness reference for the ladder's RRSIG-age clamp (I4): the
+    # NEWEST inception among the covering RRSIGs (the most-recent re-sign). These
+    # signatures have already validated above, so the inception is trustworthy
+    # and is on the same clock as `now` (`_validation_now`).
+    rrsig_inception = max(int(sig.inception) for sig in txt_rrsig)
+
+    return ValidationResult(
+        Validation.SECURE, record=record, rrsig_inception=rrsig_inception
+    )
 
 
 # --------------------------------------------------------------------------- #

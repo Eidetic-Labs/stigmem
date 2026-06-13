@@ -24,15 +24,19 @@ own key. The wire ``entity_uri`` is self-certifying — a forged one only select
 zone the forger controls — and the downstream ``origin_sig`` check (not this
 module) closes the loop.
 
-RRSIG-age seam (see the implementer note in the batch report): the frozen 3a
-``resolve_dnssec_binding`` does not surface an RRSIG age (the validator is strict:
-an out-of-window RRSIG is BOGUS, so a SECURE binding is by construction inside
-the validity window). The ladder therefore accepts the RRSIG age as the optional
-``rrsig_age_seconds`` parameter, supplied by the call site that parses the live
-DNS message (the 3c relay/recheck layer). When it is ``None`` (the 3b default,
-before that extraction is wired), a SECURE binding is treated as fresh — which
-matches the validator's strict-window guarantee. The age-clamp branches (I4) fire
-only when a caller supplies an age.
+RRSIG-age seam (Rev 6 I4): the binding RRSIG inception is threaded out of the
+validator (``ValidationResult.rrsig_inception`` -> ``DnssecResult.rrsig_inception``)
+and the ladder derives the signature age internally from it and ``now``
+(``age = now - inception``). The age clamp (I4) therefore fires on every ACTIVE
+binding by default — an aged-but-valid signature routes to operator-confirm, and a
+previously-fresh-now-aged signature is rejected.
+
+``rrsig_age_seconds`` remains an OPTIONAL OVERRIDE for the 3c relay/recheck layer
+(a caller that extracts the age from a live re-resolved DNS message itself). When
+it is ``None`` (the default) the age is derived from ``result.rrsig_inception``.
+An ACTIVE outcome whose ``rrsig_inception`` is ``None`` is a contract breach (the
+validator must surface it on every SECURE path): the age cannot be derived, so the
+binding fails closed (REJECTED) rather than being treated as fresh.
 
 dnspython stays out of this module's import graph (Rev 6 I11): the only DNSSEC
 work is delegated to ``resolve_dnssec_binding``, which imports dnspython lazily.
@@ -42,7 +46,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from . import epoch as ep
@@ -247,32 +251,44 @@ def resolve_first_trust(
     if not ep.accept_epoch(conn, host, record.epoch):
         return _rejected("dnssec epoch rollback")
 
-    # RRSIG-age clamp (I4). See the module docstring: when no age is supplied the
-    # SECURE binding is treated as fresh (the validator already enforced the
-    # validity window). When an age is supplied, classify it.
-    if rrsig_age_seconds is not None:
-        age_class = fr.classify_rrsig_age(
-            rrsig_age_seconds=rrsig_age_seconds,
-            max_age=settings.federation_dnssec_max_rrsig_age,
-            previously_fresh=fr.was_previously_fresh(conn, host),
+    # RRSIG-age clamp (I4). The age is derived from the validated binding RRSIG
+    # inception threaded out of the resolver, measured against `now` (the same
+    # wall-clock reference the validator checks RRSIG validity against). A 3c
+    # caller may override the derived value via `rrsig_age_seconds`.
+    age = rrsig_age_seconds
+    if age is None:
+        if result.rrsig_inception is None:
+            # Contract breach: an ACTIVE binding MUST carry an RRSIG inception
+            # (the validator surfaces it on every SECURE path). With no inception
+            # the age cannot be derived -> fail closed; never treat as fresh (I4).
+            return _rejected("dnssec active without rrsig inception")
+        # `now` is the ladder's wall-clock reference; treat a naive datetime as
+        # UTC to match how the epoch/freshness batches handle `now`.
+        now_ref = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        age = now_ref.timestamp() - result.rrsig_inception
+
+    age_class = fr.classify_rrsig_age(
+        rrsig_age_seconds=age,
+        max_age=settings.federation_dnssec_max_rrsig_age,
+        previously_fresh=fr.was_previously_fresh(conn, host),
+    )
+    if age_class is fr.AgeClass.REJECT:
+        # Previously-fresh host now serving only aged signatures -> attack (I4).
+        return _rejected("aged rrsig on previously-fresh host")
+    if age_class is fr.AgeClass.FALLTHROUGH_CONFIRM:
+        # Aged RRSIG on a never-fresh host -> slow-resigning zone behind a
+        # human gate (operator-confirm), not a hard reject (I4).
+        return _quarantine_or_fail_closed(
+            conn,
+            entity_uri=entity_uri,
+            node_id=node_id,
+            candidate_key_fpr=candidate_key_fpr,
+            source=source,
+            relay_peer=relay_peer,
+            now=now,
+            settings=settings,
+            confirm_source="stale-dnssec",
         )
-        if age_class is fr.AgeClass.REJECT:
-            # Previously-fresh host now serving only aged signatures -> attack (I4).
-            return _rejected("aged rrsig on previously-fresh host")
-        if age_class is fr.AgeClass.FALLTHROUGH_CONFIRM:
-            # Aged RRSIG on a never-fresh host -> slow-resigning zone behind a
-            # human gate (operator-confirm), not a hard reject (I4).
-            return _quarantine_or_fail_closed(
-                conn,
-                entity_uri=entity_uri,
-                node_id=node_id,
-                candidate_key_fpr=candidate_key_fpr,
-                source=source,
-                relay_peer=relay_peer,
-                now=now,
-                settings=settings,
-                confirm_source="stale-dnssec",
-            )
 
     # SECURE + binds-candidate + epoch-OK + fresh -> TRUSTED. Stamp the host's
     # sticky-signed + fresh markers and pin the identity (I1).

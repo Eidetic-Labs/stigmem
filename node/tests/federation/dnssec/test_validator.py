@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from stigmem_node.federation.dnssec.validator import Validation, validate_binding
 
-from .conftest import HOST
+from .conftest import HOST, INCEPTION
 
 
 def test_valid_chain_returns_secure(valid_chain):
@@ -21,6 +21,23 @@ def test_valid_chain_returns_secure(valid_chain):
     assert res.record.fpr == "abc123def"
     assert res.record.epoch == 7
     assert res.record.revoked is False
+
+
+def test_secure_surfaces_binding_rrsig_inception(valid_chain):
+    # I4: the validator surfaces the binding RRSIG inception (newest covering
+    # signature) so the ladder's age clamp can fire. It is the fixture window
+    # inception (epoch seconds).
+    res = validate_binding(HOST.rstrip("."), resolver=valid_chain)
+    assert res.status is Validation.SECURE, res.detail
+    assert res.rrsig_inception == int(INCEPTION.timestamp())
+
+
+def test_non_secure_has_no_rrsig_inception(forged_rrsig_chain):
+    # A non-SECURE path never surfaces an inception (it would be meaningless and
+    # must not read as "fresh" downstream).
+    res = validate_binding(HOST.rstrip("."), resolver=forged_rrsig_chain)
+    assert res.status is Validation.BOGUS, res.detail
+    assert res.rrsig_inception is None
 
 
 def test_ad_bit_is_ignored(valid_chain):

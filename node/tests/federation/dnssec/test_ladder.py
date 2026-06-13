@@ -24,9 +24,12 @@ import pytest
 from stigmem_node.db import apply_migrations
 from stigmem_node.federation.dnssec import epoch as ep
 from stigmem_node.federation.dnssec import freshness as fr
+from stigmem_node.federation.dnssec import ladder as ladder_mod
 from stigmem_node.federation.dnssec import pin as p
 from stigmem_node.federation.dnssec import quarantine as q
 from stigmem_node.federation.dnssec.ladder import TrustDecision, resolve_first_trust
+from stigmem_node.federation.dnssec.record import BindingRecord
+from stigmem_node.federation.dnssec.resolve import DnssecResult
 from stigmem_node.settings import Settings
 
 from .conftest import HOST
@@ -37,7 +40,9 @@ ENTITY_URI = "https://" + HOSTNAME + "/"
 RECORD_FPR = "abc123def"  # the fixture's active binding fingerprint
 RECORD_EPOCH = 7
 NODE_ID = "node-A"
-_NOW = datetime(2026, 6, 12, tzinfo=UTC)
+# Within the fixture's max-RRSIG-age window of the binding inception (2026-06-01)
+# so the real age clamp reads the default ``valid_chain`` binding as fresh.
+_NOW = datetime(2026, 6, 5, tzinfo=UTC)
 
 
 @pytest.fixture()
@@ -135,11 +140,14 @@ def test_epoch_rollback_is_rejected(conn, settings, valid_chain):
     assert p.get_pin(conn, ENTITY_URI, NODE_ID) is None
 
 
-def test_aged_rrsig_never_fresh_falls_through_to_confirm(conn, settings, valid_chain):
-    """A SECURE binding with an aged RRSIG on a never-fresh host -> PENDING_CONFIRM
-    (a slow-resigning zone stays usable behind a human gate, I4)."""
-    aged = settings.federation_dnssec_max_rrsig_age + 1
-    d = _call(conn, settings, valid_chain, rrsig_age_seconds=aged)
+def test_aged_rrsig_never_fresh_falls_through_to_confirm(conn, settings, binding_chain_factory):
+    """A SECURE binding whose binding RRSIG inception is older than the age ceiling,
+    on a never-fresh host -> PENDING_CONFIRM (a slow-resigning zone stays usable
+    behind a human gate, I4). The age is derived from the real RRSIG inception via
+    the resolver, NOT injected."""
+    aged_inception = _NOW - timedelta(seconds=settings.federation_dnssec_max_rrsig_age + 86400)
+    resolver = binding_chain_factory(inception=aged_inception)
+    d = _call(conn, settings, resolver)
     assert d.outcome is TrustDecision.Outcome.PENDING_CONFIRM, d
     # The candidate was quarantined for operator-confirm.
     assert q.get_pending(conn, ENTITY_URI, NODE_ID) is not None
@@ -147,12 +155,25 @@ def test_aged_rrsig_never_fresh_falls_through_to_confirm(conn, settings, valid_c
     assert p.get_pin(conn, ENTITY_URI, NODE_ID) is None
 
 
-def test_aged_rrsig_previously_fresh_is_rejected(conn, settings, valid_chain):
-    """A previously-fresh sticky host suddenly serving only aged signatures is an
-    attack signal -> hard reject (I4)."""
+def test_fresh_rrsig_inception_is_trusted(conn, settings, binding_chain_factory):
+    """A SECURE binding whose binding RRSIG inception is recent (within the age
+    ceiling) is fresh -> TRUSTED, with the age derived end-to-end via the
+    resolver (not injected)."""
+    recent_inception = _NOW - timedelta(seconds=settings.federation_dnssec_max_rrsig_age // 2)
+    resolver = binding_chain_factory(inception=recent_inception)
+    d = _call(conn, settings, resolver)
+    assert d.outcome is TrustDecision.Outcome.TRUSTED, d
+    assert p.get_pin(conn, ENTITY_URI, NODE_ID) is not None
+
+
+def test_aged_rrsig_previously_fresh_is_rejected(conn, settings, binding_chain_factory):
+    """A previously-fresh sticky host suddenly serving only an aged binding RRSIG
+    is an attack signal -> hard reject (I4). Age is derived from the real RRSIG
+    inception via the resolver."""
     fr.mark_fresh(conn, HOSTNAME, now=(_NOW - timedelta(days=1)).isoformat())
-    aged = settings.federation_dnssec_max_rrsig_age + 1
-    d = _call(conn, settings, valid_chain, rrsig_age_seconds=aged)
+    aged_inception = _NOW - timedelta(seconds=settings.federation_dnssec_max_rrsig_age + 86400)
+    resolver = binding_chain_factory(inception=aged_inception)
+    d = _call(conn, settings, resolver)
     assert d.outcome is TrustDecision.Outcome.REJECTED, d
     assert q.get_pending(conn, ENTITY_URI, NODE_ID) is None
 
@@ -255,3 +276,22 @@ def test_self_origin_matching_dnssec_record_still_goes_through_ladder(conn, sett
     assert d.outcome is TrustDecision.Outcome.TRUSTED, d
     # Trust came from a DNSSEC pin, not a self shortcut.
     assert p.get_pin(conn, ENTITY_URI, NODE_ID) is not None
+
+
+# --- I4 contract guard: ACTIVE must carry an RRSIG inception -----------------
+
+
+def test_active_without_rrsig_inception_is_rejected(conn, settings, valid_chain, monkeypatch):
+    """Contract breach: an ACTIVE outcome with no ``rrsig_inception`` cannot have
+    its age derived, so it MUST fail closed (REJECTED) — never be treated as
+    fresh (I4). Stub the resolver to return an inception-less ACTIVE."""
+    record = BindingRecord(fpr=RECORD_FPR, epoch=RECORD_EPOCH)
+    stub = DnssecResult(
+        DnssecResult.Outcome.ACTIVE, record=record, host=HOSTNAME, rrsig_inception=None
+    )
+    monkeypatch.setattr(ladder_mod, "resolve_dnssec_binding", lambda *a, **k: stub)
+    d = _call(conn, settings, valid_chain)
+    assert d.outcome is TrustDecision.Outcome.REJECTED, d
+    # Nothing pinned and nothing parked — a hard fail-closed.
+    assert p.get_pin(conn, ENTITY_URI, NODE_ID) is None
+    assert q.get_pending(conn, ENTITY_URI, NODE_ID) is None

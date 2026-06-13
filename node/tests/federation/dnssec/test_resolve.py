@@ -23,7 +23,7 @@ from __future__ import annotations
 from stigmem_node.federation.dnssec import DnssecResult, resolve_dnssec_binding
 from stigmem_node.federation.dnssec.record import BindingRecord
 
-from .conftest import HOST
+from .conftest import HOST, INCEPTION
 
 # A DNSSEC-capable entity_uri whose host canonicalizes to the fixture HOST.
 ENTITY_URI = "https://" + HOST.rstrip(".") + "/"
@@ -38,12 +38,27 @@ def test_active_chain_resolves_to_active(valid_chain):
     assert res.record.revoked is False
 
 
+def test_active_carries_rrsig_inception(valid_chain):
+    # I4: the SECURE binding's RRSIG inception is threaded onto the ACTIVE result
+    # so the ladder can derive the signature age.
+    res = resolve_dnssec_binding(ENTITY_URI, resolver=valid_chain)
+    assert res.outcome is DnssecResult.Outcome.ACTIVE, res
+    assert res.rrsig_inception == int(INCEPTION.timestamp())
+
+
 def test_revoked_chain_resolves_to_revoked(revoked_chain):
     res = resolve_dnssec_binding(ENTITY_URI, resolver=revoked_chain)
     assert res.outcome is DnssecResult.Outcome.REVOKED, res
     assert isinstance(res.record, BindingRecord)
     assert res.record.revoked is True
     assert res.record.fpr == ""
+
+
+def test_non_secure_outcome_has_no_rrsig_inception(forged_rrsig_chain):
+    # A non-SECURE outcome carries no inception (nothing trustworthy to age).
+    res = resolve_dnssec_binding(ENTITY_URI, resolver=forged_rrsig_chain)
+    assert res.outcome is DnssecResult.Outcome.BOGUS, res
+    assert res.rrsig_inception is None
 
 
 def test_insecure_delegation_resolves_to_insecure(unsigned_delegation):
