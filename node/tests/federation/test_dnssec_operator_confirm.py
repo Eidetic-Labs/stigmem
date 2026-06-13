@@ -198,6 +198,68 @@ class TestConfirm:
 
             assert get_pin(conn, uri, nid) is None
 
+    def test_wrong_fpr_writes_audit_event(self, fed_node: FedNode) -> None:
+        # A wrong-fingerprint confirm is a MITM/attack signal: it must be audited
+        # (federation_audit row with dnssec_first_trust_confirm_rejected), even
+        # though it 422s and leaves the row parked.
+        admin_key = _admin_key()
+        uri = _entity_uri()
+        nid = _node_id()
+        _stage(entity_uri=uri, node_id=nid, candidate_key_fpr="sha256:thereal")
+
+        r = fed_node.client.post(
+            "/v1/federation/dnssec/pending/confirm",
+            json={"entity_uri": uri, "node_id": nid, "key_fpr": "sha256:attacker"},
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert r.status_code == 422, r.text
+        with _db_ctx() as conn:
+            rows = conn.execute(
+                "SELECT detail FROM federation_audit "
+                "WHERE peer_id=? AND event_type='dnssec_first_trust_confirm_rejected'",
+                (uri,),
+            ).fetchall()
+        assert len(rows) == 1, rows
+        assert "fpr_mismatch" in (rows[0][0] or "")
+
+    def test_successful_confirm_and_reject_still_audit(self, fed_node: FedNode) -> None:
+        # The pre-existing success/reject audit events still fire (no regression).
+        admin_key = _admin_key()
+        uri_ok = _entity_uri()
+        nid_ok = _node_id()
+        fpr = "sha256:auditok"
+        _stage(entity_uri=uri_ok, node_id=nid_ok, candidate_key_fpr=fpr)
+        r = fed_node.client.post(
+            "/v1/federation/dnssec/pending/confirm",
+            json={"entity_uri": uri_ok, "node_id": nid_ok, "key_fpr": fpr},
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert r.status_code in (200, 201), r.text
+
+        uri_rej = _entity_uri()
+        nid_rej = _node_id()
+        _stage(entity_uri=uri_rej, node_id=nid_rej, candidate_key_fpr="sha256:rej")
+        r = fed_node.client.post(
+            "/v1/federation/dnssec/pending/reject",
+            json={"entity_uri": uri_rej, "node_id": nid_rej},
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert r.status_code in (200, 204), r.text
+
+        with _db_ctx() as conn:
+            confirmed = conn.execute(
+                "SELECT COUNT(*) FROM federation_audit "
+                "WHERE peer_id=? AND event_type='dnssec_first_trust_confirmed'",
+                (uri_ok,),
+            ).fetchone()[0]
+            rejected = conn.execute(
+                "SELECT COUNT(*) FROM federation_audit "
+                "WHERE peer_id=? AND event_type='dnssec_first_trust_rejected'",
+                (uri_rej,),
+            ).fetchone()[0]
+        assert confirmed == 1
+        assert rejected == 1
+
     def test_confirm_absent_row_returns_404(self, fed_node: FedNode) -> None:
         admin_key = _admin_key()
         r = fed_node.client.post(

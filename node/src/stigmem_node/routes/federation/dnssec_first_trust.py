@@ -111,6 +111,19 @@ def confirm_dnssec_pending(
         # stored candidate fingerprint byte-for-byte. A mismatch never trusts and
         # never clears the row — the candidate stays parked for a correct paste.
         if req.key_fpr != row["candidate_key_fpr"]:
+            # A wrong-fingerprint confirm is a MITM/attack signal (the operator
+            # was shown a fingerprint that does not match the quarantined
+            # candidate). Audit it before failing closed; the row stays parked.
+            _public_module().write_audit_log(
+                req.entity_uri,
+                "dnssec_first_trust_confirm_rejected",
+                {
+                    "entity_uri": req.entity_uri,
+                    "node_id": req.node_id,
+                    "reason": "fpr_mismatch",
+                    "rejected_by": identity.entity_uri,
+                },
+            )
             raise HTTPException(
                 status_code=422,
                 detail="key_fpr does not match the quarantined candidate fingerprint",
