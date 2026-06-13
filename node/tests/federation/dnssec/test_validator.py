@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from stigmem_node.federation.dnssec.validator import Validation, validate_binding
 
-from .conftest import HOST, INCEPTION
+from .conftest import HOST, INCEPTION, TWO_RRSIG_STALE_INCEPTION
 
 
 def test_valid_chain_returns_secure(valid_chain):
@@ -62,6 +62,19 @@ def test_ad_bit_ignored_even_with_present_forged_signature(forged_rrsig_chain):
     forged_rrsig_chain.force_ad_bit()
     res = validate_binding(HOST.rstrip("."), resolver=forged_rrsig_chain)
     assert res.status is Validation.BOGUS, res.detail
+
+
+def test_two_covering_rrsigs_inception_from_validating_only(two_covering_rrsigs_chain):
+    # F1 (CRITICAL): a binding TXT served with TWO covering RRSIGs — the real
+    # stale-but-valid ZSK signature plus an injected near-now RRSIG signed by a
+    # rogue key that does NOT validate. The combined chain check still passes on
+    # the real signature, so the verdict is SECURE; but the surfaced
+    # `rrsig_inception` MUST be derived from ONLY the individually-validating
+    # signature (the stale real one), NOT max() over the served set (which would
+    # pick the attacker's fresh-looking value and defeat the I4 age clamp).
+    res = validate_binding(HOST.rstrip("."), resolver=two_covering_rrsigs_chain)
+    assert res.status is Validation.SECURE, res.detail
+    assert res.rrsig_inception == int(TWO_RRSIG_STALE_INCEPTION.timestamp())
 
 
 def test_stale_rrsig_is_bogus(stale_rrsig_chain):

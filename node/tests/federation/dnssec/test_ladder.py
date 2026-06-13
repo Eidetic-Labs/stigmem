@@ -33,6 +33,7 @@ from stigmem_node.federation.dnssec.resolve import DnssecResult
 from stigmem_node.settings import Settings
 
 from .conftest import HOST
+from .conftest import NOW as _CONFTEST_NOW
 
 # A DNSSEC-capable entity_uri whose host canonicalizes to the fixture HOST.
 HOSTNAME = HOST.rstrip(".")  # memory.acme.example
@@ -175,6 +176,28 @@ def test_aged_rrsig_previously_fresh_is_rejected(conn, settings, binding_chain_f
     resolver = binding_chain_factory(inception=aged_inception)
     d = _call(conn, settings, resolver)
     assert d.outcome is TrustDecision.Outcome.REJECTED, d
+    assert q.get_pending(conn, ENTITY_URI, NODE_ID) is None
+
+
+def test_two_covering_rrsigs_aged_real_sig_previously_fresh_is_rejected(
+    conn, settings, two_covering_rrsigs_chain
+):
+    """F1 (CRITICAL) end-to-end: a binding TXT served with the real stale-but-valid
+    RRSIG plus an injected near-now RRSIG signed by a rogue key. The validator must
+    derive the freshness inception from ONLY the real (stale) signature, so on a
+    previously-fresh host the age clamp fires -> REJECTED (aged-on-previously-fresh,
+    I4). If the attacker's near-now inception leaked through, the binding would read
+    as fresh and be TRUSTED — the bug this guards against."""
+    # The validator's clock is pinned to the conftest NOW; resolve the ladder at
+    # the same instant so the derived age (now - real-stale-inception ~ 40 days,
+    # well past the 7-day ceiling) is self-consistent with the validation window.
+    now = datetime.fromtimestamp(_CONFTEST_NOW, tz=UTC)
+    fr.mark_fresh(conn, HOSTNAME, now=(now - timedelta(days=1)).isoformat())
+    d = _call(conn, settings, two_covering_rrsigs_chain, now=now)
+    assert d.outcome is TrustDecision.Outcome.REJECTED, d
+    assert "aged" in d.reason.lower() or "fresh" in d.reason.lower()
+    # Hard fail-closed: nothing pinned, nothing parked.
+    assert p.get_pin(conn, ENTITY_URI, NODE_ID) is None
     assert q.get_pending(conn, ENTITY_URI, NODE_ID) is None
 
 
