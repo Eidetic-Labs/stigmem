@@ -75,13 +75,12 @@ def list_quarantined_facts(
     )
     quarantine_garden_expr = "COALESCE(fqs.quarantine_garden_id, f.quarantine_garden_id)"
     quarantine_status_expr = "COALESCE(fqs.quarantine_status, f.quarantine_status)"
-    filters: list[str] = [f"{quarantine_garden_expr} IS NOT NULL"]
-    params: list[Any] = []
-
     # Tenant scope: applies to ALL callers (admins included). A per-NODE admin
     # is NOT cross-tenant — quarantine moderation is per-TENANT (R-2 / F-SBOLA5).
-    filters.append("f.tenant_id = ?")
-    params.append(identity.tenant_id)
+    # Kept as a LITERAL leading predicate in the WHERE f-string below (NOT appended
+    # to `filters`) so the static fact-query tenant-scope guard can verify it.
+    params: list[Any] = [identity.tenant_id]
+    filters: list[str] = [f"{quarantine_garden_expr} IS NOT NULL"]
 
     if quarantine_status:
         filters.append(f"{quarantine_status_expr} = ?")
@@ -110,7 +109,8 @@ def list_quarantined_facts(
 
     with db() as conn:
         count_row = conn.execute(
-            f"SELECT COUNT(*) FROM facts f {projection_joins} WHERE {where_clause}",  # nosec B608
+            f"SELECT COUNT(*) FROM facts f {projection_joins}"
+            f" WHERE f.tenant_id = ? AND {where_clause}",  # nosec B608
             params,
         ).fetchone()
         total: int = count_row[0] if count_row else 0
@@ -126,7 +126,7 @@ def list_quarantined_facts(
                          AS quarantine_acted_at,
                        f.source_trust, f.received_from, f.timestamp
                 FROM facts f {projection_joins}
-                WHERE {where_clause}
+                WHERE f.tenant_id = ? AND {where_clause}
                 ORDER BY f.timestamp DESC
                 LIMIT ? OFFSET ?""",  # nosec B608
             [*params, limit, offset],
