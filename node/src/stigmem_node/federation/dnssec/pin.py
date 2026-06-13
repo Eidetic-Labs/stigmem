@@ -29,7 +29,7 @@ No DNSSEC / ``dnspython`` import is reachable from this module (Rev 6 I11).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 _COLUMNS = (
@@ -135,9 +135,16 @@ def pin_matches(pin: Pin, candidate_fpr: str, *, now: datetime) -> bool:
     if pin.prev_fpr and candidate_fpr == pin.prev_fpr and pin.prev_until:
         try:
             deadline = datetime.fromisoformat(pin.prev_until)
-        except ValueError:
-            # An unparseable deadline is fail-closed: no live grace window.
+        except (ValueError, TypeError):
+            # An unparseable/odd deadline is fail-closed: no live grace window.
+            # ``prev_until`` is record input the grammar does not constrain, so
+            # the comparison below must never raise out of the ladder.
             return False
+        # A legitimate NAIVE deadline (no tzinfo) is normalized to UTC so a
+        # bare ISO timestamp still honors rotation grace rather than raising a
+        # TypeError against the tz-aware `now`.
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
         return now <= deadline
 
     return False

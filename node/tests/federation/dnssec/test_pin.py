@@ -156,3 +156,54 @@ def test_pin_no_prev_fpr_only_current_matches(conn: sqlite3.Connection) -> None:
     pin = p.get_pin(conn, "u", "n")
     assert p.pin_matches(pin, "cur", now=_NOW) is True
     assert p.pin_matches(pin, "", now=_NOW) is False
+
+
+# --- F2: prev_until format is unconstrained DNSSEC-record input --------------
+# It comes from the served binding record verbatim; pin_matches must never raise
+# (a raise would escape the "total" ladder), and a legitimate NAIVE timestamp
+# must still honor the grace window rather than silently failing.
+
+
+def test_pin_matches_naive_prev_until_within_window(conn: sqlite3.Connection) -> None:
+    # A NAIVE (no-tzinfo) prev_until inside the window. Comparing a naive deadline
+    # to the tz-aware `now` would raise TypeError; normalizing the naive deadline
+    # to UTC must let the prior key match within grace (I6 honored).
+    naive_until = (_NOW + timedelta(hours=2)).replace(tzinfo=None).isoformat()
+    p.upsert_pin(
+        conn, entity_uri="u", node_id="n", key_fpr="cur", epoch=2, host="h",
+        prev_fpr="old", prev_until=naive_until, now=_NOW,
+    )
+    pin = p.get_pin(conn, "u", "n")
+    assert p.pin_matches(pin, "old", now=_NOW) is True
+
+
+def test_pin_matches_naive_prev_until_after_window(conn: sqlite3.Connection) -> None:
+    # A NAIVE prev_until that has already passed -> prior key not honored (still
+    # a clean comparison, no raise).
+    naive_until = (_NOW - timedelta(hours=2)).replace(tzinfo=None).isoformat()
+    p.upsert_pin(
+        conn, entity_uri="u", node_id="n", key_fpr="cur", epoch=2, host="h",
+        prev_fpr="old", prev_until=naive_until, now=_NOW,
+    )
+    pin = p.get_pin(conn, "u", "n")
+    assert p.pin_matches(pin, "old", now=_NOW) is False
+
+
+def test_pin_matches_garbage_prev_until_fails_closed(conn: sqlite3.Connection) -> None:
+    # An unparseable / garbage prev_until must fail closed (False), never raise.
+    p.upsert_pin(
+        conn, entity_uri="u", node_id="n", key_fpr="cur", epoch=2, host="h",
+        prev_fpr="old", prev_until="not-a-timestamp", now=_NOW,
+    )
+    pin = p.get_pin(conn, "u", "n")
+    assert p.pin_matches(pin, "old", now=_NOW) is False
+
+
+def test_pin_matches_aware_prev_until_unchanged(conn: sqlite3.Connection) -> None:
+    # The existing aware-timestamp behavior is unchanged.
+    p.upsert_pin(
+        conn, entity_uri="u", node_id="n", key_fpr="cur", epoch=2, host="h",
+        prev_fpr="old", prev_until=_GRACE_UNTIL, now=_NOW,
+    )
+    pin = p.get_pin(conn, "u", "n")
+    assert p.pin_matches(pin, "old", now=_NOW) is True
