@@ -484,6 +484,189 @@ def unsigned_delegation(patch_anchor) -> FixtureResolver:
 
 
 @pytest.fixture
+def unbound_dnskey_chain(patch_anchor) -> FixtureResolver:
+    """3AV-1 chain-of-trust attack: DNSKEY RRset self-signed by a NON-DS key.
+
+    The attacker knows the leaf zone's *public* KSK (the one the parent DS pins).
+    They serve a leaf DNSKEY RRset = {real KSK (matches DS), attacker KSK,
+    attacker ZSK}, but self-sign the RRset with the ATTACKER KSK (not the
+    DS-pinned real KSK) and sign the binding TXT with the attacker ZSK.
+
+    A validator that only checks "some DS-matching key is present" AND "the RRset
+    is self-signed by some key in it" — two decoupled checks — returns SECURE
+    with the attacker's fingerprint. RFC 4035 §5.2 requires the DNSKEY RRset's
+    RRSIG be validated using ONLY the DS-authenticated key as the keyset, which
+    makes this attack -> BOGUS.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+
+    # Root + TLD load normally (legit). The leaf is where the attack lives.
+    for zone in (h.root, h.tld):
+        dnskey_rr = zone.dnskey_rrset
+        sig_rr = dns.rrset.from_rdata(zone.origin, 3600, zone.sign_with_ksk(dnskey_rr))
+        resolver.add(zone.origin.to_text(), "DNSKEY",
+                     _answer_message(zone.origin.to_text(), "DNSKEY", [dnskey_rr, sig_rr]))
+    ds_rr = h.root.ds_rrset(h.tld)
+    sig_rr = dns.rrset.from_rdata(h.tld.origin, 3600, h.root.sign_with_zsk(ds_rr))
+    resolver.add(h.tld.origin.to_text(), "DS",
+                 _answer_message(h.tld.origin.to_text(), "DS", [ds_rr, sig_rr]))
+
+    # The TLD publishes a DS for the leaf's REAL KSK (h.leaf.ksk). That is the
+    # only key the chain authenticates for the leaf.
+    leaf_ds_rr = h.tld.ds_rrset(h.leaf)
+    leaf_ds_sig = dns.rrset.from_rdata(h.leaf.origin, 3600, h.tld.sign_with_zsk(leaf_ds_rr))
+    resolver.add(h.leaf.origin.to_text(), "DS",
+                 _answer_message(h.leaf.origin.to_text(), "DS", [leaf_ds_rr, leaf_ds_sig]))
+
+    # Attacker keys (NOT pinned by the DS).
+    atk_ksk_priv, atk_ksk = _make_keypair(257)
+    atk_zsk_priv, atk_zsk = _make_keypair(256)
+
+    # Served leaf DNSKEY RRset: real KSK + attacker KSK + attacker ZSK. The
+    # RRset is self-signed by the ATTACKER KSK only (the real KSK never signs).
+    dnskey_rr = dns.rrset.from_rdata(h.leaf.origin, 3600, h.leaf.ksk, atk_ksk, atk_zsk)
+    dnskey_sig = dns.dnssec.sign(
+        dnskey_rr, atk_ksk_priv, h.leaf.origin, atk_ksk,
+        inception=INCEPTION, expiration=EXPIRATION,
+    )
+    dnskey_sig_rr = dns.rrset.from_rdata(h.leaf.origin, 3600, dnskey_sig)
+    resolver.add(h.leaf.origin.to_text(), "DNSKEY",
+                 _answer_message(h.leaf.origin.to_text(), "DNSKEY",
+                                 [dnskey_rr, dnskey_sig_rr]))
+
+    # Binding TXT signed by the attacker ZSK (in the served RRset, not DS-pinned).
+    qname = dns.name.from_text(BINDING_QNAME)
+    txt_rd = dns.rdata.from_text(dns.rdataclass.IN, dns.rdatatype.TXT, f'"{DEFAULT_RECORD}"')
+    txt_rr = dns.rrset.from_rdata(qname, 300, txt_rd)
+    txt_sig = dns.dnssec.sign(
+        txt_rr, atk_zsk_priv, h.leaf.origin, atk_zsk,
+        inception=INCEPTION, expiration=EXPIRATION,
+    )
+    sig_rr = dns.rrset.from_rdata(qname, 300, txt_sig)
+    resolver.add(BINDING_QNAME, "TXT", _answer_message(BINDING_QNAME, "TXT", [txt_rr, sig_rr]))
+    return resolver
+
+
+@pytest.fixture
+def dnskey_self_signed_by_non_ds_key(patch_anchor) -> FixtureResolver:
+    """Leaf DNSKEY RRset whose ONLY self-signature is by a key NOT matching the DS.
+
+    The served RRset contains the real DS-pinned KSK (so the DS-match check
+    passes) plus an attacker KSK, but is self-signed ONLY by the attacker KSK.
+    With the keyset restricted to the DS-authenticated key, no RRSIG validates
+    against the real KSK -> BOGUS.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    for zone in (h.root, h.tld):
+        dnskey_rr = zone.dnskey_rrset
+        sig_rr = dns.rrset.from_rdata(zone.origin, 3600, zone.sign_with_ksk(dnskey_rr))
+        resolver.add(zone.origin.to_text(), "DNSKEY",
+                     _answer_message(zone.origin.to_text(), "DNSKEY", [dnskey_rr, sig_rr]))
+    for parent, child in ((h.root, h.tld), (h.tld, h.leaf)):
+        ds_rr = parent.ds_rrset(child)
+        ds_sig = dns.rrset.from_rdata(child.origin, 3600, parent.sign_with_zsk(ds_rr))
+        resolver.add(child.origin.to_text(), "DS",
+                     _answer_message(child.origin.to_text(), "DS", [ds_rr, ds_sig]))
+
+    atk_ksk_priv, atk_ksk = _make_keypair(257)
+    # RRset = real KSK (DS-matched) + real ZSK + attacker KSK, signed ONLY by
+    # the attacker KSK.
+    dnskey_rr = dns.rrset.from_rdata(h.leaf.origin, 3600, h.leaf.ksk, h.leaf.zsk, atk_ksk)
+    dnskey_sig = dns.dnssec.sign(
+        dnskey_rr, atk_ksk_priv, h.leaf.origin, atk_ksk,
+        inception=INCEPTION, expiration=EXPIRATION,
+    )
+    dnskey_sig_rr = dns.rrset.from_rdata(h.leaf.origin, 3600, dnskey_sig)
+    resolver.add(h.leaf.origin.to_text(), "DNSKEY",
+                 _answer_message(h.leaf.origin.to_text(), "DNSKEY",
+                                 [dnskey_rr, dnskey_sig_rr]))
+    _load_binding_txt(resolver, h)
+    return resolver
+
+
+@pytest.fixture
+def ds_signed_by_non_parent_key(patch_anchor) -> FixtureResolver:
+    """The leaf DS RRset is signed by a key that is NOT the parent zone's.
+
+    The DS digest itself is correct (pins the real leaf KSK), but its RRSIG is
+    made by a rogue key absent from the parent (TLD) DNSKEY RRset. The DS RRSIG
+    must validate against the parent's chain-validated DNSKEY -> BOGUS.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)  # establishes a fully-valid chain...
+
+    # ...then overwrite the leaf DS answer with one signed by a rogue key.
+    rogue_priv, rogue_key = _make_keypair(256)
+    ds_rr = h.tld.ds_rrset(h.leaf)
+    rogue_sig = dns.dnssec.sign(
+        ds_rr, rogue_priv, h.tld.origin, rogue_key,
+        inception=INCEPTION, expiration=EXPIRATION,
+    )
+    sig_rr = dns.rrset.from_rdata(h.leaf.origin, 3600, rogue_sig)
+    resolver.add(h.leaf.origin.to_text(), "DS",
+                 _answer_message(h.leaf.origin.to_text(), "DS", [ds_rr, sig_rr]))
+    _load_binding_txt(resolver, h)
+    return resolver
+
+
+@pytest.fixture
+def nsec3_absence_signed_by_wrong_key(patch_anchor) -> FixtureResolver:
+    """Binding TXT absent; the NSEC3 absence proof is signed by a non-zone key.
+
+    The NSEC3 closest-encloser proof is structurally valid but its RRSIG is made
+    by a rogue key not in the leaf DNSKEY RRset. The proof must validate against
+    the zone DNSKEY; a wrong-key signature -> UNVALIDATABLE (never absent).
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+
+    rogue = SignedZone.create(HOST)  # a zone whose keys are NOT the leaf's
+    proof = _closest_encloser_proof(rogue, BINDING_QNAME)
+    resolver.add(BINDING_QNAME, "TXT", _nodata_message(BINDING_QNAME, "TXT", proof))
+    return resolver
+
+
+@pytest.fixture
+def forged_no_ds_nsec3_wrong_key(patch_anchor) -> FixtureResolver:
+    """Leaf DS query: a forged NS-no-DS NSEC3 signed by a non-parent key.
+
+    Models an attacker trying to downgrade the leaf to an insecure delegation by
+    serving an NS-but-no-DS NSEC3 at the leaf, but signed by a rogue key (not the
+    parent TLD's). The proof must validate against the parent DNSKEY; a wrong-key
+    signature must NOT yield INSECURE (the chain must not be downgraded).
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    # Root + TLD DNSKEY/DS + leaf DNSKEY, but NO leaf DS.
+    for zone in (h.root, h.tld, h.leaf):
+        dnskey_rr = zone.dnskey_rrset
+        sig_rr = dns.rrset.from_rdata(zone.origin, 3600, zone.sign_with_ksk(dnskey_rr))
+        resolver.add(zone.origin.to_text(), "DNSKEY",
+                     _answer_message(zone.origin.to_text(), "DNSKEY", [dnskey_rr, sig_rr]))
+    ds_rr = h.root.ds_rrset(h.tld)
+    sig_rr = dns.rrset.from_rdata(h.tld.origin, 3600, h.root.sign_with_zsk(ds_rr))
+    resolver.add(h.tld.origin.to_text(), "DS",
+                 _answer_message(h.tld.origin.to_text(), "DS", [ds_rr, sig_rr]))
+
+    # The NSEC3 at the leaf is signed by a ROGUE zone, not the parent TLD.
+    rogue = SignedZone.create("example.")
+    leaf_hash = rogue.nsec3_hash(h.leaf.origin.to_text())
+    nsec3_pair = _signed_nsec3(rogue, leaf_hash, _b32hex_increment(leaf_hash), ["NS", "RRSIG"])
+    resolver.add(h.leaf.origin.to_text(), "DS",
+                 _nodata_message(h.leaf.origin.to_text(), "DS", [nsec3_pair]))
+    return resolver
+
+
+@pytest.fixture
 def wildcard_synth(patch_anchor) -> FixtureResolver:
     """The binding answer is synthesized from a ``*`` wildcard, not an exact name.
 

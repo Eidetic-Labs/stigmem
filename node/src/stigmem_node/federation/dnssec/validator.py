@@ -36,6 +36,7 @@ from .record import BindingRecord, parse_binding_record
 if TYPE_CHECKING:  # import for type-checkers only; never at runtime (I11).
     import dns.message
     import dns.name
+    import dns.rdata
     import dns.rdataset
     import dns.rdatatype
     import dns.rrset
@@ -236,10 +237,15 @@ def _validate_dnskey_against_ds(
     """Validate ``zone``'s DNSKEY RRset against ``ds_rrset``; return its rdataset.
 
     ``ds_rrset`` is the DS the parent published for ``zone`` (the IANA anchor at
-    the root). The DNSKEY RRset must be self-signed, and a SEP key in it must
-    match a DS digest.
+    the root). RFC 4035 §5.2: a SEP key in the RRset must reproduce a parent DS
+    digest, AND the DNSKEY RRset's RRSIG MUST validate using ONLY that
+    DS-authenticated key as the keyset — not the whole served RRset. Validating
+    against the whole RRset would let an attacker who knows the zone's public KSK
+    serve {real KSK, attacker KSK, ...} self-signed by the attacker key and have
+    it accepted (the two checks must bind to the SAME key, not merely co-occur).
     """
     import dns.dnssec
+    import dns.rdataset
     import dns.rdatatype
 
     try:
@@ -252,27 +258,47 @@ def _validate_dnskey_against_ds(
     if dnskey_rrset is None or dnskey_rrsig is None:
         raise _ChainError(f"{zone} missing DNSKEY/RRSIG")
 
-    if not _ds_matches_dnskey(zone, ds_rrset, dnskey_rrset):
+    ds_matched_keys = _ds_matched_keys(zone, ds_rrset, dnskey_rrset)
+    if not ds_matched_keys:
         raise _ChainError(f"{zone} DNSKEY does not match parent DS")
 
-    dnskey_rds = dnskey_rrset.to_rdataset()
+    # Build the validation keyset from ONLY the DS-authenticated key(s). The
+    # DNSKEY RRset's self-signature is then verified against the keys the parent
+    # actually pinned, so a non-DS key signing the RRset raises ValidationFailure
+    # -> BOGUS (RFC 4035 §5.2). NOT a key_tag filter: key tags collide and are
+    # attacker-spoofable; the keyset itself is restricted.
+    trusted_keyset = dns.rdataset.Rdataset(dnskey_rrset.rdclass, dns.rdatatype.DNSKEY)
+    trusted_keyset.ttl = dnskey_rrset.ttl
+    for key in ds_matched_keys:
+        trusted_keyset.add(key)
+
     try:
-        dns.dnssec.validate(dnskey_rrset, dnskey_rrsig, {zone: dnskey_rds}, now=now)
+        dns.dnssec.validate(dnskey_rrset, dnskey_rrsig, {zone: trusted_keyset}, now=now)
     except Exception as exc:  # noqa: BLE001
         raise _ChainError(f"{zone} DNSKEY RRSIG invalid: {exc}") from exc
 
-    return dnskey_rds
+    # The full RRset (every key in it) becomes the trusted keyset for the *next*
+    # step only after its self-signature has been authenticated by the DS-pinned
+    # key above — i.e. the parent has vouched (via DS+RRSIG chain) for the whole
+    # set, so the zone's ZSKs are now usable for the records it signs.
+    return dnskey_rrset.to_rdataset()
 
 
-def _ds_matches_dnskey(
+def _ds_matched_keys(
     zone: dns.name.Name, ds_rrset: dns.rdataset.Rdataset, dnskey_rrset: dns.rrset.RRset
-) -> bool:
-    """True iff some SEP key in ``dnskey_rrset`` produces a DS in ``ds_rrset``."""
+) -> list[dns.rdata.Rdata]:
+    """Return the SEP key(s) in ``dnskey_rrset`` that reproduce a DS in ``ds_rrset``.
+
+    Empty list when no key matches. The returned keys are the only ones the
+    parent has authenticated; the DNSKEY RRset's RRSIG must validate against
+    exactly these (RFC 4035 §5.2).
+    """
     import dns.dnssec
 
     ds_records = list(ds_rrset)
     if not ds_records:
-        return False
+        return []
+    matched: list[dns.rdata.Rdata] = []
     for key in dnskey_rrset:
         # Only SEP/KSK keys (flags bit 0 set) are eligible as a DS target.
         if not (key.flags & 0x0001):
@@ -283,8 +309,9 @@ def _ds_matches_dnskey(
             except Exception:  # noqa: BLE001,S112
                 continue  # nosec B112 — unknown DS digest type: skip this DS, try the next.
             if candidate == ds:
-                return True
-    return False
+                matched.append(key)
+                break
+    return matched
 
 
 def _fetch_validated_ds(
