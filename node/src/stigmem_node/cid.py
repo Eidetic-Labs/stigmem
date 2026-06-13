@@ -1,6 +1,14 @@
 """Content-addressed fact IDs — spec §25 (CID v2).
 
-CID = "sha256:" + hex_lowercase(SHA-256(RFC8785(canonical_fact_body)))
+CID = "sha256:" + hex_lowercase(SHA-256(canonical_fact_body))
+
+Canonicalization is **sorted-key compact ``json.dumps``**, NOT full RFC 8785
+(JCS). Concretely the canonical body is serialized with
+``json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)``
+and UTF-8 encoded. This gives deterministic key ordering and no insignificant
+whitespace, but does NOT apply RFC 8785's number canonicalization or Unicode
+normalization. Producers and verifiers MUST use this same serialization (see
+``compute_cid``); the documented field set below is what makes it stable.
 
 **CID v2 (breaking change, 2026-06-06).** The canonical body is a JSON object
 with exactly 8 fields in lexicographic key order:
