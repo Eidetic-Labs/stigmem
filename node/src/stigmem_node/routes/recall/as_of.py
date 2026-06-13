@@ -48,13 +48,13 @@ def _recall_as_of_impl(
                  AS projected_quarantine_status,
                COALESCE(fqs.quarantine_garden_id, f.quarantine_garden_id)
                  AS projected_quarantine_garden_id,
-               (
+               COALESCE(f.cid, (
                  SELECT fca.cid
                  FROM fact_cid_aliases fca
                  WHERE fca.fact_id = f.id
                  ORDER BY fca.cid
                  LIMIT 1
-               ) AS projected_cid
+               )) AS projected_cid
         FROM facts f
         LEFT JOIN fact_validity_overrides fvo ON fvo.fact_id = f.id
         LEFT JOIN fact_garden_membership fgm ON fgm.fact_id = f.id
