@@ -358,6 +358,22 @@ def valid_chain(patch_anchor) -> FixtureResolver:
 
 
 @pytest.fixture
+def revoked_chain(patch_anchor) -> FixtureResolver:
+    """A fully-signed, valid chain resolving a REVOKED binding TXT -> SECURE.
+
+    Mirrors ``valid_chain`` exactly (same signer hierarchy + trust anchor) but
+    the leaf TXT carries a ``status=revoked`` tombstone (empty fpr). The chain
+    validates to SECURE; the composition in 3a.7 maps SECURE+revoked -> REVOKED.
+    """
+    h = _build_hierarchy(record_text="v=stigmem1; status=revoked; epoch=9; fpr=")
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+    _load_binding_txt(resolver, h)
+    return resolver
+
+
+@pytest.fixture
 def forged_rrsig_chain(patch_anchor) -> FixtureResolver:
     """Valid chain, but the binding TXT RRSIG is signed by an attacker key."""
     h = _build_hierarchy()

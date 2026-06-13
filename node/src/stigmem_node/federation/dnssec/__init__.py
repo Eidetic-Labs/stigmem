@@ -13,3 +13,12 @@ need it, so importing ``stigmem_node`` on a default node never loads the extra.
 """
 
 from __future__ import annotations
+
+from .host import host_from_entity_uri
+from .resolve import DnssecResult, resolve_dnssec_binding
+
+__all__ = [
+    "DnssecResult",
+    "host_from_entity_uri",
+    "resolve_dnssec_binding",
+]
