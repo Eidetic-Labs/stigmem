@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -58,6 +59,8 @@ _ARGON2_HASHER = PasswordHasher(
     type=Type.ID,
 )
 _LEGACY_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+logger = logging.getLogger("stigmem.auth")
 
 
 def _hash_key(raw: str) -> str:
@@ -103,7 +106,20 @@ def _verify_key_hash(raw_key: str, stored_hash: str) -> bool:
     if _is_legacy_sha256_hash(stored_hash):
         if not _legacy_sha256_allowed():
             _raise_legacy_sha256_disabled()
-        return hmac.compare_digest(stored_hash, _legacy_sha256(raw_key))
+        matched = hmac.compare_digest(stored_hash, _legacy_sha256(raw_key))
+        if matched:
+            # F-SAUTH2: a legacy unsalted SHA-256 key hash was accepted. Emit a
+            # per-acceptance deprecation warning so operators see exactly which
+            # auth events still rely on the weaker legacy format and can force
+            # rotation before setting a cutoff (legacy_sha256_accept_until).
+            logger.warning(
+                "DEPRECATION: accepted a legacy unsalted SHA-256 API-key hash. "
+                "Unsalted SHA-256 is weaker than the Argon2id default; this key "
+                "is opportunistically rehashed on success — rotate any keys that "
+                "do not rehash, and set STIGMEM_LEGACY_SHA256_ACCEPT_UNTIL to bound "
+                "the migration window."
+            )
+        return matched
     return False
 
 

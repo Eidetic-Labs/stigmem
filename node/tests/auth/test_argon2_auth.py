@@ -105,6 +105,54 @@ def test_legacy_sha256_key_rejected_after_acceptance_deadline(
     assert "Legacy API key hashes are no longer accepted" in response.json()["detail"]
 
 
+def test_legacy_sha256_acceptance_logs_deprecation_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """F-SAUTH2: accepting a legacy hash emits a per-acceptance deprecation warning."""
+    import logging
+
+    monkeypatch.setattr(db_mod.settings, "legacy_sha256_accept_until", None)
+    raw_key = f"legacy-{uuid.uuid4().hex}"
+    stored = hashlib.sha256(raw_key.encode()).hexdigest()
+
+    with caplog.at_level(logging.WARNING, logger="stigmem.auth"):
+        assert _verify_key_hash(raw_key, stored) is True
+
+    assert "DEPRECATION" in caplog.text
+    assert "legacy unsalted SHA-256" in caplog.text
+
+
+def test_legacy_sha256_mismatch_does_not_warn(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A non-matching legacy hash must NOT emit the acceptance deprecation warning."""
+    import logging
+
+    monkeypatch.setattr(db_mod.settings, "legacy_sha256_accept_until", None)
+    stored = hashlib.sha256(b"the-real-key").hexdigest()
+
+    with caplog.at_level(logging.WARNING, logger="stigmem.auth"):
+        assert _verify_key_hash("a-different-key", stored) is False
+
+    assert "DEPRECATION" not in caplog.text
+
+
+def test_legacy_sha256_past_cutoff_rejects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F-SAUTH2: a past cutoff date rejects legacy-hash verification (raises 401)."""
+    from fastapi import HTTPException
+
+    expired = datetime.now(UTC) - timedelta(seconds=1)
+    monkeypatch.setattr(db_mod.settings, "legacy_sha256_accept_until", expired)
+    raw_key = f"legacy-{uuid.uuid4().hex}"
+    stored = hashlib.sha256(raw_key.encode()).hexdigest()
+
+    with pytest.raises(HTTPException) as exc:
+        _verify_key_hash(raw_key, stored)
+    assert exc.value.status_code == 401
+
+
 def test_invalid_key_does_not_rehash_legacy_rows(
     authed_client: tuple[TestClient, str],
 ) -> None:
