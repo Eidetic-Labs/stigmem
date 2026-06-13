@@ -713,11 +713,13 @@ class _FetchStub:
 
 
 def _neutralize_ssrf_dns(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """No-op the SSRF/DNS guard in the resolver so a non-resolvable .example host can be
-    fetched. The HTTPS-only scheme guard is exercised separately (it raises pre-DNS)."""
+    """No-op the anti-rebind DNS pin in the relay-manifest fetch so a non-resolvable
+    .example host can be fetched. The pin (``resolve_pinned_address``) would otherwise
+    DNS-resolve the .example host and fail; the HTTPS-only scheme guard is exercised
+    separately. The httpx.get stub returns the manifest against the (ignored) pinned URL."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
 
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
 
 _RELAY_ENTITY = "https://relay-origin.example"
@@ -819,7 +821,7 @@ def test_relay_resolve_cache_dedups_within_request_and_refetches_fresh(client, m
 
 def test_relay_resolve_https_only_rejects_http_nonloopback(client, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """W3.2 (e) HTTPS-ONLY: a relay-origin entity_uri with http scheme (non-loopback) is
-    rejected by the safety guard (assert_safe_url https-only)."""
+    rejected by the anti-rebind pin (resolve_pinned_address, https-only)."""
     import stigmem_node.federation.origin_identity as oi  # noqa: PLC0415
 
     # federation_insecure OFF (production) so the loopback-dev skip cannot apply.

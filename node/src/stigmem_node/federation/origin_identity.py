@@ -17,7 +17,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 import httpx
 
@@ -29,7 +29,7 @@ from ..identity.manifest import (
     verify_manifest,
 )
 from ..identity.trust_store import get_peer_manifest, store_peer_manifest
-from ..net_util import assert_safe_url, node_url_is_loopback
+from ..net_util import resolve_pinned_address
 from ..settings import settings
 from .origin_pins import fingerprint_from_pubkey, get_origin_pin
 
@@ -147,15 +147,17 @@ def _existing_entity_uri_for_node(node_id: str) -> str | None:
 
 
 def _fetch_relay_manifest(entity_uri: str) -> OrgManifest | None:
-    """Fetch + self-verify the origin's manifest from *entity_uri*, HTTPS-ONLY.
+    """Fetch + self-verify the origin's manifest from *entity_uri*, HTTPS-ONLY + pinned.
 
-    Distinct from ``trust_store._try_fetch_manifest`` (which allows http) because the
-    relay path resolves an attacker-CHOSEN entity_uri carried on the wire: it could
-    point at an internal host or a plaintext endpoint. We therefore enforce
-    ``assert_safe_url`` with ``allow_schemes={"https"}`` and ``follow_redirects=False``.
-    The loopback-dev exception mirrors the 2a approval-time fetch: the SSRF/scheme guard
-    is skipped ONLY under the conjunction ``federation_insecure AND a literal loopback
-    host`` so a loopback dev cluster can still relay-resolve.
+    This resolves an attacker-CHOSEN entity_uri carried on the wire, so it is the
+    sharpest SSRF surface: the host could point at an internal/IMDS address or a
+    plaintext endpoint, and could DNS-rebind between validation and connect. We close
+    that with the R-5 / F-SSRF1 anti-rebind pin (``resolve_pinned_address``, https-only
+    — rejecting the whole URL on any private record or non-https scheme) resolved BEFORE
+    the client is opened, connecting to the EXACT pinned IP while preserving the ``Host``
+    header + TLS SNI, ``follow_redirects=False``. This matches the now-pinned trust_store
+    sibling ``_try_fetch_manifest`` (which is also https-only after R-5's F-SSRF2 change).
+    The dev bypass is ``federation_insecure`` alone, matching the recurring-pull path.
     """
     if not (entity_uri.startswith("https://") or entity_uri.startswith("http://")):
         return None  # cannot derive a fetch URL from a non-HTTP entity_uri
@@ -163,14 +165,10 @@ def _fetch_relay_manifest(entity_uri: str) -> OrgManifest | None:
     base_url = f"{parsed.scheme}://{parsed.netloc}"
 
     try:
-        loopback_dev = settings.federation_insecure and node_url_is_loopback(base_url)
-        if not loopback_dev:
-            # HTTPS-ONLY: a wire-carried entity_uri must be https in production.
-            assert_safe_url(base_url, allow_schemes=frozenset({"https"}))
-        resp = httpx.get(
+        resp = _pinned_relay_manifest_get(
             f"{base_url}/.well-known/stigmem-manifest.json",
             timeout=10.0,
-            follow_redirects=False,
+            skip_pin=settings.federation_insecure,
         )
         if resp.status_code != 200:
             return None
@@ -180,6 +178,50 @@ def _fetch_relay_manifest(entity_uri: str) -> OrgManifest | None:
     except Exception as exc:
         logger.debug("relay manifest fetch failed for %s: %s", entity_uri, exc)
         return None
+
+
+def _pinned_relay_manifest_get(
+    url: str,
+    *,
+    timeout: float,
+    skip_pin: bool,
+) -> httpx.Response:
+    """GET *url* with the a11 anti-rebind DNS pin (R-5 / F-SSRF1), unless *skip_pin*.
+
+    Synchronous sibling of ``federation_pull._pinned_get`` /
+    ``trust_store._pinned_manifest_get``. Resolves the host ONCE via
+    ``resolve_pinned_address`` (https-only) BEFORE opening the client, connecting to the
+    EXACT pinned IP literal with ``Host`` header + TLS SNI + cert verification preserved
+    against the original hostname and ``follow_redirects=False``. A blocked/rebind/non-
+    https target fails closed (``ValueError``) with no request issued. Under *skip_pin*
+    (``federation_insecure``) the original-hostname URL is passed through unpinned.
+    """
+    if skip_pin:
+        return httpx.get(url, timeout=timeout, follow_redirects=False)
+
+    pinned_ip = resolve_pinned_address(url, allow_schemes=frozenset({"https"}))
+    parts = urlsplit(url)
+    hostname = parts.hostname or ""
+    port = parts.port
+    ip_authority = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    if port is not None:
+        netloc = f"{ip_authority}:{port}"
+        host_header = f"{hostname}:{port}"
+    else:
+        netloc = ip_authority
+        host_header = hostname
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    # extensions={"sni_hostname": ...} runs TLS SNI + cert verification against the
+    # original hostname while the socket connects to the pinned IP literal (the webhook
+    # pin shape). httpx.get forwards it to the transient Client; the type stub omits the
+    # kwarg, so the runtime-valid call needs an ignore.
+    return httpx.get(  # type: ignore[call-arg]
+        pinned_url,
+        timeout=timeout,
+        follow_redirects=False,
+        headers={"Host": host_header},
+        extensions={"sni_hostname": hostname},
+    )
 
 
 def _audit_relay(event_type: str, *, node_id: str, entity_uri: str, **detail: object) -> None:

@@ -481,7 +481,7 @@ def test_relay_unreachable_unpinned_origin_skips(relay_nodes: Any, monkeypatch: 
         return _httpx.Response(404)
 
     monkeypatch.setattr(oi.httpx, "get", _get)
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
     tomb_id = f"tomb_{uuid.uuid4()}"
     _insert_tombstone(fed_node.db_path, tombstone_id=tomb_id, entity_uri="user:relay-rev-unreach")
@@ -1260,7 +1260,7 @@ def _no_fetch(monkeypatch: Any) -> None:
         return _httpx.Response(404)
 
     monkeypatch.setattr(oi.httpx, "get", _get)
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
 
 def _fetch_serves_a(monkeypatch: Any, a: _Node) -> None:
@@ -1276,7 +1276,7 @@ def _fetch_serves_a(monkeypatch: Any, a: _Node) -> None:
         return _httpx.Response(404)
 
     monkeypatch.setattr(oi.httpx, "get", _get)
-    monkeypatch.setattr(oi, "assert_safe_url", lambda *a, **k: None)
+    monkeypatch.setattr(oi, "resolve_pinned_address", lambda url, **k: "203.0.113.7")
 
 
 def _bearer(fed_node: Any, c: _Node) -> str:

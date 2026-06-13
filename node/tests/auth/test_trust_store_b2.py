@@ -260,8 +260,12 @@ class TestTryFetchManifest:
                 return {}
 
         monkeypatch.setattr(httpx, "get", lambda *a, **kw: _Resp())
-        # Skip URL safety for the test
-        monkeypatch.setattr(ts_mod, "assert_safe_url", lambda *a, **kw: None)
+        # Resolve the host to a public IP so the anti-rebind pin (R-5 / F-SSRF1)
+        # admits it; the fetch then returns 404 → None.
+        monkeypatch.setattr(
+            "stigmem_node.utility.net_util.socket.getaddrinfo",
+            lambda *a, **k: [(2, 1, 6, "", ("8.8.8.8", 0))],
+        )
 
         assert ts_mod._try_fetch_manifest("https://example.test") is None
 
