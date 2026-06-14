@@ -4,6 +4,132 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any
+
+
+def _dnssec_pending_base_url(args: argparse.Namespace) -> str:
+    """Resolve the local node base URL for the dnssec first-trust admin API."""
+    from ..settings import settings
+
+    return (args.node_url or settings.node_url).rstrip("/")
+
+
+def _dnssec_auth_headers(args: argparse.Namespace) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if args.api_key:
+        headers["Authorization"] = f"Bearer {args.api_key}"
+    return headers
+
+
+def _cmd_federation_dnssec_pending(args: argparse.Namespace) -> int:
+    """List quarantined DNSSEC first-trust candidates (operator-confirm queue).
+
+    Calls ``GET /v1/federation/dnssec/pending`` on the local node (admin-gated).
+    """
+    import json
+
+    import httpx
+
+    base = _dnssec_pending_base_url(args)
+    try:
+        resp = httpx.get(
+            f"{base}/v1/federation/dnssec/pending",
+            headers=_dnssec_auth_headers(args),
+            timeout=15.0,
+        )
+    except Exception as exc:
+        print(f"error: cannot reach node at {base}: {exc}", file=sys.stderr)
+        return 1
+
+    if resp.status_code != 200:
+        print(f"error: node returned {resp.status_code}: {resp.text}", file=sys.stderr)
+        return 1
+
+    pending: list[dict[str, Any]] = resp.json().get("pending", [])
+    print(json.dumps({"pending": pending}, indent=2))
+    if not pending:
+        print("no pending first-trust candidates", file=sys.stderr)
+    return 0
+
+
+def _cmd_federation_dnssec_confirm(args: argparse.Namespace) -> int:
+    """Confirm a quarantined DNSSEC first-trust candidate (paste-to-confirm).
+
+    Calls ``POST /v1/federation/dnssec/pending/confirm`` on the local node. The
+    operator-supplied ``--key-fpr`` MUST byte-equal the stored candidate
+    fingerprint (NF-D4-5); a mismatch is rejected by the node (no trust) and this
+    command exits non-zero.
+    """
+    import json
+
+    import httpx
+
+    base = _dnssec_pending_base_url(args)
+    payload = {
+        "entity_uri": args.entity_uri,
+        "node_id": args.node_id,
+        "key_fpr": args.key_fpr,
+    }
+    try:
+        resp = httpx.post(
+            f"{base}/v1/federation/dnssec/pending/confirm",
+            json=payload,
+            headers=_dnssec_auth_headers(args),
+            timeout=15.0,
+        )
+    except Exception as exc:
+        print(f"error: cannot reach node at {base}: {exc}", file=sys.stderr)
+        return 1
+
+    if resp.status_code in (200, 201):
+        print(json.dumps(resp.json(), indent=2))
+        print("first-trust candidate confirmed and pinned", file=sys.stderr)
+        return 0
+    if resp.status_code == 422:
+        print(
+            "error: fingerprint did not match the quarantined candidate — not trusted",
+            file=sys.stderr,
+        )
+        return 1
+    if resp.status_code == 404:
+        print("error: no such pending first-trust candidate", file=sys.stderr)
+        return 1
+    print(f"error: node returned {resp.status_code}: {resp.text}", file=sys.stderr)
+    return 1
+
+
+def _cmd_federation_dnssec_reject(args: argparse.Namespace) -> int:
+    """Reject a quarantined DNSSEC first-trust candidate WITHOUT trusting it.
+
+    Calls ``POST /v1/federation/dnssec/pending/reject`` on the local node.
+    """
+    import json
+
+    import httpx
+
+    base = _dnssec_pending_base_url(args)
+    payload = {"entity_uri": args.entity_uri, "node_id": args.node_id}
+    try:
+        resp = httpx.post(
+            f"{base}/v1/federation/dnssec/pending/reject",
+            json=payload,
+            headers=_dnssec_auth_headers(args),
+            timeout=15.0,
+        )
+    except Exception as exc:
+        print(f"error: cannot reach node at {base}: {exc}", file=sys.stderr)
+        return 1
+
+    if resp.status_code in (200, 204):
+        if resp.status_code == 200 and resp.text:
+            print(json.dumps(resp.json(), indent=2))
+        print("first-trust candidate rejected", file=sys.stderr)
+        return 0
+    if resp.status_code == 404:
+        print("error: no such pending first-trust candidate", file=sys.stderr)
+        return 1
+    print(f"error: node returned {resp.status_code}: {resp.text}", file=sys.stderr)
+    return 1
 
 
 def _cmd_federation_register_peer(args: argparse.Namespace) -> int:

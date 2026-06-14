@@ -91,6 +91,30 @@ class Settings(BaseSettings):
     # scope/tenant propagation (Phase 2c). Default OFF = today's behaviour.
     federation_relay_enabled: bool = False
 
+    # Phase 3 (DNSSEC-rooted origin key first-trust, Rev 6 §10). All
+    # default-safe/inert: the master gate is OFF, so the first-trust ladder is
+    # unreachable on a default node (proven by reachability + lazy-import CI
+    # guards). Schema (migrations 053-055) lands empty; ENFORCEMENT (ladder,
+    # epoch pins, quarantine cap/TTL) arrives in later 3b tasks. The recency
+    # re-check floor/cap settings belong to 3c and are NOT defined here.
+    #
+    # Master gate for the DNSSEC first-trust ladder (operator-pin -> DNSSEC ->
+    # operator-confirm -> fail-closed). Default OFF; only meaningful when
+    # federation_relay_enabled is also ON.
+    federation_dnssec_trust_enabled: bool = False
+    # Per-origin-overridable ceiling on RRSIG age. An RRSIG older than this
+    # falls through to operator-confirm on a never-fresh host (and hard-rejects
+    # on a previously-fresh sticky-signed host, I4). Default 7 days (in seconds)
+    # — generous relative to a typical zone re-sign interval so a slow-resigning
+    # zone is not mistaken for an attack.
+    federation_dnssec_max_rrsig_age: int = 7 * 24 * 60 * 60
+    # Per-relay-peer cap on pending_first_trust inserts (I9 queue bound): an
+    # untrusted relay cannot flood the operator-confirm queue. Default 100.
+    federation_dnssec_pending_confirm_cap: int = 100
+    # TTL (seconds) for unconfirmed pending_first_trust quarantine rows; rows
+    # older than this are evicted (I9 queue bound). Default 7 days.
+    federation_dnssec_pending_confirm_ttl: int = 7 * 24 * 60 * 60
+
     # Decay sweeper (Phase 6, spec §decay)
     # 0 = disabled; positive = decay non-expiring facts older than N seconds
     # when sweep runs without explicit ttl_seconds

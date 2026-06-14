@@ -21,7 +21,12 @@ from .capability import (
     _cmd_capability_revoke,
     _cmd_capability_verify,
 )
-from .federation import _cmd_federation_register_peer
+from .federation import (
+    _cmd_federation_dnssec_confirm,
+    _cmd_federation_dnssec_pending,
+    _cmd_federation_dnssec_reject,
+    _cmd_federation_register_peer,
+)
 from .maintenance import _cmd_decay_sweep, _cmd_migrate_normalize_entities
 from .mcp import (
     _cmd_mcp_config,
@@ -56,6 +61,9 @@ __all__ = [
     "_cmd_doctor",
     "_cmd_federation_cursor_export",
     "_cmd_federation_cursor_import",
+    "_cmd_federation_dnssec_confirm",
+    "_cmd_federation_dnssec_pending",
+    "_cmd_federation_dnssec_reject",
     "_cmd_federation_register_peer",
     "_cmd_identity_rotate_key",
     "_cmd_instruction_manifest_generate",

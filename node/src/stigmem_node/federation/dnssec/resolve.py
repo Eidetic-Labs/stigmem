@@ -89,6 +89,11 @@ class DnssecResult:
     record: BindingRecord | None = None
     host: str | None = None
     detail: str = ""
+    # Epoch-seconds inception of the newest binding RRSIG, threaded from the
+    # validator (Rev 6 I4). Only meaningful for SECURE-derived outcomes
+    # (``ACTIVE``/``REVOKED``); ``None`` everywhere else. The first-trust ladder
+    # derives the RRSIG age from this for its age clamp.
+    rrsig_inception: float | None = None
 
 
 # The SECURE-with-record outcomes are decided by the record's revoked flag; every
@@ -136,7 +141,13 @@ def resolve_dnssec_binding(entity_uri: str, *, resolver: Resolver) -> DnssecResu
         outcome = (
             DnssecResult.Outcome.REVOKED if record.revoked else DnssecResult.Outcome.ACTIVE
         )
-        return DnssecResult(outcome, record=record, host=host, detail=verdict.detail)
+        return DnssecResult(
+            outcome,
+            record=record,
+            host=host,
+            detail=verdict.detail,
+            rrsig_inception=verdict.rrsig_inception,
+        )
 
     mapped = _NON_SECURE_MAP.get(verdict.status, DnssecResult.Outcome.BOGUS)
     return DnssecResult(mapped, host=host, detail=verdict.detail)

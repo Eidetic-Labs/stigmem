@@ -22,7 +22,12 @@ from .capability import (
     _cmd_capability_revoke,
     _cmd_capability_verify,
 )
-from .federation import _cmd_federation_register_peer
+from .federation import (
+    _cmd_federation_dnssec_confirm,
+    _cmd_federation_dnssec_pending,
+    _cmd_federation_dnssec_reject,
+    _cmd_federation_register_peer,
+)
 from .maintenance import _cmd_decay_sweep, _cmd_migrate_normalize_entities
 from .mcp import (
     _cmd_mcp_config,
@@ -326,6 +331,63 @@ def _build_parser() -> argparse.ArgumentParser:
         help="CA bundle used to verify HTTPS federation peers",
     )
     rp_p.set_defaults(func=_cmd_federation_register_peer)
+
+    # ------------------------------------------------------------------ federation dnssec
+    # DNSSEC first-trust operator-confirm queue (Rev 6 I9). All three subcommands
+    # call the local node's admin API over HTTP (admin:federation), mirroring the
+    # register-peer node-API pattern. entity_uri travels in the request body.
+    dnssec_p = fed_sub.add_parser(
+        "dnssec",
+        help="DNSSEC first-trust operator-confirm queue (list/confirm/reject)",
+    )
+    dnssec_sub = dnssec_p.add_subparsers(dest="dnssec_command", metavar="SUBCOMMAND")
+    dnssec_sub.required = True
+
+    def _add_dnssec_node_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--node-url",
+            default=None,
+            metavar="URL",
+            help="base URL of the local node (default: STIGMEM_NODE_URL)",
+        )
+        p.add_argument(
+            "--api-key",
+            default=None,
+            metavar="KEY",
+            help="admin:federation API key for the local node",
+        )
+
+    dp_p = dnssec_sub.add_parser(
+        "pending",
+        help="list quarantined DNSSEC first-trust candidates",
+    )
+    _add_dnssec_node_args(dp_p)
+    dp_p.set_defaults(func=_cmd_federation_dnssec_pending)
+
+    dc_p = dnssec_sub.add_parser(
+        "confirm",
+        help="paste-to-confirm a quarantined candidate (the key fingerprint must match)",
+    )
+    dc_p.add_argument("--entity-uri", dest="entity_uri", required=True, metavar="URI")
+    dc_p.add_argument("--node-id", dest="node_id", required=True, metavar="NODE_ID")
+    dc_p.add_argument(
+        "--key-fpr",
+        dest="key_fpr",
+        required=True,
+        metavar="FPR",
+        help="the candidate key fingerprint, pasted exactly (NF-D4-5)",
+    )
+    _add_dnssec_node_args(dc_p)
+    dc_p.set_defaults(func=_cmd_federation_dnssec_confirm)
+
+    dr_p = dnssec_sub.add_parser(
+        "reject",
+        help="reject a quarantined candidate without trusting it",
+    )
+    dr_p.add_argument("--entity-uri", dest="entity_uri", required=True, metavar="URI")
+    dr_p.add_argument("--node-id", dest="node_id", required=True, metavar="NODE_ID")
+    _add_dnssec_node_args(dr_p)
+    dr_p.set_defaults(func=_cmd_federation_dnssec_reject)
 
     # ------------------------------------------------------------------ federation cursor-export
     ce_p = fed_sub.add_parser(

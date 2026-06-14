@@ -357,6 +357,32 @@ def valid_chain(patch_anchor) -> FixtureResolver:
 
 
 @pytest.fixture
+def binding_chain_factory(patch_anchor):
+    """Factory: a fully-signed valid chain whose binding RRSIG inception is set.
+
+    Lets a test produce an *aged-but-valid* binding by back-dating the binding
+    TXT RRSIG inception while keeping the expiration inside the validator's
+    pinned NOW window — so the chain still validates to SECURE but the surfaced
+    ``rrsig_inception`` is old. ``inception``/``expiration`` are
+    ``datetime.datetime`` (defaulting to the standard fixture window).
+    """
+
+    def _make(
+        *,
+        inception: datetime.datetime = INCEPTION,
+        expiration: datetime.datetime = EXPIRATION,
+    ) -> FixtureResolver:
+        h = _build_hierarchy()
+        patch_anchor(h)
+        resolver = FixtureResolver()
+        _load_chain(resolver, h)
+        _load_binding_txt(resolver, h, inception=inception, expiration=expiration)
+        return resolver
+
+    return _make
+
+
+@pytest.fixture
 def revoked_chain(patch_anchor) -> FixtureResolver:
     """A fully-signed, valid chain resolving a REVOKED binding TXT -> SECURE.
 
@@ -402,6 +428,66 @@ def stale_rrsig_chain(patch_anchor) -> FixtureResolver:
     resolver = FixtureResolver()
     _load_chain(resolver, h)
     _load_binding_txt(resolver, h, inception=STALE_INCEPTION, expiration=STALE_EXPIRATION)
+    return resolver
+
+
+# An aged-but-VALID inception for the F1 two-RRSIG scenario: 40 days before the
+# pinned NOW, with the expiration still inside the window so the signature
+# validates against the validator's clock (a genuinely slow re-sign).
+TWO_RRSIG_STALE_INCEPTION = datetime.datetime.fromtimestamp(
+    NOW, tz=datetime.UTC
+) - datetime.timedelta(days=40)
+
+
+@pytest.fixture
+def two_covering_rrsigs_chain(patch_anchor) -> FixtureResolver:
+    """F1 regression: a binding TXT served with TWO covering RRSIGs.
+
+    Models a zone-serving / on-path attacker (Rev 6 threat model) that appends a
+    fresh-LOOKING but NON-validating RRSIG alongside the real, stale-but-valid
+    signature:
+
+      (A) the real leaf ZSK signature with a STALE inception (40 days before the
+          pinned NOW; expiration still inside the validator's window, so it
+          validates) — the genuine, slow-re-signed signature.
+      (B) an injected RRSIG with ``inception = NOW - 60s`` (near-now, looks
+          fresh) signed by a ROGUE key absent from the leaf DNSKEY RRset — it
+          does NOT validate.
+
+    The combined ``dns.dnssec.validate`` passes on (A). A validator that derived
+    the freshness inception from ``max(inception)`` over the whole served set
+    would select (B)'s near-now value and defeat the I4 aged-on-previously-fresh
+    clamp. The fix derives the inception from ONLY the individually-validating
+    signature(s) -> (A)'s stale inception.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+
+    qname = dns.name.from_text(BINDING_QNAME)
+    txt_rd = dns.rdata.from_text(dns.rdataclass.IN, dns.rdatatype.TXT, f'"{DEFAULT_RECORD}"')
+    txt_rr = dns.rrset.from_rdata(qname, 300, txt_rd)
+
+    # (A) Real ZSK signature, stale inception but still-valid window.
+    stale_incep = TWO_RRSIG_STALE_INCEPTION
+    real_sig = h.leaf.sign_with_zsk(txt_rr, inception=stale_incep, expiration=EXPIRATION)
+
+    # (B) Rogue-key signature with a near-now (fresh-looking) inception. The
+    # rogue key is NOT in the leaf DNSKEY RRset, so this signature never
+    # validates against the zone keyset.
+    rogue_priv, rogue_key = _make_keypair(256)
+    rogue_incep = datetime.datetime.fromtimestamp(NOW, tz=datetime.UTC) - datetime.timedelta(
+        seconds=60
+    )
+    rogue_sig = dns.dnssec.sign(
+        txt_rr, rogue_priv, h.leaf.origin, rogue_key,
+        inception=rogue_incep, expiration=EXPIRATION,
+    )
+
+    # Serve BOTH RRSIGs in one covering RRSIG RRset at the binding name.
+    sig_rr = dns.rrset.from_rdata(qname, 300, real_sig, rogue_sig)
+    resolver.add(BINDING_QNAME, "TXT", _answer_message(BINDING_QNAME, "TXT", [txt_rr, sig_rr]))
     return resolver
 
 

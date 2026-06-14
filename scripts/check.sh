@@ -120,6 +120,7 @@ run_python() {
   timed_run python-manifest-key-unification uv run python scripts/check_manifest_key_unification.py
   timed_run python-federation-v2-origin uv run python scripts/check_federation_v2_origin.py
   timed_run python-federation-relay-egress uv run python scripts/check_federation_relay_egress.py
+  timed_run python-dnssec-trust-default-off uv run python scripts/check_dnssec_trust_default_off.py
   timed_run python-plugin-readme-sections uv run python scripts/check_plugin_readme_sections.py
   timed_run python-plugin-manifest-version uv run python scripts/check_plugin_manifest_version_consistency.py
   timed_run python-plugin-readme-pypi-consistency uv run python scripts/check_plugin_readme_pypi_consistency.py

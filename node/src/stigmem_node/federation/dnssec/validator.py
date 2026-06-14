@@ -63,11 +63,21 @@ class Validation(enum.Enum):
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """The validator's verdict plus the parsed record on success."""
+    """The validator's verdict plus the parsed record on success.
+
+    ``rrsig_inception`` is the epoch-seconds inception of the *newest* RRSIG
+    covering the binding TXT (the most-recent re-sign — the correct freshness
+    reference). It is populated ONLY on the ``SECURE`` path and stays ``None`` on
+    every other outcome. It is measured against the SAME clock the RRSIG validity
+    is checked against (``_validation_now``), so the ladder's RRSIG-age clamp
+    (Rev 6 I4) can derive a real age from it. Surfacing it changes no trust
+    decision here — it is an additional, validated input the ladder consumes.
+    """
 
     status: Validation
     record: BindingRecord | None = None
     detail: str = ""
+    rrsig_inception: float | None = None
 
 
 class _ChainError(Exception):
@@ -83,6 +93,7 @@ def validate_binding(host: str, *, resolver: Resolver) -> ValidationResult:
     import dns.dnssec
     import dns.name
     import dns.rdatatype
+    import dns.rrset
 
     from . import anchor
 
@@ -149,7 +160,38 @@ def validate_binding(host: str, *, resolver: Resolver) -> ValidationResult:
     if record is None:
         return ValidationResult(Validation.BOGUS, detail="binding TXT failed grammar")
 
-    return ValidationResult(Validation.SECURE, record=record)
+    # Surface the freshness reference for the ladder's RRSIG-age clamp (I4): the
+    # NEWEST inception among the covering RRSIGs (the most-recent re-sign).
+    #
+    # The combined `dns.dnssec.validate` above passes if ANY ONE served RRSIG
+    # validates; it does NOT individually window-check the others. Taking
+    # `max(inception)` over the whole served set would therefore let a
+    # zone-serving / on-path attacker (Rev 6 threat model) append a NON-validating
+    # RRSIG with a near-now inception alongside a real stale-but-valid signature,
+    # and have that fresh-looking value selected — defeating the I4
+    # aged-on-previously-fresh clamp (same class as the 3a DS-keyset break). So
+    # derive the inception from ONLY the signature(s) that INDIVIDUALLY validate:
+    # re-run the proven chain check per-RRSIG, passing `now` so an expired/forged
+    # injected sig is excluded by its own window/key check.
+    validating_inceptions: list[int] = []
+    for sig in txt_rrsig:
+        single = dns.rrset.from_rdata(txt_rrsig.name, txt_rrsig.ttl, sig)
+        try:
+            dns.dnssec.validate(txt_rrset, single, {signing_zone: zone_keys}, now=now)
+        except Exception:  # noqa: BLE001,S112 — this RRSIG is expired/forged/wrong-key: exclude it.
+            continue  # nosec B112 — excluding a non-validating signature is the intent.
+        validating_inceptions.append(int(sig.inception))
+    if not validating_inceptions:
+        # The combined check passed but no single RRSIG validates in isolation:
+        # treat as bogus rather than trust an unattributable inception.
+        return ValidationResult(
+            Validation.BOGUS, detail="binding TXT: no individually-validating RRSIG"
+        )
+    rrsig_inception = max(validating_inceptions)
+
+    return ValidationResult(
+        Validation.SECURE, record=record, rrsig_inception=rrsig_inception
+    )
 
 
 # --------------------------------------------------------------------------- #
