@@ -124,6 +124,36 @@ advanced ACL plugin is not registered. See
 [`features/memory-garden-acl/security.md`](features/memory-garden-acl/security.md)
 for the full feature-owned disposition.
 
+## Dependency Advisory — esbuild (2026-06-13)
+
+A High dependency advisory was cleared ahead of the next release line.
+
+**esbuild — GHSA-gv7w-rqvm-qjhr.** Versions `< 0.28.1` miss binary integrity
+verification in the Deno install path, enabling remote code execution via a
+hostile `NPM_CONFIG_REGISTRY`. esbuild is a build-time bundler (a development
+dependency), not a published Stigmem runtime dependency — no shipped artifact
+embeds it, and the vulnerable code path is reached only when esbuild's own
+installer runs. Dependabot flagged two manifests not covered by the root pnpm
+workspace override:
+
+- `sdks/stigmem-ts` (published SDK). The declared devDependency range was
+  `^0.25.0`, but the workspace `esbuild` override already resolved esbuild to
+  `0.28.1` in the lockfile, so the build/CI environment was never on a
+  vulnerable version. Remediation aligns the declared range to `^0.28.1` to
+  match the enforced one; the lockfile is unchanged.
+- `experimental/obsidian-adapter/plugin` (unpublished, npm-managed with its own
+  lockfile, outside the pnpm workspace). The direct dependency was `^0.25.12`
+  and `vite` pulled esbuild transitively. Remediation raises the direct
+  dependency to `^0.28.1` and adds an npm `overrides` entry so vite's transitive
+  copy is forced to the same version; the lockfile regenerates to a single
+  `esbuild@0.28.1`. The plugin build and test suite pass on the bumped version.
+
+Publication disposition: documented here per the Medium/Low publication policy.
+No Stigmem GHSA is opened — the upstream advisory is already public, esbuild is
+build-time tooling (no published artifact embeds it), the published SDK's build
+environment already resolved the patched version via the workspace override, and
+the experimental plugin is unpublished. The fix landed via PR #731.
+
 ## Dependency Advisory — Hono + pip (2026-06-06)
 
 Two Moderate dependency advisories were cleared ahead of the next release line.
