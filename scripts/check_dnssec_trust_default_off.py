@@ -22,13 +22,15 @@ Asserts four things; any failure exits non-zero (the structural-guard contract):
      helper — cannot fool the ordering check, L-2), asserting (a) the flag-guard ``If`` node
      exists and (b) it precedes EVERY ``resolve_first_trust`` reference inside the helper.
 
-  4. **Recheck fail-closed gate (TB-4)** — the helper routes a TRUSTED ladder verdict
-     through ``recheck_relay_binding`` (the 3c recency/revocation seam) BEFORE returning a
-     key, and that seam is a fail-closed stub in 3b (raises ``RecheckNotImplemented``). This
-     makes the "trust a DNSSEC pin with no revocation path" window unreachable STRUCTURALLY,
-     not just by an undocumented flag (TB-4 strengthened). We assert the helper text invokes
-     ``recheck_relay_binding(`` on the TRUSTED branch and that ``recheck.py`` defines the
-     fail-closed ``RecheckNotImplemented`` and never returns a trusted verdict.
+  4. **Recheck recency/revocation gate (TB-4 / I5)** — the helper routes a TRUSTED ladder
+     verdict through ``recheck_relay_binding`` (the I5 recency/revocation seam) BEFORE
+     honoring a key, and that seam is the REAL asymmetric engine (3c.2): it hard-rejects on a
+     positive withdrawal and fails closed on suppression past grace. This makes the "trust a
+     DNSSEC pin with no revocation path" window unreachable STRUCTURALLY, not just by an
+     undocumented flag (TB-4). We assert the helper text invokes ``recheck_relay_binding(``
+     before honoring TRUSTED AND that ``recheck.py`` actually implements the asymmetric
+     rejects — it emits ``relay_origin_revoked`` (positive revocation) and raises a typed
+     reject (``RecheckRejected``) — WITHOUT requiring the old always-raise stub.
 """
 from __future__ import annotations
 
@@ -180,7 +182,14 @@ def _check_reachability(text: str) -> list[str]:
 
 
 def _check_recheck_gate(origin_text: str, recheck_text: str) -> list[str]:
-    """TB-4: a TRUSTED verdict is gated by the fail-closed recheck seam (assert 4)."""
+    """TB-4 / I5: a TRUSTED verdict is gated by the asymmetric recheck seam (assert 4).
+
+    The recency/revocation re-check is wired before honoring a key, and the seam
+    actually IMPLEMENTS the asymmetric rejects (positive revocation hard-reject +
+    a typed reject) — not the old always-raise stub. This keeps the "trust a
+    DNSSEC pin with no revocation path" window unreachable structurally even
+    though the seam now returns (HONOR) on a current binding.
+    """
     failures: list[str] = []
 
     if "recheck_relay_binding(" not in origin_text:
@@ -189,16 +198,25 @@ def _check_recheck_gate(origin_text: str, recheck_text: str) -> list[str]:
             "`recheck_relay_binding(` before honoring a TRUSTED key (TB-4 / I5)"
         )
 
-    if "class RecheckNotImplemented" not in recheck_text:
+    # The seam must emit the positive-revocation audit (proof a withdrawal record
+    # hard-rejects) — suppression must never be allowed to masquerade as this.
+    if "relay_origin_revoked" not in recheck_text:
         failures.append(
-            "recheck.py: missing the fail-closed `RecheckNotImplemented` typed error (TB-4)"
+            "recheck.py: the recency re-check must reject a positive DNSSEC withdrawal and "
+            "emit `relay_origin_revoked` (I5 asymmetric failure)"
         )
-    # The 3b stub must RAISE (fail-closed) and must NOT contain a `return` that yields a
-    # trusted verdict. The only legitimate statement is the raise; assert it raises.
-    if "raise RecheckNotImplemented" not in recheck_text:
+
+    # The seam must raise a TYPED reject so the call site fails closed cleanly on
+    # revoked / rollback / aged / unreachable-past-grace.
+    if "class RecheckRejected" not in recheck_text:
         failures.append(
-            "recheck.py: `recheck_relay_binding` must raise RecheckNotImplemented in 3b "
-            "(fail-closed; never return a trusted verdict until 3c wires the re-check)"
+            "recheck.py: missing the typed `RecheckRejected` reject (the re-check must raise "
+            "a typed error on revoked / rollback / unreachable-past-grace, not return trust)"
+        )
+    if "raise RecheckRejected" not in recheck_text:
+        failures.append(
+            "recheck.py: `recheck_relay_binding` must `raise RecheckRejected` on its reject "
+            "branches (revoked / rollback / aged / unreachable-past-grace fail closed)"
         )
     return failures
 

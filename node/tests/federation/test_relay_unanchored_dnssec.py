@@ -15,12 +15,14 @@ TOFU. It does NOT supersede TOFU; when the origin is reachable, TOFU still fires
 first (those paths stay byte-identical). The DNSSEC tier is consulted only here,
 on the unknown-AND-unreachable terminal.
 
-TB-4 / I5 (the recheck seam): even a TRUSTED DNSSEC first-trust verdict is NOT
-honored on the relay in 3b — the ladder pins the binding, but a relayed key has
-no recency/revocation re-check until 3c. So before returning a DNSSEC-trusted
-key the relay calls ``recheck.recheck_relay_binding``, which in 3b raises
-``RecheckNotImplemented`` -> fail-closed. The flag-on DNSSEC relay-trust path is
-therefore structurally unreachable as permanent trust until 3c.
+I5 / 3c.2 (the recheck seam): a TRUSTED DNSSEC first-trust verdict is honored on
+the relay only after the recency/revocation re-check confirms the binding is
+still current — the ladder pins it, then the relay calls
+``recheck.recheck_relay_binding`` before returning a key. The re-check HONORS
+(returns) when current (the freshly-pinned binding is within cadence), or raises
+a typed reject (``RecheckRejected``) on revoked / rollback / aged / unreachable-
+past-grace. So with the flag on + a valid fresh chain the relay now resolves the
+key; a revoked/rejected chain still fails closed.
 
 Flag-OFF (default): the function behaves EXACTLY as today — no ladder call, no
 DNSSEC resolver constructed, both terminals raise ``relay_origin_unanchored``.
@@ -172,12 +174,13 @@ def test_flag_off_candidate_terminal_unchanged(client, monkeypatch, _dnssec_off,
 # ---------------------------------------------------------------------------
 
 
-def test_flag_on_candidate_trusted_then_recheck_fails_closed(
+def test_flag_on_candidate_trusted_then_recheck_honors(
     client, monkeypatch, _dnssec_on, _unreachable, valid_chain
 ):
     """Candidate-exists terminal, flag ON, DNSSEC TRUSTED: the ladder validates +
-    pins, BUT the relay still fails closed because the 3c recency re-check is not
-    wired (TB-4). The carried manifest's key fingerprint matches the record fpr."""
+    pins, and the I5 relay-path recency re-check (3c.2) HONORS the freshly-pinned
+    binding (within cadence) -> the relay resolves the verified key. The carried
+    manifest's key fingerprint matches the record fpr."""
     import datetime as _dt
 
     m, pub = _manifest_with_fpr(NODE_ID, ENTITY_URI)
@@ -192,11 +195,11 @@ def test_flag_on_candidate_trusted_then_recheck_fails_closed(
     )
     monkeypatch.setattr(oi, "_now", lambda: fixture_now)
     _inject_resolver(monkeypatch, valid_chain)
-    with pytest.raises(oi.OriginIdentityError) as exc:
-        oi.resolve_origin_key_for_relay(
-            NODE_ID, ENTITY_URI, cache={}, origin_manifest=manifest_to_dict(m)
-        )
-    assert "recheck" in str(exc.value).lower() or "recency" in str(exc.value).lower()
+    keys = oi.resolve_origin_key_for_relay(
+        NODE_ID, ENTITY_URI, cache={}, origin_manifest=manifest_to_dict(m)
+    )
+    # The candidate manifest's public key is honored as the verified signing key.
+    assert pub in keys
 
 
 def test_flag_on_candidate_pending_confirm_raises(
