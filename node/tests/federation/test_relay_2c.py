@@ -150,8 +150,9 @@ def test_self_originated_emit_signs_fresh_with_own_identity() -> None:
         priv=priv,
     )
     assert result is not None
-    origin, sig, origin_manifest = result
+    origin, sig, origin_manifest, origin_key_proof = result
     assert origin_manifest is None  # self-originated facts carry no relay manifest
+    assert origin_key_proof is None  # self-originated facts carry no DNSSEC proof (v2.2 I7)
     assert origin.node_id == _OWN_NODE_ID  # this node, not an upstream
     assert origin.tenant == _PULL_TENANT
     assert origin.allowed_tenants == [_PULL_TENANT]
@@ -191,7 +192,7 @@ def test_relayed_emit_forwards_stored_origin_block_verbatim() -> None:
         priv=priv,
     )
     assert result is not None
-    origin, sig, _origin_manifest = result
+    origin, sig, _origin_manifest, _origin_key_proof = result
     # origin attribution is the UPSTREAM origin, NOT this relay node
     assert origin.node_id == _ORIGIN_NODE_ID
     assert origin.node_id != _OWN_NODE_ID

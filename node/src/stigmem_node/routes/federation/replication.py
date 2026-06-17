@@ -34,6 +34,7 @@ from ...models.federation import (
     FederationEnvelopeEntry,
     FederationFactsResponse,
     OriginBlock,
+    OriginKeyProof,
 )
 from ...plugins import Deny, TenantContext, get_registry
 from .common import (
@@ -79,6 +80,45 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _dnssec_proof_for_relayed(stored_entity_uri: str, node_id: str) -> OriginKeyProof | None:
+    """Build the v2.2 ``origin_key_proof`` transport copy for a RELAYED origin (I7).
+
+    A pure EMIT-side optimisation: when DNSSEC trust is enabled and this relay has a
+    last-validated DNSSEC pin for the relayed origin's ``(entity_uri, node_id)``, attach
+    a snapshot of that binding (fpr / epoch / host / outcome) so a forward downstream has
+    a diagnostic / forward-compat hint. It is a TRANSPORT COPY ONLY — the downstream
+    re-resolves + re-validates and never trusts these carried bytes (I7), so a best-effort
+    failure here simply omits the field (never blocks emit). Returns ``None`` for a
+    non-DNSSEC origin (no pin), when the flag is off, or on any read error.
+    """
+    if not _public_module().settings.federation_dnssec_trust_enabled:
+        return None
+    try:
+        from ...federation.dnssec import pin as pinstore
+
+        with db() as conn:
+            pin = pinstore.get_pin(conn, stored_entity_uri, node_id)
+        if pin is None:
+            return None  # not a DNSSEC-anchored origin on this relay
+        return OriginKeyProof(
+            proof_version=1,
+            dnssec_binding={
+                "fpr": pin.key_fpr,
+                "epoch": pin.epoch,
+                "host": pin.host,
+                "outcome": "active",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — the proof is a hint; never block emit (I7)
+        logger.debug(
+            "federation relay: could not attach origin_key_proof for %s/%s: %s",
+            stored_entity_uri,
+            node_id,
+            exc,
+        )
+        return None
+
+
 def build_origin_entry(
     record: Any,
     row: Any,
@@ -87,8 +127,8 @@ def build_origin_entry(
     own_entity_uri: str,
     pull_tenant: str,
     priv: Any,
-) -> tuple[OriginBlock, str, dict[str, Any] | None] | None:
-    """Build the (OriginBlock, origin_sig, origin_manifest) triple for one egress record.
+) -> tuple[OriginBlock, str, dict[str, Any] | None, OriginKeyProof | None] | None:
+    """Build the (OriginBlock, origin_sig, origin_manifest, origin_key_proof) for one record.
 
     Two cases (F-FED-2c W2.2):
 
@@ -110,6 +150,12 @@ def build_origin_entry(
     anchor-match against its operator pin / stored binding. It is only the self-verifying
     manifest BODY — no proof/STH/Merkle. Self-originated facts carry no manifest (None).
 
+    Phase 3 (v2.2, I7): for a RELAYED, DNSSEC-anchored fact, ALSO attach a transport copy
+    of this relay's last-validated DNSSEC binding as ``origin_key_proof`` (best-effort, via
+    ``_dnssec_proof_for_relayed``). It is a forward-compat HINT only — the downstream
+    re-resolves + re-validates and never trusts the carried bytes (I7). Self-originated and
+    non-DNSSEC origins carry no proof (None).
+
     Returns ``None`` (skip + warn) when the record is not emittable: a relayed fact
     with no stored ``origin_sig`` cannot be attributed and must not be forwarded.
     """
@@ -129,7 +175,8 @@ def build_origin_entry(
             origin=origin.model_dump(),
             valid_until=record.valid_until,
         )
-        return origin, sig, None
+        # Self-originated facts carry no relayed manifest and no DNSSEC proof (v2.2 I7).
+        return origin, sig, None, None
 
     # Relayed: forward the stored origin block + stored sig verbatim (no re-sign).
     stored_sig = row["origin_sig"]
@@ -180,7 +227,11 @@ def build_origin_entry(
             stored_entity_uri,
             exc,
         )
-    return origin, stored_sig, carried_manifest
+    # v2.2 (I7): attach this relay's last-validated DNSSEC binding snapshot as a transport
+    # copy / forward-compat hint for a DNSSEC-anchored origin. Best-effort, never trusted
+    # downstream (the receiver re-resolves + re-validates). None for non-DNSSEC origins.
+    origin_key_proof = _dnssec_proof_for_relayed(stored_entity_uri, origin.node_id)
+    return origin, stored_sig, carried_manifest, origin_key_proof
 
 
 @router.get("/v1/federation/facts", response_model=FederationFactsResponse)
@@ -405,10 +456,14 @@ def pull_facts(
         )
         if built is None:
             continue
-        origin, sig, origin_manifest = built
+        origin, sig, origin_manifest, origin_key_proof = built
         entries.append(
             FederationEnvelopeEntry(
-                fact=record, origin=origin, origin_sig=sig, origin_manifest=origin_manifest
+                fact=record,
+                origin=origin,
+                origin_sig=sig,
+                origin_manifest=origin_manifest,
+                origin_key_proof=origin_key_proof,
             )
         )
 

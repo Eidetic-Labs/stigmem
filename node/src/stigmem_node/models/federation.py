@@ -65,6 +65,33 @@ class OriginBlock(BaseModel):
     entity_uri: str
 
 
+class OriginKeyProof(BaseModel):
+    """Phase 3 (Rev 6 §7) — the v2.2 envelope ``origin_key_proof`` transport copy.
+
+    A relay MAY attach its last-resolved DNSSEC binding snapshot (fingerprint /
+    epoch / host / outcome) for a RELAYED, DNSSEC-anchored origin. It is purely a
+    *transport copy* / forward-compat hint.
+
+    INVARIANT I7 — carried bytes are transport, NEVER trust. The receiver MUST
+    ignore this carried snapshot as a trust input: it independently re-resolves and
+    re-validates the origin key through the live ladder/recheck path
+    (``resolve_origin_key_for_relay`` -> ``resolve_dnssec_binding``). A carried
+    ``dnssec_binding`` with a fabricated ``fpr`` and no live validating record is
+    rejected EXACTLY as if it were absent — trust comes only from live
+    re-validation, never the carried bytes. The relay resolution entry point takes
+    no ``origin_key_proof`` argument, so this snapshot can never be threaded into a
+    trust decision; it exists for diagnostics / forward compatibility only.
+
+    Additive + optional: ``proof_version`` lets the snapshot's shape evolve without
+    breaking a v2.1 peer (which simply omits the whole field). ``dnssec_binding`` is
+    a free-form dict (fpr/epoch/host/outcome) and may be ``None`` for a non-binding
+    hint.
+    """
+
+    proof_version: int
+    dnssec_binding: dict[str, Any] | None = None
+
+
 class FederationEnvelopeEntry(BaseModel):
     fact: FactRecord
     origin: OriginBlock
@@ -75,6 +102,12 @@ class FederationEnvelopeEntry(BaseModel):
     # without a first-party anchor match — no proof/STH/Merkle fields, just the manifest
     # body. Absent (None) for self-originated facts and for direct (origin==sender) entries.
     origin_manifest: dict[str, Any] | None = None
+    # Phase 3 (Rev 6 §7 v2.2): an OPTIONAL, additive per-origin DNSSEC binding snapshot a
+    # relay MAY attach for a RELAYED, DNSSEC-anchored origin. Transport copy ONLY (I7): the
+    # receiver re-resolves + re-validates and NEVER trusts these carried bytes (see
+    # OriginKeyProof). Absent (None) for self-originated facts, direct entries, and any
+    # non-DNSSEC origin. A v2.1 peer that omits the field still parses (backward-compatible).
+    origin_key_proof: OriginKeyProof | None = None
 
 
 class FederationFactsResponse(BaseModel):
