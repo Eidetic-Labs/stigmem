@@ -22,7 +22,9 @@ from .dnssec.conftest import (
     _pin_validation_clock,
     no_answer_chain,
     patch_anchor,
+    record_chain_factory,
     revoked_chain,
+    two_covering_rrsigs_chain,
     unsigned_delegation,
     valid_chain,
 )
@@ -33,8 +35,10 @@ __all__ = [
     "no_answer_chain",
     "patch_anchor",
     "push_node",
+    "record_chain_factory",
     "relay_nodes",
     "revoked_chain",
+    "two_covering_rrsigs_chain",
     "unsigned_delegation",
     "valid_chain",
 ]
