@@ -124,6 +124,82 @@ advanced ACL plugin is not registered. See
 [`features/memory-garden-acl/security.md`](features/memory-garden-acl/security.md)
 for the full feature-owned disposition.
 
+## Dependency Advisory — Dependabot sweep (2026-06-14)
+
+A sweep cleared the open Dependabot dependency alerts across all four
+lockfiles ahead of the next release line: **38 of 41 alerts fully resolved by
+version bumps/overrides; the remaining 3 are no-upstream-patch residuals that
+are unreachable or build-time-only** (detailed below). Every advisory is a
+public upstream CVE; no Stigmem GHSA is opened (see disposition).
+
+**Python — `uv.lock` (shipped `stigmem-node` runtime deps).** Bumped to the
+patched floors via `uv lock --upgrade-package`:
+
+- `starlette` 1.0.1 → 1.3.1 — GHSA-82w8-qh3p-5jfq (H, CVE-2026-54283),
+  GHSA-wqp7-x3pw-xc5r (H, CVE-2026-48818), GHSA-x746-7m8f-x49c (M,
+  CVE-2026-48817), GHSA-jp82-jpqv-5vv3 (L, CVE-2026-54282). FastAPI 0.136.1
+  requires `starlette>=0.46.0` (floor-only), so 1.3.1 is compatible; the full
+  test suite passes on the bump.
+- `aiohttp` 3.14.0 → 3.14.1 — GHSA-xcgm-r5h9-7989, -4fvr-rgm6-gqmc,
+  -g3cq-j2xw-wf74, -63hw-fmq6-xxg2, -hpj7-wq8m-9hgp (M) + -4m7w-qmgq-4wj5,
+  -9x8q-7h8h-wcw9, -2fqr-mr3j-6wp8 (L).
+- `cryptography` 47.0.0 → 49.0.0 (≥48.0.1) — GHSA-537c-gmf6-5ccf (H).
+- `python-multipart` 0.0.29 → 0.0.32 (≥0.0.31) — GHSA-5rvq-cxj2-64vf (H,
+  CVE-2026-53539) + -v9pg-7xvm-68hf, -6jv3-5f52-599m, -vffw-93wf-4j4q (L).
+
+**npm — `pnpm-lock.yaml` (SDK + MCP workspace).** Raised the workspace
+`overrides` (in both `pnpm-workspace.yaml` and `package.json`):
+
+- `hono` → ≥4.12.25 (from ≥4.12.23) — GHSA-88fw-hqm2-52qc (H) + -rv63-4mwf-qqc2,
+  -wgpf-jwqj-8h8p, -wwfh-h76j-fc44, -j6c9-x7qj-28xf (M).
+- `vite` → "≥6.4.3 <7" — GHSA-fx2h-pf6j-xcff (H), -v6wh-96g9-6wx3 (M). (Bounded
+  to the v6 line; an unbounded range over-resolves to a v8 major.)
+- `ws` → ≥8.21.0 — GHSA-96hv-2xvq-fx4p (H).
+- `js-yaml` → ≥4.2.0 — GHSA-h67p-54hq-rp68 (M).
+
+**npm — `docs/package-lock.json` (Docusaurus build toolchain).** npm `overrides`:
+`ws` ≥8.21.0 (H, GHSA-96hv-2xvq-fx4p), `dompurify` ≥3.4.11 (M/L —
+GHSA-rp9w-3fw7-7cwq, -hpcv-96wg-7vj8, -r47g-fvhr-h676, -76mc-f452-cxcm,
+-gvmj-g25r-r7wr; dompurify is shipped to the browser via client-side mermaid),
+`js-yaml` ≥4.2.0 (M, also forcing the `openapi-to-postmanv2` scoped copy),
+`launch-editor` ≥2.14.1 (M), `@babel/core` "≥7.29.7 <8" (L; bounded to keep the
+Docusaurus-required v7 line).
+
+**npm — `experimental/obsidian-adapter/plugin` (unpublished experimental).**
+`vite` → 6.4.3 (GHSA-fx2h-pf6j-xcff H, -v6wh-96g9-6wx3 M) and `esbuild` held at
+0.28.1, via npm `$name` self-referencing overrides.
+
+**No-upstream-patch residuals (documented, not fixable by version today):**
+
+- **`nltk` ≤3.9.4 — GHSA-p4gq-832x-fm9v / CVE-2026-54293 (High, path traversal
+  in `nltk.data.load()`).** No upstream patch exists; the lock is at the latest
+  release. **Not reachable in any shipped artifact:** `nltk` is absent from the
+  `stigmem-node` wheel and from the default `uv sync` environment (so the
+  `pip-audit` gate never sees it). It enters `uv.lock` only as a deep transitive
+  of the **experimental, opt-in** Letta adapter extra (`letta` → `llama-index` →
+  `llama-index-core` → `nltk`), and no Stigmem code calls `nltk.data.load()` with
+  caller-controlled input. Tracked for auto-bump when a patch ships; operators
+  opting into the Letta extra inherit this unpatched transitive until then.
+- **`dompurify` ≤3.4.6 — GHSA-x4vx-rjvf-j5p4 (Low).** Cleared by version
+  ceiling: the override resolves dompurify@3.4.11, above the affected range; the
+  vulnerable `IN_PLACE` path is additionally not exercised (mermaid sanitizes a
+  string, never `IN_PLACE:true`).
+- **`js-yaml` ≤4.1.1 — GHSA-h67p-54hq-rp68 / CVE-2026-53550 (Moderate, merge-key
+  DoS).** Fixed on every 4.x consumer (→4.2.0). A single residual copy remains
+  under `gray-matter` (pinned to the latest 3.x, 3.14.2), which has no 3.x
+  backport and whose API `gray-matter` still depends on; forcing js-yaml 4.x
+  there breaks the docs build. This is **build-time only** (front-matter parsing
+  of first-party, non-attacker-controlled Markdown), so the DoS path is not
+  reachable by an external actor.
+
+Publication disposition: documented here per the Medium/Low policy and the
+"third-party dependency" scope rule. **No Stigmem GHSA is opened** — every
+advisory is already public upstream, all patchable cases are fixed before the
+next release, and the three residuals are either unreachable in a shipped
+artifact (nltk), cleared by version ceiling (dompurify), or a non-exploitable
+build-time path with no upstream backport (gray-matter's js-yaml). Landed via
+the 2026-06-14 dependency-advisory sweep.
+
 ## Dependency Advisory — Hono + pip (2026-06-06)
 
 Two Moderate dependency advisories were cleared ahead of the next release line.
