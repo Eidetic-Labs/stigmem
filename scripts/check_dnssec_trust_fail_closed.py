@@ -414,7 +414,7 @@ def _check_recheck(text: str, *, non_active: set[str]) -> list[str]:
     return failures
 
 
-def _key_derivation_call_nodes(func: ast.FunctionDef) -> list[ast.Call]:
+def _honor_point_call_nodes(func: ast.FunctionDef) -> list[ast.Call]:
     """Every ``_keys_from_manifest(...)`` call inside ``func`` (a key-honor point)."""
     return [
         node
@@ -509,20 +509,20 @@ def _check_trusted_gate(text: str) -> list[str]:
         )
         return failures
 
-    key_calls = _key_derivation_call_nodes(func)
-    if not key_calls:
+    honor_points = _honor_point_call_nodes(func)
+    if not honor_points:
         failures.append(
             f"{_TRUST_HELPER}: expected a `_keys_from_manifest(` key-derivation call "
             "(the honor point the re-check must dominate — I5)"
         )
         return failures
 
-    for key_call in key_calls:
-        before = _guaranteed_before_call_names(func, key_call)
+    for honor_point in honor_points:
+        before = _guaranteed_before_call_names(func, honor_point)
         if "recheck_relay_binding" not in before:
             failures.append(
                 f"{_TRUST_HELPER}: a `_keys_from_manifest(` key-honor point (line "
-                f"{getattr(key_call, 'lineno', '?')}) is not dominated by a "
+                f"{getattr(honor_point, 'lineno', '?')}) is not dominated by a "
                 "`recheck_relay_binding(` call on its path — the recency re-check must run "
                 "BEFORE the key is honored on EVERY branch (else a stale/revoked key is "
                 "returned before the check can reject — I5, F-FC-3)"
