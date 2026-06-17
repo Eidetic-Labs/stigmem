@@ -53,6 +53,57 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/check_release_readiness.py --tag "$GITHUB_REF_NAME"
 
+  # Tag-blocking a12-release-gate (NF-CT-3 / TX-3). Runs only on tag push and
+  # enforces BOTH v0.9.0a12 tracks at tag time, all in one job:
+  #   * Track B (Phase 3 DNSSEC origin trust): the default-off + fail-closed
+  #     structural guards, the §12 negative DNSSEC validation suite, and the
+  #     4-node DNSSEC relay-trust + self-cert integration proof.
+  #   * Track A (tenant isolation): the HIGH cross-tenant regression tests
+  #     (decay / quarantine / tombstone / async-job / cid scope) and the R-6
+  #     fact-query-tenant-scope structural guard.
+  # The fully-tag-gated publish jobs (publish-sdk-ts, publish-python,
+  # create-release) declare `needs: a12-release-gate`; publish-node calls the
+  # same steps INLINE below because it also runs on main push for :edge image
+  # tags and `needs:` on a skipped/tag-gated job propagates the skip.
+  a12-release-gate:
+    name: a12 release gate (Phase 3 + tenant isolation)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync workspace
+        run: uv sync --all-packages
+      # Track B — DNSSEC trust structural guards (default-off + fail-closed).
+      - name: DNSSEC trust default-off guard
+        run: uv run python scripts/check_dnssec_trust_default_off.py
+      - name: DNSSEC trust fail-closed guard
+        run: uv run python scripts/check_dnssec_trust_fail_closed.py
+      # Track B — §12 negative DNSSEC suite + the 4-node relay-trust + self-cert proof.
+      - name: Phase-3 negative DNSSEC suite + 4-node integration
+        run: >-
+          uv run pytest -q --tb=short
+          node/tests/federation/dnssec/
+          node/tests/federation/test_phase3_4node.py
+      # Track A — HIGH cross-tenant regression tests + the R-6 query-scope guard.
+      - name: Track A HIGH cross-tenant regression tests
+        run: >-
+          uv run pytest -q --tb=short
+          node/tests/test_decay_tenant_scope.py
+          node/tests/test_quarantine_tenant_scope.py
+          node/tests/test_tombstone_tenant_scope.py
+          node/tests/test_jobs_tenant_scope.py
+          node/tests/test_cid_tenant_scope.py
+      - name: Fact-query-tenant-scope guard (R-6)
+        run: uv run python scripts/check_fact_query_tenant_scope.py
+
   publish-node:
     name: Build & push stigmem-node
     runs-on: ubuntu-latest
@@ -74,6 +125,46 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/check_release_readiness.py --tag "$GITHUB_REF_NAME"
+
+      # Inline a12-release-gate for the tag-push path (NF-CT-3 / TX-3). Mirrors
+      # the inline release-readiness block above: publish-node also runs on main
+      # push for :edge image tags, so it cannot `needs: a12-release-gate` (the
+      # skip would propagate). These steps are a no-op on non-tag pushes.
+      - name: Set up Python (a12 gate, tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv (a12 gate, tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: astral-sh/setup-uv@v5
+      - name: Sync workspace (a12 gate, tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv sync --all-packages
+      - name: a12 gate — DNSSEC trust default-off guard (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run python scripts/check_dnssec_trust_default_off.py
+      - name: a12 gate — DNSSEC trust fail-closed guard (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run python scripts/check_dnssec_trust_fail_closed.py
+      - name: a12 gate — Phase-3 negative DNSSEC suite + 4-node (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >-
+          uv run pytest -q --tb=short
+          node/tests/federation/dnssec/
+          node/tests/federation/test_phase3_4node.py
+      - name: a12 gate — Track A HIGH cross-tenant regression (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >-
+          uv run pytest -q --tb=short
+          node/tests/test_decay_tenant_scope.py
+          node/tests/test_quarantine_tenant_scope.py
+          node/tests/test_tombstone_tenant_scope.py
+          node/tests/test_jobs_tenant_scope.py
+          node/tests/test_cid_tenant_scope.py
+      - name: a12 gate — fact-query-tenant-scope guard R-6 (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run python scripts/check_fact_query_tenant_scope.py
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -184,7 +275,7 @@ jobs:
   publish-sdk-ts:
     name: Publish @eidetic-labs/stigmem-ts to npm
     runs-on: ubuntu-latest
-    needs: release-readiness
+    needs: [release-readiness, a12-release-gate]
     # Only publish on tagged releases that look like semver (e.g. v1.0.0)
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -268,7 +359,7 @@ jobs:
   publish-python:
     name: Build & publish Python packages to PyPI
     runs-on: ubuntu-latest
-    needs: release-readiness
+    needs: [release-readiness, a12-release-gate]
     # Tagged releases only — same gate as publish-sdk-ts.
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -390,7 +481,7 @@ jobs:
     # working artifacts. Dashboard is intentionally excluded from `needs`
     # because it's marked "In progress" in the README — a dashboard publish
     # failure shouldn't block release-page creation for the working publishes.
-    needs: [publish-node, publish-sdk-ts, publish-python]
+    needs: [a12-release-gate, publish-node, publish-sdk-ts, publish-python]
     permissions:
       contents: write   # required to create the release
 
