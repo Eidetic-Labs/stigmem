@@ -9,6 +9,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ## [Unreleased]
 
+### Security
+
+- **Dependency advisory sweep** — cleared the open Dependabot dependency alerts
+  across all four lockfiles (38 of 41 resolved by version bumps/overrides; 3
+  no-upstream-patch residuals documented as unreachable or build-time-only).
+  Python runtime (`uv.lock`): `starlette`→1.3.1, `aiohttp`→3.14.1,
+  `cryptography`→49.0.0, `python-multipart`→0.0.32. SDK/MCP workspace:
+  `hono`→4.12.25, `vite`→6.4.3, `ws`→8.21.0, `js-yaml`→4.2.0. Docs toolchain:
+  `ws`/`dompurify`/`js-yaml`/`launch-editor`/`@babel/core`. Obsidian plugin:
+  `vite`→6.4.3. Residuals (`nltk`, `dompurify`#83 by ceiling, `gray-matter`'s
+  `js-yaml` 3.x) are dispositioned in [SECURITY.md](SECURITY.md).
+
 ## [0.9.0a11] — 2026-06-11
 
 ### Added

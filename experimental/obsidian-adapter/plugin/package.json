@@ -19,10 +19,11 @@
     "obsidian": "latest",
     "tslib": "^2.6.3",
     "typescript": "^5.5.3",
-    "vite": "^6.3.0",
+    "vite": "^6.4.3",
     "vitest": "^4.1.0"
   },
   "overrides": {
-    "esbuild": "$esbuild"
+    "esbuild": "$esbuild",
+    "vite": "$vite"
   }
 }
