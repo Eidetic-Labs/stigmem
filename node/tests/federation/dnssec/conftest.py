@@ -383,6 +383,55 @@ def binding_chain_factory(patch_anchor):
 
 
 @pytest.fixture
+def record_chain_factory(patch_anchor):
+    """Factory: a fully-signed valid chain serving an ARBITRARY binding record.
+
+    Lets a test drive the relay-path re-check (3c.2) with rotation / rollback /
+    higher-epoch scenarios by choosing the binding TXT body directly:
+
+        resolver = record_chain_factory("v=stigmem1; fpr=newkey; epoch=8")
+
+    The chain validates end-to-end to SECURE; the composition maps it to
+    ACTIVE/REVOKED per the record. ``inception``/``expiration`` default to the
+    standard fixture window (fresh against the pinned NOW).
+    """
+
+    def _make(
+        record_text: str = DEFAULT_RECORD,
+        *,
+        inception: datetime.datetime = INCEPTION,
+        expiration: datetime.datetime = EXPIRATION,
+    ) -> FixtureResolver:
+        h = _build_hierarchy(record_text=record_text)
+        patch_anchor(h)
+        resolver = FixtureResolver()
+        _load_chain(resolver, h)
+        _load_binding_txt(resolver, h, inception=inception, expiration=expiration)
+        return resolver
+
+    return _make
+
+
+@pytest.fixture
+def no_answer_chain(patch_anchor) -> FixtureResolver:
+    """A fully-signed chain whose binding TXT query has NO staged answer.
+
+    Models a transport no-answer / unvalidatable absence on the relay re-check
+    (SERVFAIL/timeout/NODATA without an NSEC3 proof): the validator returns
+    UNVALIDATABLE, which the re-check treats as suppression (time-boxed
+    fail-closed), NEVER as a positive revocation. Distinct from ``revoked_chain``
+    (a positive DNSSEC-validated tombstone). Identical to ``unvalidatable_absence``
+    but named for the recency-re-check intent.
+    """
+    h = _build_hierarchy()
+    patch_anchor(h)
+    resolver = FixtureResolver()
+    _load_chain(resolver, h)
+    # Intentionally do not stage a binding TXT answer.
+    return resolver
+
+
+@pytest.fixture
 def revoked_chain(patch_anchor) -> FixtureResolver:
     """A fully-signed, valid chain resolving a REVOKED binding TXT -> SECURE.
 

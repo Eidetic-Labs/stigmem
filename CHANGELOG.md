@@ -9,6 +9,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ## [Unreleased]
 
+### Added
+
+- **Federation DNSSEC origin trust (Phase 3)**, default-OFF behind
+  `federation_dnssec_trust_enabled` (and only meaningful when
+  `federation_relay_enabled` is also on). A relayed fact whose origin node is
+  unreachable and otherwise unanchored can now have its key re-derived from a
+  DNSSEC-signed binding record at `_stigmem-fed._key.<host>`, so revocation and
+  recency stay enforceable while the origin node is offline (its DNS is
+  independent of its node). The first-trust ladder is operator-pin → DNSSEC →
+  operator-confirm → fail-closed; a trusted DNSSEC key is honored only after a
+  relay-path recency/revocation re-check (cadence `clamp(TTL, floor, cap)`
+  anchored on the last genuine DNS validation), which hard-rejects a positive
+  withdrawal (`status=revoked` tombstone) or an epoch rollback, time-boxes an
+  unreachable/suppressed binding, and reconciles key rotation via the record's
+  `prev_fpr` grace. Unsigned, absent, or slow-resigning origins fall through to a
+  bounded operator-confirm queue (`stigmem federation dnssec pending|confirm|reject`
+  + `GET/POST /v1/federation/dnssec/pending[/confirm|/reject]`). The carried v2.2
+  envelope `dnssec_binding` is re-validated on ingest (never trusted as bytes).
+  Completes the Phase-3 3a (DNSSEC chain validator) / 3b (first-trust ladder +
+  pin store + operator-confirm) / 3c (relay-path re-check + 4-node proof) arc.
+  The feature is inert and the relay path is byte-identical to before unless the
+  flag is explicitly enabled. See the
+  [Federation DNSSEC Trust runbook](docs/docs/operators/runbooks/federation-dnssec-trust.md).
+
 ### Security
 
 - **Dependency advisory sweep** — cleared the open Dependabot dependency alerts

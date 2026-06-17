@@ -95,28 +95,28 @@ def _dnssec_first_trust_keys(
 
       * **Candidate exists** (the candidate-exists terminal): run the first-trust
         ladder against the candidate's fingerprint.
-          - TRUSTED   -> the ladder validated + pinned the binding, BUT a relayed
-            DNSSEC key is honored only after the I5 recency/revocation re-check,
-            which is build-phase 3c. Call the ``recheck`` seam BEFORE returning a
-            key; in 3b it raises ``RecheckNotImplemented`` -> fail-closed (plan
-            TB-4: a 3b node cannot honor a DNSSEC first-trust key with no
-            revocation path, even with the flag flipped on). 3c will make TRUSTED
-            return the verified key set.
+          - TRUSTED   -> the ladder validated + pinned the binding; a relayed
+            DNSSEC key is then honored only after the I5 relay-path
+            recency/revocation re-check (``recheck_relay_binding``, 3c.2) confirms
+            the binding is still current. The re-check HONORS (returns) -> return
+            the verified key set; it raises a typed reject (``RecheckRejected``, an
+            ``OriginIdentityError``) on revoked / rollback / aged / key-changed /
+            unreachable-past-grace -> fail closed (the audit was already emitted by
+            the re-check engine).
           - PENDING_CONFIRM -> the ladder quarantined the binding; the fact cannot
             be trusted until an operator confirms the fingerprint out-of-band.
             Raise (operator-confirm pending).
           - REJECTED  -> raise (revoked / rollback / bogus / unvalidatable / queue
             full — every reject branch of the I10 outcome lattice).
 
-    Raises ``OriginIdentityError`` on any non-trust verdict (or the 3b recheck
-    fail-closed). Returns the verified key set ONLY when a future 3c recheck
-    succeeds; in 3b it never returns a key set.
+    Raises ``OriginIdentityError`` on any non-trust verdict (or a re-check
+    reject). Returns the verified key set only on TRUSTED + a HONOR re-check.
     """
     if not settings.federation_dnssec_trust_enabled:
         return None  # flag OFF — no ladder, no resolver; caller fails closed as today
 
     from .dnssec.ladder import TrustDecision, resolve_first_trust
-    from .dnssec.recheck import RecheckNotImplemented, recheck_relay_binding
+    from .dnssec.recheck import recheck_relay_binding
 
     if candidate is None or not candidate_fp:
         # No-candidate terminal: no key bytes exist to anchor, no candidate fpr to
@@ -147,11 +147,18 @@ def _dnssec_first_trust_keys(
     )
 
     if decision.outcome is TrustDecision.Outcome.TRUSTED:
-        # TB-4 / I5: a relayed DNSSEC key is not honored without the 3c recency
-        # re-check. The seam raises RecheckNotImplemented in 3b; map it to the
-        # fail-closed ``OriginIdentityError`` the relay caller already handles, so a
-        # 3b node refuses the key (with the validated pin persisted for 3c). The
-        # ladder already committed the pin via ``conn``; commit again is harmless.
+        # I5 / 3c.2: the ladder validated + pinned the binding, but a relayed
+        # DNSSEC key is honored only after the relay-path recency/revocation
+        # re-check confirms the binding is still current (revocation works while
+        # the origin's node is unreachable, because its DNS is independent). The
+        # re-check HONORS (returns) when current, or raises a typed reject
+        # (``RecheckRejected``, an ``OriginIdentityError``) on revoked / rollback /
+        # aged / key-changed / unreachable-past-grace — every reject having
+        # emitted its ``relay_origin_*`` audit. On honor the verified key set is
+        # returned; on a reject the (already-audited) error propagates and the
+        # caller fails closed. The ladder committed the pin via ``conn``; the
+        # re-check writes any HONOR mutations (rotation advance / fresh stamp) on
+        # the same ``conn``, and the caller commits.
         try:
             recheck_relay_binding(
                 conn,
@@ -163,14 +170,16 @@ def _dnssec_first_trust_keys(
                 settings=settings,
                 now=_now(),
             )
-        except RecheckNotImplemented as exc:
+        except OriginIdentityError:
+            # A typed re-check reject (RecheckRejected) or any other identity
+            # error: persist the ladder/re-check side effects (epoch/sticky/pin
+            # markers) before the raise unwinds the caller's transaction, then
+            # re-raise so the relay fails closed. The audit was already emitted by
+            # the re-check engine.
             if conn is not None:
-                conn.commit()  # persist the ladder's validated pin for the 3c re-check
-            raise OriginIdentityError(
-                f"relayed origin {node_id!r} ({entity_uri!r}) dnssec-trusted but the "
-                f"relay-path recency re-check is not yet wired (3c); failing closed"
-            ) from exc
-        # 3c only: reached after a successful re-check.
+                conn.commit()
+            raise
+        # Honor: the binding re-validated current within the cadence/grace.
         keys = _keys_from_manifest(candidate)
         return keys
 

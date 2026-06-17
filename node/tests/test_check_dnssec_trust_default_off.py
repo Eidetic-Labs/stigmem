@@ -92,32 +92,74 @@ def test_reachability_scope_ignores_earlier_unrelated_mention() -> None:
     assert checker._check_reachability(text) == []
 
 
-# --- assert 4: TB-4 recheck fail-closed gate ---------------------------------
+# --- assert 4: TB-4 / I5 recency/revocation gate -----------------------------
 
 
 def test_recheck_gate_flags_missing_recheck_call() -> None:
     checker = _load_checker()
     origin = "keys = _keys_from_manifest(candidate)\nreturn keys\n"  # no recheck gate
-    recheck = "class RecheckNotImplemented(Exception): ...\nraise RecheckNotImplemented()\n"
+    recheck = (
+        "class RecheckRejected(Exception): ...\n"
+        "def recheck_relay_binding(conn):\n"
+        '    _audit_relay("relay_origin_revoked")\n'
+        "    raise RecheckRejected()\n"
+    )
     failures = checker._check_recheck_gate(origin, recheck)
     assert any("recheck_relay_binding(" in f for f in failures)
 
 
-def test_recheck_gate_flags_non_failclosed_stub() -> None:
-    """A recheck.py that does NOT raise the typed error (e.g. returns) is a silent-trust
-    hole; the guard must reject it."""
-    checker = _load_checker()
-    origin = "recheck_relay_binding(conn)\n"
-    recheck = "def recheck_relay_binding(*a, **k):\n    return None\n"  # no typed raise
-    failures = checker._check_recheck_gate(origin, recheck)
-    assert any("RecheckNotImplemented" in f for f in failures)
-
-
-def test_recheck_gate_passes_on_failclosed_stub() -> None:
+def test_recheck_gate_flags_recheck_without_positive_revocation() -> None:
+    """A recheck.py that never rejects a positive withdrawal (no relay_origin_revoked)
+    is incomplete; the guard must reject it."""
     checker = _load_checker()
     origin = "recheck_relay_binding(conn)\n"
     recheck = (
-        "class RecheckNotImplemented(Exception): ...\n"
-        "def recheck_relay_binding(*a, **k):\n    raise RecheckNotImplemented()\n"
+        "class RecheckRejected(Exception): ...\n"
+        "def recheck_relay_binding(conn):\n"
+        "    raise RecheckRejected()\n"  # no relay_origin_revoked audit
+    )
+    failures = checker._check_recheck_gate(origin, recheck)
+    assert any("relay_origin_revoked" in f for f in failures)
+
+
+def test_recheck_gate_flags_recheck_without_typed_reject() -> None:
+    """A recheck.py that returns instead of raising a typed reject is a silent-trust
+    hole; the guard must reject it."""
+    checker = _load_checker()
+    origin = "recheck_relay_binding(conn)\n"
+    recheck = (
+        "def recheck_relay_binding(conn):\n"
+        '    _audit_relay("relay_origin_revoked")\n'
+        "    return None\n"  # no typed raise
+    )
+    failures = checker._check_recheck_gate(origin, recheck)
+    assert any("RecheckRejected" in f for f in failures)
+
+
+def test_recheck_gate_flags_reject_symbols_only_in_docstring() -> None:
+    """F-FC-2 (R3 caveat): a recheck.py whose reject symbols + RecheckRejected appear
+    ONLY in the engine docstring (the body always HONORs / returns) is a silent-trust
+    hole. The AST-scoped check must catch it — a docstring substring is not a reject."""
+    checker = _load_checker()
+    origin = "recheck_relay_binding(conn)\n"
+    recheck = (
+        "class RecheckRejected(Exception): ...\n"
+        "def recheck_relay_binding(conn):\n"
+        '    """Mentions relay_origin_revoked and raise RecheckRejected in prose only."""\n'
+        "    return None\n"  # body HONORS unconditionally; symbols only in docstring
+    )
+    failures = checker._check_recheck_gate(origin, recheck)
+    assert any("relay_origin_revoked" in f for f in failures)
+    assert any("RecheckRejected" in f for f in failures)
+
+
+def test_recheck_gate_passes_on_asymmetric_engine() -> None:
+    checker = _load_checker()
+    origin = "recheck_relay_binding(conn)\n"
+    recheck = (
+        "class RecheckRejected(OriginIdentityError): ...\n"
+        "def recheck_relay_binding(conn):\n"
+        '    _audit_relay("relay_origin_revoked", node_id=node_id, entity_uri=entity_uri)\n'
+        "    raise RecheckRejected('revoked')\n"
     )
     assert checker._check_recheck_gate(origin, recheck) == []

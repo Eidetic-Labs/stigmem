@@ -20,8 +20,11 @@ from __future__ import annotations
 # trust-anchor dependency.
 from .dnssec.conftest import (
     _pin_validation_clock,
+    no_answer_chain,
     patch_anchor,
+    record_chain_factory,
     revoked_chain,
+    two_covering_rrsigs_chain,
     unsigned_delegation,
     valid_chain,
 )
@@ -29,10 +32,13 @@ from .test_revocation_relay_2c import push_node, relay_nodes
 
 __all__ = [
     "_pin_validation_clock",
+    "no_answer_chain",
     "patch_anchor",
     "push_node",
+    "record_chain_factory",
     "relay_nodes",
     "revoked_chain",
+    "two_covering_rrsigs_chain",
     "unsigned_delegation",
     "valid_chain",
 ]

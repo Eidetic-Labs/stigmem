@@ -1958,6 +1958,7 @@ export interface components {
         FederationEnvelopeEntry: {
             fact: components["schemas"]["FactRecord"];
             origin: components["schemas"]["OriginBlock"];
+            origin_key_proof?: components["schemas"]["OriginKeyProof"] | null;
             /** Origin Manifest */
             origin_manifest?: {
                 [key: string]: unknown;
@@ -2296,6 +2297,37 @@ export interface components {
             node_id: string;
             /** Tenant */
             tenant: string;
+        };
+        /**
+         * OriginKeyProof
+         * @description Phase 3 (Rev 6 §7) — the v2.2 envelope ``origin_key_proof`` transport copy.
+         *
+         *     A relay MAY attach its last-resolved DNSSEC binding snapshot (fingerprint /
+         *     epoch / host / outcome) for a RELAYED, DNSSEC-anchored origin. It is purely a
+         *     *transport copy* / forward-compat hint.
+         *
+         *     INVARIANT I7 — carried bytes are transport, NEVER trust. The receiver MUST
+         *     ignore this carried snapshot as a trust input: it independently re-resolves and
+         *     re-validates the origin key through the live ladder/recheck path
+         *     (``resolve_origin_key_for_relay`` -> ``resolve_dnssec_binding``). A carried
+         *     ``dnssec_binding`` with a fabricated ``fpr`` and no live validating record is
+         *     rejected EXACTLY as if it were absent — trust comes only from live
+         *     re-validation, never the carried bytes. The relay resolution entry point takes
+         *     no ``origin_key_proof`` argument, so this snapshot can never be threaded into a
+         *     trust decision; it exists for diagnostics / forward compatibility only.
+         *
+         *     Additive + optional: ``proof_version`` lets the snapshot's shape evolve without
+         *     breaking a v2.1 peer (which simply omits the whole field). ``dnssec_binding`` is
+         *     a free-form dict (fpr/epoch/host/outcome) and may be ``None`` for a non-binding
+         *     hint.
+         */
+        OriginKeyProof: {
+            /** Dnssec Binding */
+            dnssec_binding?: {
+                [key: string]: unknown;
+            } | null;
+            /** Proof Version */
+            proof_version: number;
         };
         /**
          * OriginPinRequest
@@ -3000,6 +3032,7 @@ export type SchemaMemoryCardResponse = components['schemas']['MemoryCardResponse
 export type SchemaNeighborItem = components['schemas']['NeighborItem'];
 export type SchemaNeighborsResponse = components['schemas']['NeighborsResponse'];
 export type SchemaOriginBlock = components['schemas']['OriginBlock'];
+export type SchemaOriginKeyProof = components['schemas']['OriginKeyProof'];
 export type SchemaOriginPinRequest = components['schemas']['OriginPinRequest'];
 export type SchemaPeerApprovalRequest = components['schemas']['PeerApprovalRequest'];
 export type SchemaPeerApprovalResponse = components['schemas']['PeerApprovalResponse'];

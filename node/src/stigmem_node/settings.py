@@ -115,6 +115,32 @@ class Settings(BaseSettings):
     # older than this are evicted (I9 queue bound). Default 7 days.
     federation_dnssec_pending_confirm_ttl: int = 7 * 24 * 60 * 60
 
+    # Phase 3 build-phase 3c — relay-path recency/revocation re-check cadence
+    # (Rev 6 I5 / §7, NF-R5C-5). The effective re-check interval is
+    # clamp(record_DNS_TTL, floor, cap): the origin's DNS TTL drives the cadence
+    # (its freshness signal), the admin sets the bounds. Within the effective
+    # interval a pinned binding is honored WITHOUT a fresh DNS re-resolution
+    # (re-checks are cached per-origin, not per-fact).
+    #
+    # Anti-storm floor (seconds): a pinned binding is never re-resolved more
+    # often than this even when the record's DNS TTL is shorter. Default 300s.
+    federation_dnssec_recheck_floor_seconds: int = 300
+    # Cap (seconds): a pinned binding is re-resolved at least this often even
+    # when the record's DNS TTL is longer (admin-raisable for lower DNS load).
+    # Default 3600s (1h).
+    federation_dnssec_recheck_cap_seconds: int = 3600
+    # Unreachable/suppression grace (Rev 6 I5): when a relay-path re-check gets
+    # NO validatable answer (transport SERVFAIL/timeout, UNVALIDATABLE, BOGUS,
+    # INSECURE, ABSENT_AUTHENTICATED) on an already-pinned binding, the pinned
+    # key is honored only up to min(this, ttl_multiple x record_DNS_TTL)
+    # measured from the pin's last_validated_at, then relayed facts FAIL CLOSED
+    # (unreachable, NEVER treated as a positive revocation). Default 24h cap.
+    federation_dnssec_unreachable_grace_seconds: int = 86400
+    # Multiple of the record's DNS TTL that bounds the unreachable grace from
+    # below (the grace is the MIN of the absolute cap above and this multiple of
+    # the TTL). Default 4.
+    federation_dnssec_unreachable_ttl_multiple: int = 4
+
     # Decay sweeper (Phase 6, spec §decay)
     # 0 = disabled; positive = decay non-expiring facts older than N seconds
     # when sweep runs without explicit ttl_seconds

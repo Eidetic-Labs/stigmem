@@ -1263,6 +1263,16 @@
           "origin": {
             "$ref": "#/components/schemas/OriginBlock"
           },
+          "origin_key_proof": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginKeyProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "origin_manifest": {
             "anyOf": [
               {
@@ -2146,6 +2156,32 @@
           "entity_uri"
         ],
         "title": "OriginBlock",
+        "type": "object"
+      },
+      "OriginKeyProof": {
+        "description": "Phase 3 (Rev 6 \u00a77) \u2014 the v2.2 envelope ``origin_key_proof`` transport copy.\n\nA relay MAY attach its last-resolved DNSSEC binding snapshot (fingerprint /\nepoch / host / outcome) for a RELAYED, DNSSEC-anchored origin. It is purely a\n*transport copy* / forward-compat hint.\n\nINVARIANT I7 \u2014 carried bytes are transport, NEVER trust. The receiver MUST\nignore this carried snapshot as a trust input: it independently re-resolves and\nre-validates the origin key through the live ladder/recheck path\n(``resolve_origin_key_for_relay`` -> ``resolve_dnssec_binding``). A carried\n``dnssec_binding`` with a fabricated ``fpr`` and no live validating record is\nrejected EXACTLY as if it were absent \u2014 trust comes only from live\nre-validation, never the carried bytes. The relay resolution entry point takes\nno ``origin_key_proof`` argument, so this snapshot can never be threaded into a\ntrust decision; it exists for diagnostics / forward compatibility only.\n\nAdditive + optional: ``proof_version`` lets the snapshot's shape evolve without\nbreaking a v2.1 peer (which simply omits the whole field). ``dnssec_binding`` is\na free-form dict (fpr/epoch/host/outcome) and may be ``None`` for a non-binding\nhint.",
+        "properties": {
+          "dnssec_binding": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dnssec Binding"
+          },
+          "proof_version": {
+            "title": "Proof Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "proof_version"
+        ],
+        "title": "OriginKeyProof",
         "type": "object"
       },
       "OriginPinRequest": {

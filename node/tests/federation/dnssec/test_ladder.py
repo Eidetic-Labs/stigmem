@@ -84,12 +84,16 @@ def _call(conn, settings, resolver, *, entity_uri=ENTITY_URI, node_id=NODE_ID,
 
 
 def test_existing_pin_match_is_trusted(conn, settings, valid_chain):
+    seeded_at = _NOW - timedelta(hours=1)
     p.upsert_pin(conn, entity_uri=ENTITY_URI, node_id=NODE_ID, key_fpr=RECORD_FPR,
-                 epoch=RECORD_EPOCH, host=HOSTNAME, now=_NOW - timedelta(hours=1))
+                 epoch=RECORD_EPOCH, host=HOSTNAME, now=seeded_at)
     d = _call(conn, settings, valid_chain)
     assert d.outcome is TrustDecision.Outcome.TRUSTED, d
-    # last_validated_at refreshed on the matching re-validation.
-    assert p.get_pin(conn, ENTITY_URI, NODE_ID).last_validated_at == _NOW.isoformat()
+    # A pure pin match performs NO DNS work, so it must NOT advance
+    # last_validated_at (I5): that timestamp means "last genuine DNSSEC chain
+    # validation" and anchors the relay-path re-check cadence + unreachable grace.
+    # The seeded timestamp is preserved unchanged.
+    assert p.get_pin(conn, ENTITY_URI, NODE_ID).last_validated_at == seeded_at.isoformat()
 
 
 def test_existing_pin_mismatch_is_rejected(conn, settings, valid_chain):
