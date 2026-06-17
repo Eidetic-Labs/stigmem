@@ -146,19 +146,21 @@ def resolve_first_trust(
     existing = pinstore.get_pin(conn, entity_uri, node_id)
     if existing is not None:
         if pinstore.pin_matches(existing, candidate_key_fpr, now=now):
-            # Re-validation against an established anchor: refresh the pin's
-            # last_validated_at and trust.
-            pinstore.upsert_pin(
-                conn,
-                entity_uri=entity_uri,
-                node_id=node_id,
-                key_fpr=existing.key_fpr,
-                epoch=existing.epoch,
-                host=existing.host,
-                prev_fpr=existing.prev_fpr,
-                prev_until=existing.prev_until,
-                now=now,
-            )
+            # The candidate matches the established anchor. This is a PURE pin
+            # match — no DNS chain was resolved here, so there is nothing new to
+            # persist and ``last_validated_at`` must NOT be advanced.
+            #
+            # ``last_validated_at`` means "last genuine DNSSEC chain validation"
+            # (I5): only a real re-resolution (the SECURE/ACTIVE first-trust
+            # branch below, or the relay-path ``recheck_relay_binding`` re-resolve)
+            # may stamp it. The relay path runs THIS ladder BEFORE the I5 recency/
+            # revocation re-check, whose cadence — and whose unreachable/suppression
+            # grace — are both anchored on ``pin.last_validated_at``. If this
+            # match branch refreshed it to ``now``, the re-check would see
+            # ``now - last_validated_at == 0`` (< the floor cadence) and HONOR
+            # without re-resolving, so a ``status=revoked`` / rolled-back record
+            # would never be consulted, and relay activity (not DNS) would extend
+            # the suppression grace indefinitely. A pure match persists nothing.
             return _trusted("matches established pin")
         # An established pin exists and the candidate does NOT match it. This is
         # disagreement with a stored anchor (I8) — an attack, NOT a fresh
