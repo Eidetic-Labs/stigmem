@@ -181,6 +181,51 @@ def _check_reachability(text: str) -> list[str]:
     return failures
 
 
+_RECHECK_FN = "recheck_relay_binding"
+
+
+def _recheck_engine_func(recheck_text: str, failures: list[str]) -> ast.FunctionDef | None:
+    """The ``recheck_relay_binding`` function node from recheck.py, or None."""
+    try:
+        tree = ast.parse(recheck_text)
+    except SyntaxError as exc:
+        failures.append(f"recheck.py: could not parse for the recheck-seam check ({exc})")
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == _RECHECK_FN:
+            return node
+    failures.append(
+        f"recheck.py: missing the `{_RECHECK_FN}` recency/revocation seam (TB-4 / I5)"
+    )
+    return None
+
+
+def _engine_audit_string_args(func: ast.FunctionDef) -> set[str]:
+    """String-constant FIRST args to ``_audit_relay(...)`` calls inside ``func``."""
+    found: set[str] = set()
+    for node in ast.walk(func):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_audit_relay"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            found.add(node.args[0].value)
+    return found
+
+
+def _engine_raises_typed_reject(func: ast.FunctionDef) -> bool:
+    """Whether ``func`` reachably ``raise``s ``RecheckRejected``."""
+    for node in ast.walk(func):
+        if isinstance(node, ast.Raise) and node.exc is not None:
+            callee = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+            if isinstance(callee, ast.Name) and callee.id == "RecheckRejected":
+                return True
+    return False
+
+
 def _check_recheck_gate(origin_text: str, recheck_text: str) -> list[str]:
     """TB-4 / I5: a TRUSTED verdict is gated by the asymmetric recheck seam (assert 4).
 
@@ -189,6 +234,11 @@ def _check_recheck_gate(origin_text: str, recheck_text: str) -> list[str]:
     a typed reject) — not the old always-raise stub. This keeps the "trust a
     DNSSEC pin with no revocation path" window unreachable structurally even
     though the seam now returns (HONOR) on a current binding.
+
+    The recheck.py checks are AST-scoped to the ``recheck_relay_binding`` engine
+    (R3 caveat / F-FC-2): the reject audit symbol and the typed raise must appear
+    in the FUNCTION BODY (an `_audit_relay(...)` string arg / a real `ast.Raise`),
+    never merely as a docstring substring.
     """
     failures: list[str] = []
 
@@ -198,25 +248,34 @@ def _check_recheck_gate(origin_text: str, recheck_text: str) -> list[str]:
             "`recheck_relay_binding(` before honoring a TRUSTED key (TB-4 / I5)"
         )
 
-    # The seam must emit the positive-revocation audit (proof a withdrawal record
-    # hard-rejects) — suppression must never be allowed to masquerade as this.
-    if "relay_origin_revoked" not in recheck_text:
-        failures.append(
-            "recheck.py: the recency re-check must reject a positive DNSSEC withdrawal and "
-            "emit `relay_origin_revoked` (I5 asymmetric failure)"
-        )
-
-    # The seam must raise a TYPED reject so the call site fails closed cleanly on
-    # revoked / rollback / aged / unreachable-past-grace.
+    # The typed reject class must be DEFINED (a class def — whole-file is fine).
     if "class RecheckRejected" not in recheck_text:
         failures.append(
             "recheck.py: missing the typed `RecheckRejected` reject (the re-check must raise "
             "a typed error on revoked / rollback / unreachable-past-grace, not return trust)"
         )
-    if "raise RecheckRejected" not in recheck_text:
+
+    engine = _recheck_engine_func(recheck_text, failures)
+    if engine is None:
+        return failures
+
+    # The seam must emit the positive-revocation audit as a real `_audit_relay`
+    # string arg in its body (not a docstring) — suppression must never masquerade
+    # as this positive revocation.
+    if "relay_origin_revoked" not in _engine_audit_string_args(engine):
         failures.append(
-            "recheck.py: `recheck_relay_binding` must `raise RecheckRejected` on its reject "
-            "branches (revoked / rollback / aged / unreachable-past-grace fail closed)"
+            "recheck.py: the recency re-check must reject a positive DNSSEC withdrawal and "
+            "emit `relay_origin_revoked` as an `_audit_relay(...)` arg in its body "
+            "(I5 asymmetric failure) — not only in a docstring (F-FC-2)"
+        )
+
+    # The seam must reachably `raise RecheckRejected` so the call site fails closed
+    # cleanly on revoked / rollback / aged / unreachable-past-grace.
+    if not _engine_raises_typed_reject(engine):
+        failures.append(
+            "recheck.py: `recheck_relay_binding` must reachably `raise RecheckRejected` in its "
+            "body (revoked / rollback / aged / unreachable-past-grace fail closed) — a "
+            "docstring mention is not a reject (F-FC-2)"
         )
     return failures
 
