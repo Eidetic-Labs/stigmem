@@ -72,12 +72,20 @@ class ValidationResult:
     is checked against (``_validation_now``), so the ladder's RRSIG-age clamp
     (Rev 6 I4) can derive a real age from it. Surfacing it changes no trust
     decision here — it is an additional, validated input the ladder consumes.
+
+    ``ttl`` is the DNS TTL of the binding TXT RRset (seconds), surfaced ONLY on
+    the ``SECURE`` path and ``None`` on every other outcome. The relay-path
+    re-check (Rev 6 I5 / §7, build-phase 3c) drives its cadence from this value
+    — ``clamp(ttl, floor, cap)`` — so a binding is the origin's own freshness
+    signal. Like ``rrsig_inception`` it is threaded out of the validated answer
+    and changes no trust decision here.
     """
 
     status: Validation
     record: BindingRecord | None = None
     detail: str = ""
     rrsig_inception: float | None = None
+    ttl: int | None = None
 
 
 class _ChainError(Exception):
@@ -189,8 +197,14 @@ def validate_binding(host: str, *, resolver: Resolver) -> ValidationResult:
         )
     rrsig_inception = max(validating_inceptions)
 
+    # Surface the binding TXT RRset's DNS TTL (Rev 6 §7 / I5): the relay-path
+    # re-check clamps its cadence to this. It is the validated answer's own TTL,
+    # so it rides only on the SECURE path (None everywhere else by default).
     return ValidationResult(
-        Validation.SECURE, record=record, rrsig_inception=rrsig_inception
+        Validation.SECURE,
+        record=record,
+        rrsig_inception=rrsig_inception,
+        ttl=int(txt_rrset.ttl),
     )
 
 

@@ -94,6 +94,11 @@ class DnssecResult:
     # (``ACTIVE``/``REVOKED``); ``None`` everywhere else. The first-trust ladder
     # derives the RRSIG age from this for its age clamp.
     rrsig_inception: float | None = None
+    # DNS TTL (seconds) of the binding TXT RRset, threaded from the validator
+    # (Rev 6 §7 / I5). Only meaningful for SECURE-derived outcomes
+    # (``ACTIVE``/``REVOKED``); ``None`` everywhere else. The relay-path re-check
+    # clamps its cadence to this (``clamp(ttl, floor, cap)``).
+    ttl: int | None = None
 
 
 # The SECURE-with-record outcomes are decided by the record's revoked flag; every
@@ -147,6 +152,7 @@ def resolve_dnssec_binding(entity_uri: str, *, resolver: Resolver) -> DnssecResu
             host=host,
             detail=verdict.detail,
             rrsig_inception=verdict.rrsig_inception,
+            ttl=verdict.ttl,
         )
 
     mapped = _NON_SECURE_MAP.get(verdict.status, DnssecResult.Outcome.BOGUS)

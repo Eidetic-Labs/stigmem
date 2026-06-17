@@ -61,6 +61,29 @@ def test_non_secure_outcome_has_no_rrsig_inception(forged_rrsig_chain):
     assert res.rrsig_inception is None
 
 
+def test_active_carries_binding_ttl(valid_chain):
+    # I5/§7 (3c.1): the SECURE binding's DNS TTL is threaded onto the ACTIVE
+    # result so the relay-path re-check can clamp its cadence to it (fixture TTL
+    # is 300).
+    res = resolve_dnssec_binding(ENTITY_URI, resolver=valid_chain)
+    assert res.outcome is DnssecResult.Outcome.ACTIVE, res
+    assert res.ttl == 300
+
+
+def test_revoked_carries_binding_ttl(revoked_chain):
+    # The TTL rides on the REVOKED outcome too (it is also SECURE-derived).
+    res = resolve_dnssec_binding(ENTITY_URI, resolver=revoked_chain)
+    assert res.outcome is DnssecResult.Outcome.REVOKED, res
+    assert res.ttl == 300
+
+
+def test_non_secure_outcome_has_no_ttl(forged_rrsig_chain):
+    # A non-SECURE outcome carries no TTL.
+    res = resolve_dnssec_binding(ENTITY_URI, resolver=forged_rrsig_chain)
+    assert res.outcome is DnssecResult.Outcome.BOGUS, res
+    assert res.ttl is None
+
+
 def test_insecure_delegation_resolves_to_insecure(unsigned_delegation):
     res = resolve_dnssec_binding(ENTITY_URI, resolver=unsigned_delegation)
     assert res.outcome is DnssecResult.Outcome.INSECURE, res

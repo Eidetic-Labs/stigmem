@@ -1,63 +1,127 @@
-"""Relay-path DNSSEC recency/revocation re-check — 3b FAIL-CLOSED stub (plan TB-4).
+"""Relay-path DNSSEC recency/revocation re-check (Rev 6 I5 / build-phase 3c).
 
 Rev 6 I5: a relayed fact's origin key is honored only if a DNSSEC re-check
-within ``federation_dnssec_recheck_interval`` confirms the binding (rotation =>
-honor new key; ``revoked`` / rolled-back epoch => reject; no-answer => time-boxed
-fail-closed). That re-check is **build-phase 3c**.
+within the effective interval confirms the binding. The cadence (this module,
+3c.1) is ``clamp(record_DNS_TTL, floor, cap)`` — the origin's DNS TTL is its own
+freshness signal, the admin sets the bounds — and re-checks are cached
+PER-ORIGIN, not per-fact (NF-R5C-5). The asymmetric failure semantics (3c.2)
+ride on top of that cadence.
 
-THIS MODULE IS THE 3b SEAM, NOT THE IMPLEMENTATION. The first-trust ladder's
-TRUSTED path pins a validated binding into ``dnssec_origin_pins``; a subsequent
-relay of the same origin short-circuits at the pin tier (``resolve_first_trust``
-step 1) and would otherwise honor that key WITHOUT re-validating recency or
-revocation. Per plan TB-4 (strengthened: structural, not doc-gated), 3b must make
-that incompleteness EXPLICIT and FAIL-CLOSED rather than silently trusting a pin
-indefinitely.
+This module owns two pieces:
 
-So the relay wiring (``origin_identity.resolve_origin_key_for_relay``) calls
-``recheck_relay_binding`` before honoring a DNSSEC-first-trust key, and in 3b
-this stub ALWAYS raises :class:`RecheckNotImplemented`. The wiring maps that to a
-fail-closed reject. Net effect: a 3b-merged-pre-3c node CANNOT return a
-DNSSEC-first-trust key with no revocation path even if an operator flips
-``federation_dnssec_trust_enabled`` — the no-recency window is unreachable
-*structurally*, not merely undocumented.
+  * ``effective_interval(ttl, floor, cap)`` — the clamp. A ``None`` TTL (a
+    non-SECURE binding has no TTL to clamp) falls back to the floor.
+  * ``RecheckCache`` — a per-origin (host-keyed) cache of the last validated
+    binding so that, within the effective interval, the binding is NOT
+    re-resolved (no DNS egress, no resolver consulted).
 
-3b GUARANTEES (proven by ``tests/federation/dnssec/test_recheck_stub.py`` + the
-default-off guard):
-  * the seam exists and is the single call site the relay path routes through;
-  * it is fail-closed (raises a dedicated typed error, never returns "trusted");
-  * it does NO network work in 3b: it never calls a resolver method, and a flag-on
-    3b node performs zero DNS egress on the pin short-circuit path. (Note the
-    resolver is CONSTRUCTED by the caller and passed in as an argument before this
-    stub runs; zero-egress holds because ``LiveResolver.__init__`` imports no
-    dnspython and opens no socket — NOT because the stub "raises first". The stub
-    simply never invokes the resolver.)
-
-3c MUST FILL IN (Rev 6 I5, task 3c.1/3c.2):
-  * the ``clamp(record_DNS_TTL, floor, cap)`` re-check cadence + per-origin cache;
-  * the asymmetric failure rule: positive ``revoked``/rollback => hard reject;
-    no-answer on a pinned binding => honor up to ``min(grace, k*ttl)`` then
-    fail-closed; suppression never honored as a positive revocation;
-  * rotation grace via the record's ``prev_fpr``.
+The real ``recheck_relay_binding`` body (the asymmetric recency/revocation
+engine) lands in 3c.2; until then this stub fails closed (raises
+``RecheckNotImplemented``) so the relay wiring honors no DNSSEC pin without a
+revocation path (plan TB-4).
 
 No DNSSEC / ``dnspython`` import is reachable from this module (Rev 6 I11): the
-3b stub does no DNS work at all, and the 3c implementation will import dnspython
-function-locally exactly as ``resolver.LiveResolver`` does.
+clamp + cache are pure arithmetic over already-validated state, and the 3c.2
+implementation imports dnspython only through the injected ``resolver`` /
+``resolve_dnssec_binding`` (which import it function-locally).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # type-checkers only; never imported at runtime (I11).
+    from .record import BindingRecord
 
 
 class RecheckNotImplemented(Exception):
     """The relay-path DNSSEC recency/revocation re-check (Rev 6 I5) is not wired.
 
-    Raised by the 3b ``recheck_relay_binding`` stub. The relay wiring catches
-    exactly this type and fails closed, so a pinned DNSSEC binding is never
-    honored on a relay without the 3c re-check. 3c replaces the stub body with
-    the real re-check and this exception ceases to be raised on the happy path.
+    Retained as the 3c.1 transitional fail-closed marker: the cadence clamp +
+    cache land here first, but ``recheck_relay_binding`` still raises this until
+    3c.2 fills in the asymmetric re-check. The relay wiring catches it and fails
+    closed, so a pinned DNSSEC binding is never honored on a relay without the
+    real re-check.
     """
+
+
+def effective_interval(ttl: int | None, *, floor: int, cap: int) -> int:
+    """The relay-path re-check cadence ``clamp(ttl, floor, cap)`` (Rev 6 §7/I5).
+
+    The origin's DNS TTL drives the cadence; the admin-set ``floor`` (anti-storm)
+    and ``cap`` (DNS-load bound) clamp it. A ``None`` TTL (a binding that did not
+    resolve SECURE, so it carries no TTL) has no freshness signal to honor and
+    falls back to the ``floor`` — the most conservative cadence. ``floor`` is
+    applied after ``cap`` so a (mis)configured ``floor > cap`` still yields the
+    floor (never a value below it), keeping the anti-storm guarantee.
+    """
+    if ttl is None:
+        return floor
+    return max(floor, min(ttl, cap))
+
+
+@dataclass
+class _CacheEntry:
+    """One per-origin cached re-check: the validated binding + when + its TTL."""
+
+    record: BindingRecord
+    validated_at: datetime
+    ttl: int | None
+
+
+class RecheckCache:
+    """Per-origin (host-keyed) cache of the last validated relay-path re-check.
+
+    Within ``effective_interval(ttl, floor, cap)`` of an origin's last validated
+    re-check, the binding is served from this cache and the resolver is NOT
+    consulted (NF-R5C-5: re-checks are per-origin, not per-fact — a page of
+    relayed facts from one origin triggers at most one DNS re-resolution per
+    cadence window). Past the interval, ``get`` returns ``None`` and the caller
+    re-resolves.
+
+    Keyed by the canonical host (Rev 6 I3), shared across the ``node_id``s a host
+    serves (the binding is a property of the zone). Caller-owned: a request-scoped
+    instance threads through the page loop, mirroring the ``resolve_origin_key_for_relay``
+    per-request cache so a stale binding never persists across requests.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[str, _CacheEntry] = {}
+
+    def get(
+        self,
+        host: str,
+        *,
+        now: datetime,
+        floor: int,
+        cap: int,
+    ) -> BindingRecord | None:
+        """Return the cached binding for ``host`` if still within its interval.
+
+        ``None`` when the host is uncached or its entry is past the effective
+        interval (the caller must re-resolve). The interval is derived from the
+        CACHED entry's own TTL, so a short-TTL origin re-checks sooner.
+        """
+        entry = self._entries.get(host)
+        if entry is None:
+            return None
+        interval = effective_interval(entry.ttl, floor=floor, cap=cap)
+        if (now - entry.validated_at).total_seconds() < interval:
+            return entry.record
+        return None
+
+    def put(
+        self,
+        host: str,
+        *,
+        record: BindingRecord,
+        validated_at: datetime,
+        ttl: int | None,
+    ) -> None:
+        """Record a fresh validated re-check for ``host`` (replaces any prior)."""
+        self._entries[host] = _CacheEntry(record=record, validated_at=validated_at, ttl=ttl)
 
 
 def recheck_relay_binding(
@@ -71,19 +135,16 @@ def recheck_relay_binding(
     settings: Any,
     now: datetime,
 ) -> None:
-    """Re-check a pinned DNSSEC binding's recency/revocation (Rev 6 I5) — 3b stub.
+    """Re-check a pinned DNSSEC binding's recency/revocation (Rev 6 I5) — 3c.1 stub.
 
-    In 3b this ALWAYS raises :class:`RecheckNotImplemented` and NEVER invokes the
-    injected ``resolver`` (so no DNS egress occurs here — the resolver is already
-    constructed by the caller, but this stub does not call any of its methods).
-    The argument shape mirrors what the 3c implementation needs (the open DB
-    connection, the canonical host + identity being re-checked, the injected
-    resolver, settings for the cadence clamp, and the wall-clock ``now``) so 3c
-    can fill in the body without changing the relay call site or this signature.
-
-    Returns ``None`` on a successful re-check in 3c; in 3b it never returns.
+    The cadence clamp (``effective_interval``) + per-origin cache (``RecheckCache``)
+    land in this commit; the asymmetric recency/revocation engine lands in 3c.2.
+    Until then this raises :class:`RecheckNotImplemented` (fail-closed) so the
+    relay wiring honors no DNSSEC pin without a revocation path (plan TB-4). It
+    never invokes the injected ``resolver``.
     """
     raise RecheckNotImplemented(
-        "DNSSEC relay-path recency/revocation re-check is build-phase 3c (Rev 6 I5); "
-        "the 3b DNSSEC first-trust relay path fails closed until it is wired"
+        "DNSSEC relay-path recency/revocation re-check engine is build-phase 3c.2 "
+        "(Rev 6 I5); the cadence clamp + cache (3c.1) are in place but the "
+        "asymmetric re-check is not yet wired — the relay path fails closed"
     )

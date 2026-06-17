@@ -82,3 +82,19 @@ def test_stale_rrsig_is_bogus(stale_rrsig_chain):
     # time. The age-clamp -> operator-confirm nuance is a 3b concern.
     res = validate_binding(HOST.rstrip("."), resolver=stale_rrsig_chain)
     assert res.status is Validation.BOGUS, res.detail
+
+
+def test_secure_surfaces_binding_ttl(valid_chain):
+    # I5/§7 (3c.1): the validator surfaces the binding TXT RRset's DNS TTL so the
+    # relay-path re-check can clamp its cadence to it. The fixture binding TXT is
+    # served with TTL 300 (conftest._load_binding_txt).
+    res = validate_binding(HOST.rstrip("."), resolver=valid_chain)
+    assert res.status is Validation.SECURE, res.detail
+    assert res.ttl == 300
+
+
+def test_non_secure_has_no_ttl(forged_rrsig_chain):
+    # A non-SECURE outcome carries no TTL (nothing trustworthy to clamp on).
+    res = validate_binding(HOST.rstrip("."), resolver=forged_rrsig_chain)
+    assert res.status is Validation.BOGUS, res.detail
+    assert res.ttl is None
