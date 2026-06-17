@@ -237,7 +237,7 @@ def _is_suppression(outcome: Any) -> bool:
 def recheck_relay_binding(
     conn: Any,
     *,
-    host: str,
+    host: str | None = None,
     entity_uri: str,
     node_id: str,
     key_fpr: str,
@@ -252,6 +252,16 @@ def recheck_relay_binding(
     asymmetric reject branch, after emitting the matching ``relay_origin_*``
     audit event. See the module docstring for the full outcome table.
 
+    The rollback/freshness defenses (``accept_epoch`` / ``mark_signed_delegation``
+    / ``mark_fresh``) are keyed on the canonical host RE-DERIVED here from the
+    signed ``entity_uri`` (``host_from_entity_uri`` — the single canonical I3
+    derivation, the same one ``resolve_dnssec_binding`` uses internally). The
+    caller-supplied ``host`` param is ignored (kept only for source/back-compat):
+    keying the epoch floor on a caller-passed host risks an empty or mismatched
+    key that silences the monotonic-epoch rollback defense. When the entity_uri is
+    not DNSSEC-capable the re-derivation is ``None``; the pinned host (the
+    canonical host the pin was created with) is the fallback.
+
     The caller (``origin_identity._dnssec_first_trust_keys`` TRUSTED branch) owns
     the transaction; HONOR mutations (pin refresh / rotation advance / fresh
     stamp) are written on ``conn`` and the caller commits.
@@ -259,6 +269,7 @@ def recheck_relay_binding(
     from . import epoch as ep
     from . import freshness as fr
     from . import pin as pinstore
+    from .host import host_from_entity_uri
     from .resolve import DnssecResult, resolve_dnssec_binding
 
     # --- step 1: the pin MUST exist (contract breach otherwise) ---------------
@@ -269,6 +280,12 @@ def recheck_relay_binding(
         raise RecheckRejected(
             f"relayed origin {node_id!r} ({entity_uri!r}) recheck has no pin (contract breach)"
         )
+
+    # Key the rollback/freshness defenses on the CANONICAL host re-derived from
+    # the signed entity_uri (R1-F2), never the caller-passed param. A non-DNSSEC-
+    # capable entity_uri re-derives None; the pin's own (canonical) host is the
+    # fallback so the epoch floor is never keyed on an empty host.
+    host = host_from_entity_uri(entity_uri) or pin.host
 
     # --- step 2: cadence — within interval -> HONOR with no DNS ----------------
     if _within_cadence(pin, now=now, settings=settings):
@@ -420,20 +437,53 @@ def _rrsig_is_aged(result: Any, *, now: datetime, settings: Any, fr: Any) -> boo
     return age_class is not fr.AgeClass.OK
 
 
-def _grace_deadline(record: Any, *, now: datetime, settings: Any) -> datetime | None:
-    """The rotation-grace deadline for ``record.prev_fpr`` (Rev 6 I6).
+def _policy_ceiling(*, observed_at: datetime, settings: Any) -> datetime:
+    """The I6 policy ceiling on a rotation-grace window: ``observed_at + grace``.
 
-    Uses the record's committed ``prev_until`` when present and parseable; else
-    derives ``now + federation_key_rotation_grace_hours``. Returns ``None`` only
-    when a ``prev_until`` is present but unparseable (fail-closed: no live grace).
+    ``observed_at`` is WHEN THE ROTATION WAS FIRST OBSERVED — NOT a fresh ``now``
+    recomputed on every re-check. Anchoring on the first-observation time is what
+    makes the window lapse on schedule: a steady-state record that keeps re-
+    advertising ``prev_fpr`` cannot push the deadline forward, because it always
+    measures from the same fixed observation instant.
     """
-    if record.prev_until:
-        try:
-            deadline = datetime.fromisoformat(record.prev_until)
-        except (ValueError, TypeError):
-            return None
-        return _as_utc(deadline)
-    return _as_utc(now) + timedelta(hours=settings.federation_key_rotation_grace_hours)
+    return _as_utc(observed_at) + timedelta(hours=settings.federation_key_rotation_grace_hours)
+
+
+def _grace_deadline(record: Any, *, observed_at: datetime, settings: Any) -> datetime:
+    """The clamped rotation-grace deadline for ``record.prev_fpr`` (Rev 6 I6).
+
+    The honored ``prev_fpr`` window is::
+
+        min(parse(record.prev_until) if parseable, observed_at + grace_hours)
+
+    The record may SHORTEN the grace (a ``prev_until`` sooner than the policy
+    ceiling is honored as the earlier deadline) but NEVER EXTEND it past policy
+    (a far-future or unparseable ``prev_until`` is clamped to the ceiling). An
+    empty/unparseable ``prev_until`` is NOT "no expiry" — it falls back to the
+    policy ceiling. This defeats a record that sets ``prev_until=2999-…`` (which
+    would otherwise honor a retired key indefinitely, breaking I6).
+    """
+    ceiling = _policy_ceiling(observed_at=observed_at, settings=settings)
+    if not record.prev_until:
+        return ceiling
+    try:
+        record_deadline = _as_utc(datetime.fromisoformat(record.prev_until))
+    except (ValueError, TypeError):
+        # Unparseable record deadline: never treat as "no expiry" -> clamp to
+        # the policy ceiling (the record may only shorten, never extend, I6).
+        return ceiling
+    return min(record_deadline, ceiling)
+
+
+def _records_same_rotation(pin: Any, *, retiring_fpr: str) -> bool:
+    """Whether the pin already records the rotation retiring ``retiring_fpr``.
+
+    True when ``pin.prev_fpr`` is exactly the retiring key and ``pin.prev_until``
+    is already set (a committed grace window). Used to distinguish FIRST
+    observation of a rotation (set the clamped deadline once) from a STEADY-STATE
+    re-check (preserve the pinned deadline so the window lapses on schedule).
+    """
+    return bool(retiring_fpr) and pin.prev_fpr == retiring_fpr and bool(pin.prev_until)
 
 
 def _honor_active(
@@ -453,23 +503,44 @@ def _honor_active(
 ) -> None:
     """HONOR an ACTIVE re-check: advance the pin, set rotation grace (I6), mark fresh.
 
-    On a rotation (``is_rotation`` — a new fpr at a strictly higher epoch) the OLD
-    pinned key becomes ``prev_fpr`` with ``prev_until`` = the record's committed
-    deadline OR ``now + federation_key_rotation_grace_hours`` (I6, whichever the
-    record supplies), so a fact still signed by the retiring key verifies within
-    grace (3c.3). On a steady-state match the pin is refreshed in place and any
-    record-carried rotation grace is propagated.
+    Rotation-grace clamping (I6 — the record may SHORTEN the window, never EXTEND
+    it past policy):
+
+      * On a rotation (``is_rotation`` — a new fpr at a strictly higher epoch) the
+        OLD pinned key becomes ``prev_fpr`` with ``prev_until`` =
+        ``min(record.prev_until, now + grace_hours)`` — the rotation is first
+        observed NOW, so the policy ceiling is ``now + grace_hours``.
+      * On a STEADY-STATE re-check that re-advertises the SAME rotation already
+        pinned (``pin.prev_fpr`` == the record's ``prev_fpr`` and a pinned
+        ``prev_until`` exists), the pinned ``prev_until`` is PRESERVED — never
+        recomputed from a fresh ``now`` — so the window lapses on its original
+        schedule and a re-advertising record cannot refresh it forever.
+      * On a steady-state re-check that newly advertises a rotation grace the pin
+        has not yet recorded, the clamped deadline ``min(record.prev_until,
+        now + grace_hours)`` is committed once (first observation is now).
+      * On a steady-state match with no record-carried grace, the existing pinned
+        ``prev_fpr``/``prev_until`` is preserved (a prior rotation's window lapses
+        via ``pin_matches``' ``prev_until`` check).
     """
     if is_rotation:
-        deadline = _grace_deadline(record, now=now, settings=settings)
+        # First observation of a new rotation: the retiring key is the old pin,
+        # observed NOW. Clamp the record's prev_until to now + grace_hours.
         prev_fpr = pin.key_fpr
-        prev_until = deadline.isoformat() if deadline is not None else None
+        prev_until = _grace_deadline(record, observed_at=now, settings=settings).isoformat()
     elif record.prev_fpr:
-        # Steady state, but the live record re-advertises a rotation grace: refresh
-        # it from the record (the record is the authoritative grace source).
-        deadline = _grace_deadline(record, now=now, settings=settings)
-        prev_fpr = record.prev_fpr
-        prev_until = deadline.isoformat() if deadline is not None else None
+        # Steady state, the live record re-advertises a rotation grace for
+        # record.prev_fpr.
+        if _records_same_rotation(pin, retiring_fpr=record.prev_fpr):
+            # The pin already records THIS rotation: PRESERVE the committed
+            # deadline. Do NOT recompute from a fresh now (that would refresh the
+            # retiring key's grace forever and defeat I6).
+            prev_fpr = pin.prev_fpr
+            prev_until = pin.prev_until
+        else:
+            # First observation of this advertised rotation: clamp once, observed
+            # now (the record may shorten, never extend past now + grace).
+            prev_fpr = record.prev_fpr
+            prev_until = _grace_deadline(record, observed_at=now, settings=settings).isoformat()
     else:
         # Steady state with no record-carried grace: PRESERVE the existing pin's
         # rotation-grace window (a prior rotation's prev_fpr/prev_until). A
