@@ -3,17 +3,21 @@
 Rev 6 I5: a relayed fact's origin key is honored only if a DNSSEC re-check
 within the effective interval confirms the binding. The cadence (3c.1) is
 ``clamp(record_DNS_TTL, floor, cap)`` — the origin's DNS TTL is its own freshness
-signal, the admin sets the bounds — and re-checks are cached PER-ORIGIN, not
-per-fact (NF-R5C-5). The asymmetric failure semantics (3c.2) ride on top.
+signal, the admin sets the bounds — and the per-origin dedup (NF-R5C-5) is
+anchored on the PERSISTENT pin (``pin.last_validated_at`` + ``_within_cadence``),
+NOT an in-memory cache: within the effective interval of an origin's last
+validated re-check the binding is HONORED with no DNS egress, and because the
+anchor is the persisted pin the cadence survives restarts (revocation stays
+detectable within the interval across process boundaries). The asymmetric failure
+semantics (3c.2) ride on top.
 
-This module owns three pieces:
+This module owns two pieces:
 
   * ``effective_interval(ttl, floor, cap)`` — the clamp. A ``None`` TTL (a
     non-SECURE binding has no TTL to clamp) falls back to the floor.
-  * ``RecheckCache`` — a per-origin (host-keyed) cache of the last validated
-    binding so that, within the effective interval, the binding is NOT
-    re-resolved (no DNS egress, no resolver consulted).
-  * ``recheck_relay_binding`` — the ASYMMETRIC recency/revocation engine (3c.2).
+  * ``recheck_relay_binding`` — the ASYMMETRIC recency/revocation engine (3c.2),
+    whose cadence short-circuit (``_within_cadence``) is the per-origin dedup,
+    anchored on the persistent ``pin.last_validated_at``.
 
 Asymmetric failure semantics (Rev 6 I5, the recency engine):
 
@@ -66,14 +70,10 @@ peer-supplied address; the engine introduces no new egress).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..origin_identity import OriginIdentityError, _audit_relay
-
-if TYPE_CHECKING:  # type-checkers only; never imported at runtime (I11).
-    from .record import BindingRecord
 
 
 class RecheckRejected(OriginIdentityError):
@@ -100,68 +100,6 @@ def effective_interval(ttl: int | None, *, floor: int, cap: int) -> int:
     if ttl is None:
         return floor
     return max(floor, min(ttl, cap))
-
-
-@dataclass
-class _CacheEntry:
-    """One per-origin cached re-check: the validated binding + when + its TTL."""
-
-    record: BindingRecord
-    validated_at: datetime
-    ttl: int | None
-
-
-class RecheckCache:
-    """Per-origin (host-keyed) cache of the last validated relay-path re-check.
-
-    Within ``effective_interval(ttl, floor, cap)`` of an origin's last validated
-    re-check, the binding is served from this cache and the resolver is NOT
-    consulted (NF-R5C-5: re-checks are per-origin, not per-fact — a page of
-    relayed facts from one origin triggers at most one DNS re-resolution per
-    cadence window). Past the interval, ``get`` returns ``None`` and the caller
-    re-resolves.
-
-    Keyed by the canonical host (Rev 6 I3), shared across the ``node_id``s a host
-    serves (the binding is a property of the zone). Caller-owned: a request-scoped
-    instance threads through the page loop, mirroring the ``resolve_origin_key_for_relay``
-    per-request cache so a stale binding never persists across requests.
-    """
-
-    def __init__(self) -> None:
-        self._entries: dict[str, _CacheEntry] = {}
-
-    def get(
-        self,
-        host: str,
-        *,
-        now: datetime,
-        floor: int,
-        cap: int,
-    ) -> BindingRecord | None:
-        """Return the cached binding for ``host`` if still within its interval.
-
-        ``None`` when the host is uncached or its entry is past the effective
-        interval (the caller must re-resolve). The interval is derived from the
-        CACHED entry's own TTL, so a short-TTL origin re-checks sooner.
-        """
-        entry = self._entries.get(host)
-        if entry is None:
-            return None
-        interval = effective_interval(entry.ttl, floor=floor, cap=cap)
-        if (now - entry.validated_at).total_seconds() < interval:
-            return entry.record
-        return None
-
-    def put(
-        self,
-        host: str,
-        *,
-        record: BindingRecord,
-        validated_at: datetime,
-        ttl: int | None,
-    ) -> None:
-        """Record a fresh validated re-check for ``host`` (replaces any prior)."""
-        self._entries[host] = _CacheEntry(record=record, validated_at=validated_at, ttl=ttl)
 
 
 def _as_utc(dt: datetime) -> datetime:
