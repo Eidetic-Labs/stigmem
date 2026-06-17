@@ -362,6 +362,25 @@ def recheck_relay_binding(
             fr=fr,
             pinstore=pinstore,
         )
+
+        # Rotation grace via prev_fpr (Rev 6 I6, 3c.3): the relayed fact's own
+        # signing key must be one the (now-refreshed) pin honors — the CURRENT
+        # key always, or the committed PRIOR key while inside its grace window.
+        # A fact still signed by the retiring key verifies within
+        # ``federation_key_rotation_grace_hours`` of the rotation, NOT past it
+        # (the shared ``pin_matches`` predicate). Re-read the pin so a rotation
+        # this re-check just committed (old key -> prev_fpr) is reflected.
+        refreshed = pinstore.get_pin(conn, entity_uri, node_id)
+        if refreshed is None or not pinstore.pin_matches(refreshed, key_fpr, now=now):
+            _audit_relay(
+                "relay_origin_key_changed",
+                node_id=node_id,
+                entity_uri=entity_uri,
+            )
+            raise RecheckRejected(
+                f"relayed origin {node_id!r} ({entity_uri!r}) signing key is neither the "
+                f"current pinned key nor a prior key within rotation grace (I6)"
+            )
         return
 
     # --- suppression (no positive proof) -> time-boxed fail-closed ------------
@@ -445,14 +464,21 @@ def _honor_active(
         deadline = _grace_deadline(record, now=now, settings=settings)
         prev_fpr = pin.key_fpr
         prev_until = deadline.isoformat() if deadline is not None else None
+    elif record.prev_fpr:
+        # Steady state, but the live record re-advertises a rotation grace: refresh
+        # it from the record (the record is the authoritative grace source).
+        deadline = _grace_deadline(record, now=now, settings=settings)
+        prev_fpr = record.prev_fpr
+        prev_until = deadline.isoformat() if deadline is not None else None
     else:
-        # Steady state: keep the record's own rotation grace if it carries one.
-        prev_fpr = record.prev_fpr or None
-        if record.prev_fpr:
-            deadline = _grace_deadline(record, now=now, settings=settings)
-            prev_until = deadline.isoformat() if deadline is not None else None
-        else:
-            prev_until = None
+        # Steady state with no record-carried grace: PRESERVE the existing pin's
+        # rotation-grace window (a prior rotation's prev_fpr/prev_until). A
+        # steady-state record stops re-advertising prev_fpr once the rotation
+        # settles, but the pinned grace window must persist until prev_until so a
+        # fact still signed by the retiring key verifies within grace (I6). The
+        # window naturally lapses via pin_matches' prev_until check.
+        prev_fpr = pin.prev_fpr
+        prev_until = pin.prev_until
 
     pinstore.upsert_pin(
         conn,
