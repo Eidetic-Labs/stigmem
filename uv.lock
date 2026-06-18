@@ -6028,7 +6028,7 @@ wheels = [
 
 [[package]]
 name = "stigmem"
-version = "0.9.0a11"
+version = "0.9.0a12"
 source = { editable = "." }
 dependencies = [
     { name = "stigmem-py" },
@@ -6194,7 +6194,7 @@ dev = [
 
 [[package]]
 name = "stigmem-node"
-version = "0.9.0a11"
+version = "0.9.0a12"
 source = { editable = "node" }
 dependencies = [
     { name = "argon2-cffi" },
@@ -6297,7 +6297,7 @@ dev = [
 
 [[package]]
 name = "stigmem-openclaw"
-version = "0.9.0a11"
+version = "0.9.0a12"
 source = { editable = "adapters/openclaw" }
 dependencies = [
     { name = "stigmem-py" },
@@ -6532,7 +6532,7 @@ provides-extras = ["zep", "demo"]
 
 [[package]]
 name = "stigmem-py"
-version = "0.9.0a11"
+version = "0.9.0a12"
 source = { editable = "sdks/stigmem-py" }
 dependencies = [
     { name = "httpx" },
