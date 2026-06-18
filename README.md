@@ -8,7 +8,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Discord](https://img.shields.io/discord/1502847943118684331?label=discord&logo=discord&logoColor=white&color=5865F2)](https://discord.gg/Z47Re7FjjV)
 
-> **Status: `v0.9.0a11` - Apache-2.0**
+> **Status: `v0.9.0a12` - Apache-2.0**
 > **Repository:** [github.com/eidetic-labs/stigmem](https://github.com/eidetic-labs/stigmem)
 > **Single-org, single-node, audit-first memory.** Cross-organizational federation is on the roadmap. See [LIMITATIONS.md](LIMITATIONS.md) for current scope.
 

@@ -1,8 +1,8 @@
 # LIMITATIONS
 
-> **Stigmem v0.9.0a11.** Scoped for single-organization, single-node deployment. Cross-organizational federation is on the roadmap, not yet production-ready. Read this before deploying.
+> **Stigmem v0.9.0a12.** Scoped for single-organization, single-node deployment. Cross-organizational federation is on the roadmap, not yet production-ready. Read this before deploying.
 >
-> Last updated: 2026-06-11 · Applies to: v0.9.0a11
+> Last updated: 2026-06-17 · Applies to: v0.9.0a12
 
 ---
 
