@@ -229,6 +229,31 @@ path is reachable through a supported Stigmem runtime endpoint (Hono affects
 the MCP adapter's HTTP surface, mitigated by the version bump; pip is
 build-time tooling only). Both fixes landed via PR #702.
 
+## Security Posture — v0.9.0a12 (2026-06-17)
+
+`v0.9.0a12` lands Federation DNSSEC origin trust (Phase 3) **disabled by
+default** and clears the open dependency-advisory backlog.
+
+DNSSEC origin trust is gated behind `federation_dnssec_trust_enabled` (default
+`false`) and is only reachable when `federation_relay_enabled` is also on. With
+the defaults, the relay path is byte-identical to `v0.9.0a11`: no DNS is queried,
+no key is re-derived, and the operator-confirm queue and pin stores stay empty
+and admin-gated. When enabled, a trusted DNSSEC-derived key is honored only after
+a relay-path recency/revocation re-check, and the carried envelope binding is
+re-validated on ingest rather than trusted as transported bytes. The release
+introduces no new default-on setting, background task, or unauthenticated
+endpoint; the migrations are additive.
+
+The dependency advisory sweep cleared the open Dependabot alerts across all four
+lockfiles (38 of 41 resolved by version bumps/overrides; 3 no-upstream-patch
+residuals dispositioned below as unreachable or build-time-only).
+
+The standing publication policy remains: Critical and High vulnerabilities that
+affect supported published artifacts are handled through GHSA where applicable
+after a patched version is available; Medium and Low findings are documented in
+this file unless a documented risk-profile, reporter-coordination, or
+downstream-compliance carve-out applies.
+
 ## Security Posture — v0.9.0a11 (2026-06-11)
 
 `v0.9.0a11` is a federation-relay and webhook-hardening alpha. It lands
