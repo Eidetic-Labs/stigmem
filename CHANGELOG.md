@@ -9,6 +9,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-rel
 
 ## [Unreleased]
 
+## [0.9.0a12] — 2026-06-17
+
 ### Added
 
 - **Federation DNSSEC origin trust (Phase 3)**, default-OFF behind
