@@ -3776,7 +3776,7 @@
     }
   },
   "info": {
-    "description": "Reference node implementing the Stigmem v0.9.0a11 HTTP API \u2014 facts, federation, gardens, recall, subscriptions, audit, identity, content-addressed fact IDs. Experimental cross-cutting behavior remains opt-in where plugin-gated; tombstone admin and federation route contracts are mounted but access-gated.",
+    "description": "Reference node implementing the Stigmem v0.9.0a12 HTTP API \u2014 facts, federation, gardens, recall, subscriptions, audit, identity, content-addressed fact IDs. Experimental cross-cutting behavior remains opt-in where plugin-gated; tombstone admin and federation route contracts are mounted but access-gated.",
     "license": {
       "name": "Apache-2.0",
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
@@ -5248,7 +5248,7 @@
     },
     "/v1/doctor": {
       "get": {
-        "description": "Return coarse node health and operator posture.\n\nThis endpoint is unauthenticated in v0.9.0a11. The garden ACL posture\nfield is accepted as ops-endpoint disclosure and intentionally avoids\ngarden names, membership rows, tenant identifiers, or policy subjects.",
+        "description": "Return coarse node health and operator posture.\n\nThis endpoint is unauthenticated in v0.9.0a12. The garden ACL posture\nfield is accepted as ops-endpoint disclosure and intentionally avoids\ngarden names, membership rows, tenant identifiers, or policy subjects.",
         "operationId": "doctor_v1_doctor_get",
         "responses": {
           "200": {

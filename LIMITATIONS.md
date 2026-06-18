@@ -10,7 +10,7 @@
 
 A plain-English statement of what stigmem cannot safely do in its current state, organized by deployment scenario. It is the operator's companion to the formal [threat model](spec/security/threat-model.md) and the disclosure policy in [SECURITY.md](SECURITY.md).
 
-If the threat model tells you *what the threats are*, this document tells you *what to actually do or not do today*. It is updated on every release. The contents below apply to **v0.9.0a11** specifically; future versions will close some of these gaps and may open new ones (each new feature lands with its own limitations entry).
+If the threat model tells you *what the threats are*, this document tells you *what to actually do or not do today*. It is updated on every release. The contents below apply to **v0.9.0a12** specifically; future versions will close some of these gaps and may open new ones (each new feature lands with its own limitations entry).
 
 If after reading this you're unsure whether your use case is safe, ask in [Discussions](https://github.com/eidetic-labs/stigmem/discussions) before deploying.
 
@@ -18,13 +18,13 @@ If after reading this you're unsure whether your use case is safe, ask in [Discu
 
 ## Current state in one sentence
 
-Stigmem v0.9.0a11 is a working federated-memory reference node with a documented threat model. Several controls the threat model identifies as required for cross-organizational deployment have not yet shipped; they are on the roadmap (see [ROADMAP.md](ROADMAP.md)). Until they ship, the deployment recommendations below are the responsible defaults.
+Stigmem v0.9.0a12 is a working federated-memory reference node with a documented threat model. Several controls the threat model identifies as required for cross-organizational deployment have not yet shipped; they are on the roadmap (see [ROADMAP.md](ROADMAP.md)). Until they ship, the deployment recommendations below are the responsible defaults.
 
 ---
 
 ## What stigmem is **not** safe for today
 
-These are unambiguous "do not" recommendations as of v0.9.0a11.
+These are unambiguous "do not" recommendations as of v0.9.0a12.
 
 ### 1. Cross-organizational federation in adversarial settings
 
@@ -112,7 +112,7 @@ The capability-based redesign is present on `main`; release posture, certificati
 - A misbehaving agent can exhaust your storage or your CPU.
 - You cannot reconstruct who-did-what from logs in a way suitable for incident response.
 
-**What to do today:** treat v0.9.0a11 as a development and evaluation release. Production deployment is not recommended until rate limits and persistent audit-log controls complete and are release-validated. If you must deploy to production now, run behind a reverse proxy with its own rate limiting, and pipe stigmem's structured output to a SIEM you trust.
+**What to do today:** treat v0.9.0a12 as a development and evaluation release. Production deployment is not recommended until rate limits and persistent audit-log controls complete and are release-validated. If you must deploy to production now, run behind a reverse proxy with its own rate limiting, and pipe stigmem's structured output to a SIEM you trust.
 
 ---
 
@@ -226,7 +226,7 @@ npm requires every package to have a `latest` dist-tag; there is no way to publi
 
 **What this means concretely:**
 
-| Adopter command | What you get today (v0.9.0a11) | What you'll get over time |
+| Adopter command | What you get today (v0.9.0a12) | What you'll get over time |
 |---|---|---|
 | `npm install @eidetic-labs/stigmem-ts` | `0.9.0-alpha.10` | The most recent published version, advancing through the active alpha line first. Future beta/RC/GA tags are created only when those release lines are explicitly opened and published. |
 | `npm install @eidetic-labs/stigmem-ts@alpha` | `0.9.0-alpha.10` | The most recent alpha. |
@@ -330,7 +330,7 @@ The default install matches the v1.0 critical-path scope from [ADR-002](docs/adr
 
 **What this means for you as an adopter today.** A single-org adopter running `make demo` gets single-tenant behavior with no tombstones, time-travel, lazy-instruction-discovery, advanced memory-garden ACL, or source-attestation activated. Each of those requires explicit experimental plugin registration; for example, `as_of` requests fail closed without `stigmem-plugin-time-travel`. The v1.0 critical-path scope claim describes user-visible *behavior* as well as code architecture.
 
-**Plugin runtime status.** Core ships the registry foundation, stable 22-hook call surface, entry-point discovery, dependency ordering, lifecycle health checks, operator CLI inspection, production signing/trust policy, and author/operator documentation. The v0.9.0a11 line validates the standalone plugin artifacts (package metadata, conformance, release evidence) ahead of publication; see [ROADMAP.md](ROADMAP.md) for the publication-readiness workstream.
+**Plugin runtime status.** Core ships the registry foundation, stable 22-hook call surface, entry-point discovery, dependency ordering, lifecycle health checks, operator CLI inspection, production signing/trust policy, and author/operator documentation. The v0.9.0a12 line validates the standalone plugin artifacts (package metadata, conformance, release evidence) ahead of publication; see [ROADMAP.md](ROADMAP.md) for the publication-readiness workstream.
 
 | Cross-cutting feature | Home | Spec reference | Extracted in |
 |---|---|---|---|

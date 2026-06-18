@@ -2,7 +2,7 @@
 
 > Public roadmap for stigmem. Milestone-gated, not time-gated — version lines complete when their exit criteria are met.
 >
-> **Current release candidate:** v0.9.0a11. **Active horizon:** federation multi-tenancy foundation (tenant/garden-aware federation + default-off multi-hop relay) and webhook SSRF hardening, within the single-org alpha scope; no beta, RC, or GA milestone is open (per [ADR-001](docs/adr/001-versioning.md) (versioning + per-ecosystem version-string convention)).
+> **Current release candidate:** v0.9.0a12. **Active horizon:** federation multi-tenancy foundation (tenant/garden-aware federation + default-off multi-hop relay) and webhook SSRF hardening, within the single-org alpha scope; no beta, RC, or GA milestone is open (per [ADR-001](docs/adr/001-versioning.md) (versioning + per-ecosystem version-string convention)).
 > **Last updated:** 2026-06-11.
 
 ---
@@ -50,7 +50,7 @@ a beta/RC/GA line or make any plugin supported or stable. The detailed readiness
 contract lives in
 [`docs/internal/releases/plugin-publication-readiness.md`](docs/internal/releases/plugin-publication-readiness.md).
 
-`v0.9.0a11` is the current release candidate. It lands the federation
+`v0.9.0a12` is the current release candidate. It lands the federation
 multi-tenancy foundation — tenant- and garden-aware federation (Phases 1–2b) and
 a multi-hop relay (Phase 2c) that is **disabled by default**
 (`federation_relay_enabled=false`) — together with completed webhook SSRF
@@ -73,7 +73,8 @@ horizons and Phase A exit evidence, lives in
 | `v0.9.0a7` | Source-attestation extraction into an opt-in experimental plugin; default source checks remain inert without plugin registration. | Shipped |
 | `v0.9.0a8` | Multi-tenant isolation extraction into an opt-in experimental plugin, completing the planned alpha extraction train. | Shipped |
 | `v0.9.0a10` | Adapter batch publication readiness, including package metadata, feature records, conformance, release evidence, and Trusted Publisher path. | Shipped |
-| `v0.9.0a11` | Federation multi-tenancy foundation (tenant/garden-aware federation + default-off multi-hop relay) and webhook SSRF hardening (GHSA-5p3m). Alpha scope; relay inert unless an operator enables it with trusted peers. | Release candidate |
+| `v0.9.0a11` | Federation multi-tenancy foundation (tenant/garden-aware federation + default-off multi-hop relay) and webhook SSRF hardening (GHSA-5p3m). Alpha scope; relay inert unless an operator enables it with trusted peers. | Shipped |
+| `v0.9.0a12` | Federation Phase 3 DNSSEC-anchored relay key trust (pin → DNSSEC → operator-confirm → fail-closed ladder, default-off) and the v2.2 origin-proof wire envelope. Alpha scope; relay inert unless an operator enables it with trusted peers. | Release candidate |
 | Plugin publication readiness | Standalone experimental plugin artifact readiness, including package metadata, conformance, and release evidence. | Active workstream |
 
 ---
