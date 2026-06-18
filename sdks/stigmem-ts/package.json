@@ -1,6 +1,6 @@
 {
   "name": "@eidetic-labs/stigmem-ts",
-  "version": "0.9.0-alpha.11",
+  "version": "0.9.0-alpha.12",
   "description": "TypeScript client SDK for Stigmem — the federated knowledge fabric",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
